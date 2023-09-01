@@ -53,7 +53,7 @@ func NewIndex(name, storageType string, shardNum int64) (*Index, error) {
 	}
 
 	if storageType == "" {
-		storageType = "disk"
+		storageType = config.Global.StorageType
 	}
 
 	if shardNum <= 0 {
@@ -120,17 +120,30 @@ func NewIndex(name, storageType string, shardNum int64) (*Index, error) {
 
 // LoadIndexWriter load the index writer from the storage
 func OpenIndexWriter(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) (*bluge.Writer, error) {
-	cfg := getOpenConfig(name, storageType, defaultSearchAnalyzer, timeRange...)
+	cfg, err := getOpenConfig(name, storageType, defaultSearchAnalyzer, timeRange...)
+	if err != nil {
+		return nil, err
+	}
 	return bluge.OpenWriter(cfg)
 }
 
-func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) bluge.Config {
+func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analysis.Analyzer, timeRange ...int64) (bluge.Config, error) {
 	dataPath := config.Global.DataPath
-	cfg := directory.GetDiskConfig(dataPath, name, timeRange...)
+	var cfg bluge.Config
+	if config.Global.StorageType != storageType {
+		return cfg, fmt.Errorf("the storage backend of the configuration is %s, but try to get %s", config.Global.StorageType, storageType)
+	}
+	if storageType == "disk" {
+		cfg = directory.GetDiskConfig(dataPath, name, timeRange...)
+	} else if storageType == "s3" {
+		cfg = directory.GetS3Config(dataPath, name, timeRange...)
+	} else if storageType == "oss" {
+		cfg = directory.GetOssConfig(dataPath, name, timeRange...)
+	}
 	if defaultSearchAnalyzer != nil {
 		cfg.DefaultSearchAnalyzer = defaultSearchAnalyzer
 	}
-	return cfg
+	return cfg, nil
 }
 
 // storeIndex stores the index to metadata

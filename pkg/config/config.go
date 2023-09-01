@@ -57,10 +57,36 @@ type config struct {
 	WalSyncInterval           time.Duration `env:"ZINC_WAL_SYNC_INTERVAL,default=1s"`      // sync wal to disk, 1s, 10ms
 	WalRedoLogNoSync          bool          `env:"ZINC_WAL_REDOLOG_NO_SYNC,default=false"` // control sync after every write
 	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
+	StorageType               string        `env:"ZINC_STORAGE_TYPE,default=disk"`
+	ObjCache                  objCache
+	S3                        s3
+	Oss                       oss
 	Cluster                   cluster
 	Shard                     shard
 	Etcd                      etcd
 	Plugin                    plugin
+}
+
+type objCache struct {
+	MaxCacheSize int64 `env:"ZINC_MAX_OBJ_CACHE_SIZE,default=10737418240"`
+}
+
+type s3 struct {
+	AccessId         string `env:"ZINC_S3_ACCESS_ID"`
+	AccessSecret     string `env:"ZINC_S3_ACCESS_SECRET"`
+	Bucket           string `env:"ZINC_S3_BUCKET"`
+	Endpoint         string `env:"ZINC_S3_ENDPOINT"`
+	UseV4Signature   bool   `env:"ZINC_S3_USE_V4_SIGNATURE"`
+	UseHttps         bool   `env:"ZINC_S3_USE_HTTPS"`
+	PathStyleRequest bool   `env:"ZINC_S3_PATH_STYLE_REQUEST"`
+	AwsRegion        string `env:"ZINC_S3_AWS_REGION"`
+}
+
+type oss struct {
+	AccessId     string `env:"ZINC_OSS_ACCESS_ID"`
+	AccessSecret string `env:"ZINC_OSS_ACCESS_SECRET"`
+	Bucket       string `env:"ZINC_OSS_BUCKET"`
+	Endpoint     string `env:"ZINC_OSS_ENDPOINT"`
 }
 
 type cluster struct {
@@ -131,6 +157,54 @@ func init() {
 		compress.Algorithm = compress.S2
 	case "ZSTD":
 		compress.Algorithm = compress.ZSTD
+	}
+
+	// check obj store backend config
+	checkOss()
+	checkS3()
+}
+
+func checkOss() {
+	if Global.StorageType != "oss" {
+		return
+	}
+
+	if Global.Oss.AccessId == "" {
+		log.Fatal().Msg("require oss access id")
+	}
+
+	if Global.Oss.AccessSecret == "" {
+		log.Fatal().Msg("require oss access secret")
+	}
+
+	if Global.Oss.Bucket == "" {
+		log.Fatal().Msg("require oss access bucket")
+	}
+
+	if Global.Oss.Endpoint == "" {
+		log.Fatal().Msg("require oss endpoint")
+	}
+}
+
+func checkS3() {
+	if Global.StorageType != "s3" {
+		return
+	}
+
+	if Global.S3.AccessId == "" {
+		log.Fatal().Msg("require s3 access id")
+	}
+
+	if Global.S3.AccessSecret == "" {
+		log.Fatal().Msg("require s3 access secret")
+	}
+
+	if Global.S3.Bucket == "" {
+		log.Fatal().Msg("require s3 access bucket")
+	}
+
+	if Global.S3.Endpoint == "" {
+		log.Fatal().Msg("require s3 endpoint")
 	}
 }
 

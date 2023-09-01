@@ -19,6 +19,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
+
 	"net/http"
 	"os"
 	"os/signal"
@@ -66,6 +68,8 @@ func main() {
 	sentries()
 	// Continuous profiling
 	profiling()
+	// lru cache
+	cache.Init()
 
 	// HTTP init
 	app := gin.New()
@@ -98,7 +102,9 @@ func main() {
 		// close metadata
 		err = metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
-
+		// cache close
+		cache.Close()
+		log.Info().Msgf("LruCache closed")
 		done <- struct{}{}
 	})
 
