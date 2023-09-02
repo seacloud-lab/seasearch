@@ -30,6 +30,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	WalStorageTypeDisk  = "disk"
+	WalStorageTypeRkv   = "rkv"
+	WalStorageTypePgsql = "postgresql"
+	WalStorageTypeMysql = "mysql"
+)
+
 type config struct {
 	GinMode                   string        `env:"GIN_MODE"`
 	ServerPort                string        `env:"ZINC_SERVER_PORT,default=4080"`
@@ -57,6 +64,8 @@ type config struct {
 	WalSyncInterval           time.Duration `env:"ZINC_WAL_SYNC_INTERVAL,default=1s"`      // sync wal to disk, 1s, 10ms
 	WalRedoLogNoSync          bool          `env:"ZINC_WAL_REDOLOG_NO_SYNC,default=false"` // control sync after every write
 	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
+	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
+	WalConfig                 walConfig
 	StorageType               string        `env:"ZINC_STORAGE_TYPE,default=disk"`
 	ObjCache                  objCache
 	S3                        s3
@@ -126,6 +135,16 @@ type gse struct {
 	DictPath   string `env:"ZINC_PLUGIN_GSE_DICT_PATH,default=./plugins/gse/dict"`
 }
 
+type walConfig struct {
+	RkvEndpoint []string `env:"ZINC_WAL_RKV_ENDPOINT"`
+
+	Host     string `env:"ZINC_WAL_SQL_HOST"`
+	Port     string `env:"ZINC_WAL_SQL_PORT"`
+	Db       string `env:"ZINC_WAL_SQL_DB"`
+	User     string `env:"ZINC_WAL_SQL_USER"`
+	Password string `env:"ZINC_WAL_SQL_PWD"`
+}
+
 var Global = new(config)
 
 func init() {
@@ -162,6 +181,7 @@ func init() {
 	// check obj store backend config
 	checkOss()
 	checkS3()
+	checkWalConfig()
 }
 
 func checkOss() {
@@ -206,6 +226,7 @@ func checkS3() {
 	if Global.S3.Endpoint == "" {
 		log.Fatal().Msg("require s3 endpoint")
 	}
+
 }
 
 func loadConfig(rv reflect.Value) {
@@ -221,6 +242,28 @@ func loadConfig(rv reflect.Value) {
 			tag := ft.Tag.Get("env")
 			setField(fv, tag)
 		}
+	}
+}
+
+func checkWalConfig() {
+	if Global.WalStorageType == WalStorageTypeDisk {
+		return
+	}
+
+	if Global.WalStorageType == WalStorageTypeRkv {
+		if len(Global.WalConfig.RkvEndpoint) == 0 {
+			log.Fatal().Msg("require rkv")
+		}
+		return
+	}
+	if Global.WalStorageType != WalStorageTypeMysql && Global.WalStorageType != WalStorageTypePgsql {
+		log.Fatal().Msg("unsupported wal type")
+	}
+
+	if Global.WalConfig.Db == "" || Global.WalConfig.Host == "" ||
+		Global.WalConfig.Port == "" || Global.WalConfig.User == "" ||
+		Global.WalConfig.Password == "" {
+		log.Fatal().Msg("require wal sql config")
 	}
 }
 

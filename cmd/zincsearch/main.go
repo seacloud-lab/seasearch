@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/wal"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
 
 	"net/http"
@@ -70,6 +71,8 @@ func main() {
 	profiling()
 	// lru cache
 	cache.Init()
+	// Initialize WAL
+	wal.Init()
 
 	// HTTP init
 	app := gin.New()
@@ -105,6 +108,9 @@ func main() {
 		// cache close
 		cache.Close()
 		log.Info().Msgf("LruCache closed")
+		// close wal
+		wal.ShutDown()
+
 		done <- struct{}{}
 	})
 

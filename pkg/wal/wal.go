@@ -16,44 +16,116 @@
 package wal
 
 import (
-	"path"
-
 	"github.com/zincsearch/wal"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
+	"github.com/zincsearch/zincsearch/pkg/wal/mysql"
+	"github.com/zincsearch/zincsearch/pkg/wal/pgsql"
 	"github.com/zincsearch/zincsearch/pkg/wal/redo"
+	"path"
 )
+
+type Wal interface {
+	Len() (uint64, error)
+	FirstIndex() (uint64, error)
+	LastIndex() (uint64, error)
+	Write(index uint64, data []byte) error
+	Read(id uint64) ([]byte, error)
+	TruncateFront(id uint64) error
+	Sync() error
+	Close() error
+}
 
 type Log struct {
 	name string
-	log  *wal.Log
-	Redo *redo.Log
+	log  Wal
+	Redo redo.Redo
+}
+
+func Init() {
+	if config.Global.WalStorageType == config.WalStorageTypeDisk {
+		// TODO
+		return
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypeMysql {
+		mysql.Init()
+		return
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypePgsql {
+		pgsql.Init()
+		return
+	}
+}
+
+func ShutDown() {
+	if config.Global.WalStorageType == config.WalStorageTypeDisk {
+		// TODO
+		return
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypeMysql {
+		mysql.ShutDown()
+		return
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypePgsql {
+		pgsql.ShutDown()
+		return
+	}
 }
 
 func Open(indexName string) (*Log, error) {
 	var err error
 	l := new(Log)
 	l.name = indexName
-	opt := &wal.Options{
-		NoSync:           true,     // Fsync after every write
-		SegmentSize:      16777216, // 16 MB log segment files.
-		SegmentCacheSize: 2,        // Number of cached in-memory segments
-		NoCopy:           true,     // Make a new copy of data for every Read call.
-		DirPerms:         0750,     // Permissions for the created directories
-		FilePerms:        0640,     // Permissions for the created data files
-		FillID:           true,     // Allow writes with a zero ID
-	}
-	l.log, err = wal.Open(path.Join(config.Global.DataPath, indexName, "wal"), opt)
-	if err != nil {
-		return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal error").Cause(err)
+
+	if config.Global.WalStorageType == config.WalStorageTypeDisk {
+		opt := &wal.Options{
+			NoSync:           true,     // Fsync after every write
+			SegmentSize:      16777216, // 16 MB log segment files.
+			SegmentCacheSize: 2,        // Number of cached in-memory segments
+			NoCopy:           true,     // Make a new copy of data for every Read call.
+			DirPerms:         0750,     // Permissions for the created directories
+			FilePerms:        0640,     // Permissions for the created data files
+			FillID:           true,     // Allow writes with a zero ID
+		}
+		l.log, err = wal.Open(path.Join(config.Global.DataPath, indexName, "wal"), opt)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal error").Cause(err)
+		}
+
+		redoOpt := redo.DefaultOptions()
+		redoOpt.NoSync = config.Global.WalRedoLogNoSync
+		redoOpt.NoCopy = true
+		l.Redo, err = redo.Open(path.Join(config.Global.DataPath, indexName, "redo"), redoOpt)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal redo error").Cause(err)
+		}
 	}
 
-	redoOpt := redo.DefaultOptions()
-	redoOpt.NoSync = config.Global.WalRedoLogNoSync
-	redoOpt.NoCopy = true
-	l.Redo, err = redo.Open(path.Join(config.Global.DataPath, indexName, "redo"), redoOpt)
-	if err != nil {
-		return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal redo error").Cause(err)
+	if config.Global.WalStorageType == config.WalStorageTypeRkv {
+		// TODO support rkv client
+		return l, err
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypeMysql {
+		l.log, err = mysql.OpenWal(indexName)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal error").Cause(err)
+		}
+		l.Redo = mysql.NewRedo(indexName)
+		return l, nil
+	}
+
+	if config.Global.WalStorageType == config.WalStorageTypePgsql {
+		l.log, err = pgsql.OpenWal(indexName)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal error").Cause(err)
+		}
+		l.Redo = pgsql.Open(indexName)
+		return l, nil
 	}
 
 	return l, nil

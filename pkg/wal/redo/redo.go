@@ -37,6 +37,12 @@ var ErrValueTooLarge = errors.New("value too large")
 
 const ValueFixedLength = 64
 
+type Redo interface {
+	Write(index uint64, data []byte) error
+	Read(index uint64) ([]byte, error)
+	Close() error
+}
+
 type Log struct {
 	index map[uint64]int
 	data  []byte
