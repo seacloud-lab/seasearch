@@ -1,0 +1,206 @@
+package cluster
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
+	client "go.etcd.io/etcd/client/v3"
+	"sync"
+	"time"
+)
+
+var (
+	closer                = z.NewCloser(2)
+	assignMap             = make(map[string]struct{})
+	lastAssignProcessTime time.Time
+	lock                  sync.RWMutex
+
+	// AssignChan used for notify core update memory index list
+	AssignChan = make(chan map[string]struct{})
+)
+
+func Init() {
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return
+	}
+
+	InitEtcd(config.Global.Etcd.Prefix, config.Global.Etcd.Endpoints)
+	if err := InitAssigns(); err != nil {
+		log.Fatal().Msgf("init cluster error: %s", err)
+	}
+
+	go keepHeartBeat()
+
+	go watchAssign()
+}
+
+func Close() {
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return
+	}
+	closer.SignalAndWait()
+	CloseEtcd()
+}
+
+func InitAssigns() error {
+	assigns, err := ListAssigns(closer.Ctx())
+	if err != nil {
+		return fmt.Errorf("init assigns error: %s", err)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	for partition, nodeId := range assigns {
+		if nodeId == config.Global.Cluster.NodeId {
+			assignMap[partition] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func keepHeartBeat() {
+	defer closer.Done()
+
+	key := fmt.Sprintf("%s/cluster/hb/%d", config.Global.Etcd.Prefix, config.Global.Cluster.NodeId)
+	ls := client.NewLease(cli)
+
+	var curLeaseId client.LeaseID = 0
+	ticker := time.NewTicker(60 * time.Second)
+
+	first := make(chan struct{}, 1)
+	first <- struct{}{}
+
+	var err error
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-first:
+			curLeaseId, err = SendHeartBeat(key, curLeaseId, ls)
+			if err != nil {
+				log.Fatal().Err(err).Msg("cannot send heart beat to etcd")
+			}
+		case <-ticker.C:
+			curLeaseId, err = SendHeartBeat(key, curLeaseId, ls)
+			if err != nil {
+				log.Warn().Err(err).Msg("cannot send heart beat to etcd")
+			}
+		}
+	}
+}
+
+// DiffAssigns
+// update current assigns with input map and return should be closed assigns
+// we don't return addMap because we have no way to only load the specified index according to partition id.
+func DiffAssigns(inputAssigns map[string]int) (removeMap map[string]struct{}) {
+	removeMap = make(map[string]struct{})
+
+	lock.Lock()
+	for partition, nodeId := range inputAssigns {
+		// assign to us
+		if nodeId == config.Global.Cluster.NodeId {
+			assignMap[partition] = struct{}{}
+		} else {
+			// we used to have it, but not anymore
+			if _, ok := assignMap[partition]; ok {
+				delete(assignMap, partition)
+				removeMap[partition] = struct{}{}
+			}
+		}
+	}
+	// not present in inputAssigns, they don't belong to anyone
+	for partition, _ := range assignMap {
+		if _, ok := inputAssigns[partition]; !ok {
+			delete(assignMap, partition)
+			removeMap[partition] = struct{}{}
+		}
+	}
+	lock.Unlock()
+
+	return
+}
+
+func ClearAssign() {
+	lock.Lock()
+	defer lock.Unlock()
+	assignMap = make(map[string]struct{})
+}
+
+func AssignCheck(indexName string) bool {
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return true
+	}
+
+	sum := sha256.Sum256([]byte(indexName))
+	str := hex.EncodeToString(sum[:])
+	assign := str[:2]
+
+	lock.RLock()
+	defer lock.RUnlock()
+	_, ok := assignMap[assign]
+	return ok
+}
+
+func watchAssign() {
+	defer closer.Done()
+
+	errCount := 0
+	watch := func(ch <-chan *AssignEvent) error {
+		for {
+			select {
+			case <-closer.HasBeenClosed():
+				return nil
+			case event, ok := <-ch:
+				if !ok {
+					return fmt.Errorf("watch goroutine chrashed")
+				}
+				if event.Err != nil {
+					return event.Err
+				}
+				if !event.Valid {
+					return fmt.Errorf("invalid assign event")
+				}
+				errCount = 0
+				// Assignments in etcd are updated in a transaction.
+				// So the events should usually arrive at around the same time.
+				// We only need to update our internal assignment cache when the first event arrives.
+				// So we set a 10s buffer to skip the following events.
+				if time.Now().Sub(lastAssignProcessTime) < 10*time.Second {
+					// ignore
+					continue
+				}
+				lastAssignProcessTime = time.Now()
+				assigns, err := ListAssigns(closer.Ctx())
+				if err != nil {
+					return fmt.Errorf("update assigns error: %s", err)
+				}
+				removeMap := DiffAssigns(assigns)
+				AssignChan <- removeMap
+			}
+		}
+	}
+
+	for {
+		// It is necessary to ensure that only one node is responsible for reading and writing an index at the same time,
+		// so we exit when we cannot get real-time assign updates from etcd.
+		if errCount == 3 {
+			log.Fatal().Msg("retry to get assigns too many times")
+		}
+		ch := WatchAssigns(closer.Ctx())
+		err := watch(ch)
+		if err != nil {
+			errCount++
+			log.Err(err).Msg("watch assign error, retrying")
+			ClearAssign()
+			if err = InitAssigns(); err != nil {
+				log.Err(err).Msg("get assigns error")
+				time.Sleep(1 * time.Second)
+			}
+			continue
+		}
+		return
+	}
+}

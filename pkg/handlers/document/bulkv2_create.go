@@ -16,6 +16,7 @@
 package document
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,10 @@ func Bulkv2(c *gin.Context) {
 	defer c.Request.Body.Close()
 	count, err := Bulkv2Worker(target, body)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			c.JSON(http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

@@ -102,7 +102,6 @@ func (c *CacheManager) InitCache() error {
 		if ext != index.ItemKindSegment && ext != index.ItemKindSnapshot {
 			return err
 		}
-
 		c.caches[p] = &cacheFile{
 			path:     p,
 			refCount: 0,
@@ -257,7 +256,6 @@ func dirExists(path string) (bool, error) {
 func (c *CacheManager) CacheFile(filePath string, reader io.Reader) error {
 	for {
 		c.lock.Lock()
-
 		// the file has already in local and traced.
 		if _, ok := c.caches[filePath]; ok {
 			c.lock.Unlock()
@@ -273,9 +271,7 @@ func (c *CacheManager) CacheFile(filePath string, reader io.Reader) error {
 		c.readyMap[filePath] = ready
 		c.lock.Unlock()
 
-		tempPath := filePath + tempExt
-		fi, err := os.OpenFile(tempPath, os.O_CREATE|os.O_RDWR, 0777)
-		err = unix.Flock(int(fi.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", tempExt))
 		cleanup := func() {
 			c.lock.Lock()
 			close(ready)
@@ -283,35 +279,35 @@ func (c *CacheManager) CacheFile(filePath string, reader io.Reader) error {
 			c.lock.Unlock()
 		}
 		if err != nil {
-			_ = fi.Close()
-			_ = c.Remove(tempPath)
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
 			cleanup()
 			return err
 		}
-		_, err = io.Copy(fi, reader)
+		_, err = io.Copy(tempfile, reader)
 		if err != nil {
-			_ = fi.Close()
-			_ = c.Remove(tempPath)
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
 			cleanup()
 			return err
 		}
-		err = os.Rename(tempPath, filePath)
+		err = os.Rename(tempfile.Name(), filePath)
 		if err != nil {
-			_ = fi.Close()
-			_ = c.Remove(tempPath)
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
 			cleanup()
 			return err
 		}
-		err = fi.Sync()
+		err = tempfile.Sync()
 		if err != nil {
-			_ = fi.Close()
+			_ = tempfile.Close()
 			_ = c.Remove(filePath)
 			cleanup()
 			return err
 		}
-		err = fi.Close()
+		err = tempfile.Close()
 		if err != nil {
-			_ = fi.Close()
+			_ = tempfile.Close()
 			_ = c.Remove(filePath)
 			cleanup()
 			return err
@@ -377,18 +373,17 @@ func (c *CacheManager) OpenWriter(filePath string) (io.WriteCloser, error) {
 		c.caches[filePath] = cf
 		c.lock.Unlock()
 	}
-	tempPath := filePath + tempExt
-	fi, err := os.OpenFile(tempPath, os.O_CREATE|os.O_RDWR, 0777)
-	err = unix.Flock(int(fi.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", tempExt))
+
 	if err != nil {
-		_ = fi.Close()
+		_ = tempfile.Close()
 		return nil, err
 	}
 	wc := &tempWriteFile{
-		tempPath: tempPath,
+		tempPath: tempfile.Name(),
 		cf:       cf,
 		realPath: filePath,
-		f:        fi,
+		f:        tempfile,
 	}
 	return wc, nil
 }

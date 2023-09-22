@@ -53,6 +53,10 @@ func Bulk(c *gin.Context) {
 
 	ret, err := BulkWorker(target, c.Request.Body)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
@@ -79,6 +83,9 @@ func ESBulk(c *gin.Context) {
 
 	ret, err := BulkWorker(target, c.Request.Body)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, &meta.HTTPResponseError{Error: err.Error()})
+		}
 		ret.Error = err.Error()
 	}
 

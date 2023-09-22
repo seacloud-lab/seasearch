@@ -18,6 +18,7 @@ package search
 import (
 	"bufio"
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"net/http"
 	"strings"
 
@@ -57,6 +58,9 @@ func SearchDSL(c *gin.Context) {
 
 	resp, err := searchIndex(strings.Split(indexName, ","), query)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+		}
 		errors.HandleError(c, err)
 		return
 	}
@@ -125,6 +129,10 @@ func MultipleSearch(c *gin.Context) {
 			// search query
 			resp, err := searchIndex(indexNames, query)
 			if err != nil {
+				if errors.Is(err, core.ErrIndexServerMismatch) {
+					zutils.GinRenderJSON(c, http.StatusNotAcceptable, &meta.SearchResponse{Error: err.Error()})
+					return
+				}
 				log.Error().Msgf("handlers.search.MultipleSearch.searchIndex: err %s", err.Error())
 				responses = append(responses, &meta.SearchResponse{Error: err.Error()})
 			} else {
@@ -165,6 +173,9 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	if indexName == "" || strings.HasSuffix(indexName, "*") || strings.HasPrefix(indexName, "*") || len(indexNames) > 1 {
 		resp, err = core.MultiSearch(indexNames, query)
 	} else {
+		if !cluster.AssignCheck(indexName) {
+			return nil, core.ErrIndexServerMismatch
+		}
 		index, exists := core.GetIndex(indexName)
 		if !exists {
 			return nil, fmt.Errorf("index %s does not exists", indexName)

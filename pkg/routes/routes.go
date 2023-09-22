@@ -101,38 +101,38 @@ func SetRoutes(r *gin.Engine) {
 	r.GET("/api/index_name", AuthMiddleware("index.IndexNameList"), index.IndexNameList)
 	r.POST("/api/index", AuthMiddleware("index.Create"), index.Create)
 	r.PUT("/api/index", AuthMiddleware("index.Create"), index.Create)
-	r.PUT("/api/index/:target", AuthMiddleware("index.Create"), index.Create)
-	r.DELETE("/api/index/:target", AuthMiddleware("index.Delete"), index.Delete)
-	r.GET("/api/index/:target", AuthMiddleware("index.Get"), index.Get)
+	r.PUT("/api/index/:target", AuthMiddleware("index.Create"), ClusterMiddleware, index.Create)
+	r.DELETE("/api/index/:target", AuthMiddleware("index.Delete"), ClusterMiddleware, index.Delete)
+	r.GET("/api/index/:target", AuthMiddleware("index.Get"), ClusterMiddleware, index.Get)
 	r.HEAD("/api/index/:target", AuthMiddleware("index.Exists"), index.Exists)
-	r.POST("/api/index/:target/refresh", AuthMiddleware("index.Refresh"), index.Refresh)
+	r.POST("/api/index/:target/refresh", AuthMiddleware("index.Refresh"), ClusterMiddleware, index.Refresh)
 	// index settings
-	r.GET("/api/:target/_mapping", AuthMiddleware("index.GetMapping"), index.GetMapping)
-	r.PUT("/api/:target/_mapping", AuthMiddleware("index.SetMapping"), index.SetMapping)
-	r.GET("/api/:target/_settings", AuthMiddleware("index.GetSettings"), index.GetSettings)
-	r.PUT("/api/:target/_settings", AuthMiddleware("index.SetSettings"), index.SetSettings)
+	r.GET("/api/:target/_mapping", AuthMiddleware("index.GetMapping"), ClusterMiddleware, index.GetMapping)
+	r.PUT("/api/:target/_mapping", AuthMiddleware("index.SetMapping"), ClusterMiddleware, index.SetMapping)
+	r.GET("/api/:target/_settings", AuthMiddleware("index.GetSettings"), ClusterMiddleware, index.GetSettings)
+	r.PUT("/api/:target/_settings", AuthMiddleware("index.SetSettings"), ClusterMiddleware, index.SetSettings)
 	// analyze
 	r.POST("/api/_analyze", AuthMiddleware("index.Analyze"), index.Analyze)
-	r.POST("/api/:target/_analyze", AuthMiddleware("index.Analyze"), index.Analyze)
+	r.POST("/api/:target/_analyze", AuthMiddleware("index.Analyze"), ClusterMiddleware, index.Analyze)
 
 	// search
-	r.POST("/api/:target/_search", AuthMiddleware("search.SearchV1"), search.SearchV1)
+	r.POST("/api/:target/_search", AuthMiddleware("search.SearchV1"), ClusterMiddleware, search.SearchV1)
 
 	// document
 	// Document Bulk update/insert
 	r.POST("/api/_bulk", AuthMiddleware("document.Bulk"), document.Bulk)
-	r.POST("/api/:target/_bulk", AuthMiddleware("document.Bulk"), document.Bulk)
-	r.POST("/api/:target/_multi", AuthMiddleware("document.Multi"), document.Multi)
-	r.POST("/api/_bulkv2", AuthMiddleware("document.Bulk"), document.Bulkv2)         // New JSON format
-	r.POST("/api/:target/_bulkv2", AuthMiddleware("document.Bulk"), document.Bulkv2) // New JSON format
+	r.POST("/api/:target/_bulk", AuthMiddleware("document.Bulk"), ClusterMiddleware, document.Bulk)
+	r.POST("/api/:target/_multi", AuthMiddleware("document.Multi"), ClusterMiddleware, document.Multi)
+	r.POST("/api/_bulkv2", AuthMiddleware("document.Bulk"), document.Bulkv2)                            // New JSON format
+	r.POST("/api/:target/_bulkv2", AuthMiddleware("document.Bulk"), ClusterMiddleware, document.Bulkv2) // New JSON format
 	// Document CRUD APIs. Update is same as create.
-	r.POST("/api/:target/_doc", AuthMiddleware("document.Create"), document.CreateUpdate)    // create
-	r.PUT("/api/:target/_doc", AuthMiddleware("document.Create"), document.CreateUpdate)     // create
-	r.PUT("/api/:target/_doc/:id", AuthMiddleware("document.Create"), document.CreateUpdate) // create or update
-	r.HEAD("/api/:target/_doc/:id", AuthMiddleware("document.Get"), document.Get)            // get
-	r.GET("/api/:target/_doc/:id", AuthMiddleware("document.Get"), document.Get)             // get
-	r.POST("/api/:target/_update/:id", AuthMiddleware("document.Update"), document.Update)   // update
-	r.DELETE("/api/:target/_doc/:id", AuthMiddleware("document.Delete"), document.Delete)    // delete
+	r.POST("/api/:target/_doc", AuthMiddleware("document.Create"), ClusterMiddleware, document.CreateUpdate)    // create
+	r.PUT("/api/:target/_doc", AuthMiddleware("document.Create"), ClusterMiddleware, document.CreateUpdate)     // create
+	r.PUT("/api/:target/_doc/:id", AuthMiddleware("document.Create"), ClusterMiddleware, document.CreateUpdate) // create or update
+	r.HEAD("/api/:target/_doc/:id", AuthMiddleware("document.Get"), ClusterMiddleware, document.Get)            // get
+	r.GET("/api/:target/_doc/:id", AuthMiddleware("document.Get"), ClusterMiddleware, document.Get)             // get
+	r.POST("/api/:target/_update/:id", AuthMiddleware("document.Update"), ClusterMiddleware, document.Update)   // update
+	r.DELETE("/api/:target/_doc/:id", AuthMiddleware("document.Delete"), ClusterMiddleware, document.Delete)    // delete
 
 	/**
 	 * elastic compatible APIs
@@ -153,9 +153,9 @@ func SetRoutes(r *gin.Engine) {
 
 	r.POST("/es/_search", AuthMiddleware("search.SearchDSL"), ESMiddleware, IndexAliasMiddleware, search.SearchDSL)
 	r.POST("/es/_msearch", AuthMiddleware("search.MultipleSearch"), ESMiddleware, IndexAliasMiddleware, search.MultipleSearch)
-	r.POST("/es/:target/_search", AuthMiddleware("search.SearchDSL"), ESMiddleware, IndexAliasMiddleware, search.SearchDSL)
-	r.POST("/es/:target/_msearch", AuthMiddleware("search.MultipleSearch"), ESMiddleware, IndexAliasMiddleware, search.MultipleSearch)
-	r.POST("/es/:target/_delete_by_query", AuthMiddleware("search.DeleteByQuery"), IndexAliasMiddleware, search.DeleteByQuery)
+	r.POST("/es/:target/_search", AuthMiddleware("search.SearchDSL"), ESMiddleware, IndexAliasMiddleware, ClusterMiddleware, search.SearchDSL)
+	r.POST("/es/:target/_msearch", AuthMiddleware("search.MultipleSearch"), ESMiddleware, IndexAliasMiddleware, ClusterMiddleware, search.MultipleSearch)
+	r.POST("/es/:target/_delete_by_query", AuthMiddleware("search.DeleteByQuery"), IndexAliasMiddleware, ClusterMiddleware, search.DeleteByQuery)
 
 	r.GET("/es/_index_template", AuthMiddleware("index.ListTemplate"), ESMiddleware, index.ListTemplate)
 	r.POST("/es/_index_template", AuthMiddleware("index.CreateTemplate"), ESMiddleware, index.CreateTemplate)
@@ -188,14 +188,14 @@ func SetRoutes(r *gin.Engine) {
 
 	// ES Bulk update/insert
 	r.POST("/es/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, document.ESBulk)
-	r.POST("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, document.ESBulk)
-	r.PUT("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, document.ESBulk)
+	r.POST("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
+	r.PUT("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
 	r.POST("/es/:target/_refresh", AuthMiddleware("index.Refresh"), index.Refresh)
 	// ES Document
-	r.POST("/es/:target/_doc", AuthMiddleware("document.CreateUpdate"), ESMiddleware, document.CreateUpdate)        // create
-	r.PUT("/es/:target/_doc/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, document.CreateUpdate)     // create or update
-	r.PUT("/es/:target/_create/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, document.CreateUpdate)  // create
-	r.POST("/es/:target/_create/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, document.CreateUpdate) // create
-	r.POST("/es/:target/_update/:id", AuthMiddleware("document.Update"), ESMiddleware, document.Update)             // update part of document
-	r.DELETE("/es/:target/_doc/:id", AuthMiddleware("document.Delete"), ESMiddleware, document.Delete)              // delete
+	r.POST("/es/:target/_doc", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)        // create
+	r.PUT("/es/:target/_doc/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)     // create or update
+	r.PUT("/es/:target/_create/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)  // create
+	r.POST("/es/:target/_create/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate) // create
+	r.POST("/es/:target/_update/:id", AuthMiddleware("document.Update"), ESMiddleware, ClusterMiddleware, document.Update)             // update part of document
+	r.DELETE("/es/:target/_doc/:id", AuthMiddleware("document.Delete"), ESMiddleware, ClusterMiddleware, document.Delete)              // delete
 }

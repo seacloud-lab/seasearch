@@ -11,6 +11,7 @@ require (
 	github.com/blugelabs/query_string v0.3.0
 	github.com/bwmarrin/snowflake v0.3.0
 	github.com/dgraph-io/badger/v3 v3.2103.5
+	github.com/dgraph-io/ristretto v0.1.1
 	github.com/docker/go-units v0.5.0
 	github.com/getsentry/sentry-go v0.17.0
 	github.com/gin-contrib/cors v1.4.0
@@ -36,11 +37,13 @@ require (
 	github.com/zincsearch/go-gin-prometheus v0.1.1
 	github.com/zincsearch/wal v1.2.5
 	go.etcd.io/bbolt v1.3.6
+	go.etcd.io/etcd/api/v3 v3.5.7
 	go.etcd.io/etcd/client/v3 v3.5.7
 	golang.org/x/crypto v0.11.0
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.10.0
 	golang.org/x/text v0.11.0
+	gopkg.in/ini.v1 v1.67.0
 )
 
 require (
@@ -64,7 +67,6 @@ require (
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.3-0.20220203105225-a9a7ef127534 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dgraph-io/ristretto v0.1.1 // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
@@ -116,7 +118,6 @@ require (
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	github.com/vcaesar/cedar v0.20.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
-	go.etcd.io/etcd/api/v3 v3.5.7 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.9 // indirect
 	go.opencensus.io v0.22.5 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
@@ -129,7 +130,6 @@ require (
 	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
 	google.golang.org/grpc v1.41.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
-	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

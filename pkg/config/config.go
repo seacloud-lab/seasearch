@@ -35,6 +35,8 @@ const (
 	WalStorageTypeRkv   = "rkv"
 	WalStorageTypePgsql = "postgresql"
 	WalStorageTypeMysql = "mysql"
+
+	ServerModeCluster = "cluster"
 )
 
 type config struct {
@@ -66,14 +68,21 @@ type config struct {
 	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
 	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
 	WalConfig                 walConfig
-	StorageType               string        `env:"ZINC_STORAGE_TYPE,default=disk"`
+	StorageType               string `env:"ZINC_STORAGE_TYPE,default=disk"`
 	ObjCache                  objCache
+	LogConfig                 logConfig
 	S3                        s3
 	Oss                       oss
 	Cluster                   cluster
 	Shard                     shard
 	Etcd                      etcd
 	Plugin                    plugin
+}
+
+type logConfig struct {
+	OutputToFile bool   `env:"ZINC_LOG_OUTPUT,default=false"`
+	LogDir       string `env:"ZINC_LOG_DIR"`
+	LogLevel     string `env:"ZINC_LOG_LEVEL,default=debug"`
 }
 
 type objCache struct {
@@ -99,7 +108,7 @@ type oss struct {
 }
 
 type cluster struct {
-	Name string `env:"ZINC_CLUSTER_NAME,default=ZincCluster"`
+	NodeId int `env:"ZINC_CLUSTER_ID"`
 }
 
 type shard struct {

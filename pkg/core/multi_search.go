@@ -18,6 +18,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"strings"
 	"time"
 
@@ -41,6 +42,10 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	isMatched := false
 	hasIndex := false
 	for _, index := range ZINC_INDEX_LIST.List() {
+		// this index should not handle by this servers
+		if !cluster.AssignCheck(index.GetName()) {
+			return nil, ErrIndexServerMismatch
+		}
 		if len(indexNames) > 0 {
 			for _, indexName := range indexNames {
 				isMatched = isMatchIndex(index.GetName(), indexName)

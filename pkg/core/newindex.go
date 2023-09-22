@@ -16,7 +16,9 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"regexp"
 	"strings"
 
@@ -32,6 +34,7 @@ import (
 )
 
 var indexNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+var ErrIndexServerMismatch = errors.New("requested index is not handled by this server")
 
 func CheckIndexName(name string) error {
 	if name == "" {
@@ -194,5 +197,8 @@ func GetIndex(name string) (*Index, bool) {
 }
 
 func GetOrCreateIndex(name, storageType string, shardNum int64) (*Index, bool, error) {
+	if !cluster.AssignCheck(name) {
+		return nil, false, ErrIndexServerMismatch
+	}
 	return ZINC_INDEX_LIST.GetOrCreate(name, storageType, shardNum)
 }

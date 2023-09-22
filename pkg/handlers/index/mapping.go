@@ -16,6 +16,7 @@
 package index
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -82,6 +83,10 @@ func SetMapping(c *gin.Context) {
 
 	index, exists, err := core.GetOrCreateIndex(indexName, "", 0)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

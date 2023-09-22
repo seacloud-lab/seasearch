@@ -17,6 +17,7 @@ package index
 
 import (
 	"errors"
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -82,9 +83,12 @@ func CreateES(c *gin.Context) {
 	if newIndex.StorageType == "" {
 		newIndex.StorageType = config.Global.StorageType
 	}
-
 	err := CreateIndexWorker(&newIndex, indexName)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
@@ -107,6 +111,9 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 
 	if newIndex.Name == "" {
 		return errors.New("index.name should be not empty")
+	}
+	if !cluster.AssignCheck(newIndex.Name) {
+		return core.ErrIndexServerMismatch
 	}
 
 	if _, ok := core.GetIndex(newIndex.Name); ok {

@@ -16,6 +16,7 @@
 package document
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,10 @@ func Update(c *gin.Context) {
 	// If the index does not exist, then create it
 	index, _, err := core.GetOrCreateIndex(indexName, "", 0)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

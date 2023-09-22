@@ -16,6 +16,8 @@
 package routes
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/meta"
 	"net/http"
 	"strings"
 
@@ -84,4 +86,14 @@ func IndexAliasMiddleware(c *gin.Context) {
 		c.Params[ix].Value = newTarget // set target new value in the request context
 	}
 	c.Next()
+}
+
+func ClusterMiddleware(c *gin.Context) {
+	indexName := c.Param("target")
+	indexNames := strings.Split(indexName, ",")
+	for _, index := range indexNames {
+		if !cluster.AssignCheck(index) {
+			c.AbortWithStatusJSON(http.StatusNotAcceptable, meta.HTTPResponseError{Error: core.ErrIndexServerMismatch.Error()})
+		}
+	}
 }

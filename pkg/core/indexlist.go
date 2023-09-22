@@ -16,18 +16,25 @@
 package core
 
 import (
-	"sort"
-	"sync"
-
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/errgroup"
-
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"golang.org/x/sync/errgroup"
+	"sort"
+	"sync"
 )
 
-var ZINC_INDEX_LIST IndexList
+var (
+	ZINC_INDEX_LIST   IndexList
+	indexUpdateCloser = z.NewCloser(1)
+	version           []byte
+)
 
 type IndexList struct {
 	Indexes map[string]*Index
@@ -36,7 +43,7 @@ type IndexList struct {
 
 func init() {
 	// check version
-	version, _ := metadata.KV.Get("version")
+	version, _ = metadata.KV.Get("version")
 	if version == nil {
 		// version have version from v0.2.5
 		// so if no version, it should be <= v0.2.4
@@ -45,9 +52,13 @@ func init() {
 
 	// start loading index
 	ZINC_INDEX_LIST.Indexes = make(map[string]*Index)
-	err := LoadZincIndexesFromMetadata(string(version))
-	if err != nil {
-		log.Fatal().Err(err).Msg("Error loading index")
+
+	// in cluster mode, we load metadata later when assigns ready
+	if config.Global.ServerMode != config.ServerModeCluster {
+		err := LoadZincIndexesFromMetadata(string(version))
+		if err != nil {
+			log.Fatal().Err(err).Msg("Error loading index")
+		}
 	}
 
 	// update version
@@ -57,7 +68,7 @@ func init() {
 			log.Error().Err(err).Msg("Error set version")
 		}
 	}
-
+	var err error
 	ZINC_INDEX_ALIAS_LIST.Aliases, err = metadata.Alias.Get()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error loading alias")
@@ -180,4 +191,79 @@ func (t *IndexList) Close() error {
 // GC auto close unused indexes what inactive for a long time (10m)
 func (t *IndexList) GC() error {
 	return nil // TODO: implement GC
+}
+
+func InitIndexList() {
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return
+	}
+	err := LoadZincIndexesFromMetadata(string(version))
+	if err != nil {
+		log.Fatal().Err(err).Msg("init assign error")
+	}
+	go watchIndexUpdate()
+}
+
+func CloseIndexList() {
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return
+	}
+	indexUpdateCloser.SignalAndWait()
+}
+
+func watchIndexUpdate() {
+	defer indexUpdateCloser.Done()
+	for {
+		select {
+		case <-indexUpdateCloser.HasBeenClosed():
+			return
+		case removeMap := <-cluster.AssignChan:
+			err := updateIndexList(removeMap)
+			if err != nil {
+				log.Error().Err(err).Msg("cannot update memory index list")
+			}
+		}
+	}
+}
+
+func updateIndexList(removeMap map[string]struct{}) error {
+	// The index list only contains indexes managed by the current node.
+	// When the allocation of shards changes, we need to close the indexes that are not managed by this node
+	// and delete them from the index list
+	curIndexList := ZINC_INDEX_LIST.List()
+	for _, index := range curIndexList {
+		sum := sha256.Sum256([]byte(index.GetName()))
+		str := hex.EncodeToString(sum[:])
+		partition := str[:2]
+
+		// the index not assign to us, we should close it.
+		if _, ok := removeMap[partition]; ok {
+			log.Debug().Msgf("unload index: %s not assign to current node", index.GetName())
+			ZINC_INDEX_LIST.Delete(index.GetName())
+		}
+	}
+	// When the assign of partition changes, some partition and indexes may be reassigned to this node.
+	// We load the indexes of these partitions.
+	// Note that in daily operation, the partition assign does not change,
+	// the creation and deletion of index are done at the node responsible for the partition,
+	// and the index list is automatically updated.
+	fullIndexes, err := metadata.Index.List(0, 0)
+	if err != nil {
+		return err
+	}
+
+	for _, index := range fullIndexes {
+		// already here
+		if _, ok := ZINC_INDEX_LIST.Get(index.Name); ok {
+			continue
+		}
+		if cluster.AssignCheck(index.Name) {
+			// the index assign to us, so we load it.
+			err := LoadZincIndexFromMetadata(string(version), index)
+			if err != nil {
+				return fmt.Errorf("reload %s metadata error: %w", index.Name, err)
+			}
+		}
+	}
+	return nil
 }
