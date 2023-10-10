@@ -14,13 +14,18 @@ import (
 )
 
 var (
-	closer                = z.NewCloser(2)
+	closer                = z.NewCloser(4)
 	assignMap             = make(map[string]struct{})
 	lastAssignProcessTime time.Time
 	lock                  sync.RWMutex
 
 	// AssignChan used for notify core update memory index list
 	AssignChan = make(chan map[string]struct{})
+
+	// RoleChan used for notify core update role list
+	RoleChan = make(chan struct{})
+	// UserChan  used for notify core update user list
+	UserChan = make(chan struct{})
 )
 
 func Init() {
@@ -36,6 +41,10 @@ func Init() {
 	go keepHeartBeat()
 
 	go watchAssign()
+
+	go watchUser()
+
+	go watchRole()
 }
 
 func Close() {
@@ -202,5 +211,32 @@ func watchAssign() {
 			continue
 		}
 		return
+	}
+}
+
+func watchUser() {
+	defer closer.Done()
+	ch := WatchUserInfo(closer.Ctx())
+
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-ch:
+			UserChan <- struct{}{}
+		}
+	}
+}
+
+func watchRole() {
+	defer closer.Done()
+	ch := WatchRoleInfo(closer.Ctx())
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-ch:
+			RoleChan <- struct{}{}
+		}
 	}
 }

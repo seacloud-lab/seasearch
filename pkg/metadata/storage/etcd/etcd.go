@@ -17,6 +17,7 @@ package etcd
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -60,6 +61,25 @@ func (t *etcdStorage) List(prefix string, _, _ int) ([][]byte, error) {
 	data := make([][]byte, 0, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		data = append(data, kv.Value)
+	}
+	return data, nil
+}
+
+func (t *etcdStorage) ListKeys(prefix string, _, _ int) ([][]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	resp, err := t.cli.Get(ctx, t.prefix+prefix, client.WithPrefix(), client.WithKeysOnly())
+	if err != nil {
+		return nil, err
+	}
+	data := make([][]byte, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		var key string
+		_, err := fmt.Sscanf(string(kv.Key), t.prefix+prefix+"%s", &key)
+		if err != nil {
+			return nil, fmt.Errorf("malformed key in %q: %v", kv.Key, err)
+		}
+		data = append(data, []byte(key))
 	}
 	return data, nil
 }

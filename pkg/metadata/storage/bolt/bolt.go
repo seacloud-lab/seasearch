@@ -17,6 +17,7 @@ package bolt
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path"
 
@@ -65,6 +66,28 @@ func (t *boltStorage) List(prefix string, _, _ int) ([][]byte, error) {
 			valCopy := make([]byte, len(v))
 			copy(valCopy, v)
 			data = append(data, valCopy)
+		}
+		return nil
+	})
+	return data, err
+}
+
+func (t *boltStorage) ListKeys(prefix string, _, _ int) ([][]byte, error) {
+	data := make([][]byte, 0)
+	bucket, _ := t.splitBucketAndKey(prefix)
+	err := t.db.View(func(txn *bbolt.Tx) error {
+		b := txn.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			var key string
+			_, err := fmt.Sscanf(string(k), prefix+"%s", &key)
+			if err != nil {
+				return fmt.Errorf("malformed key in %q: %v", k, err)
+			}
+			data = append(data, []byte(key))
 		}
 		return nil
 	})

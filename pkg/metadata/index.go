@@ -51,6 +51,18 @@ func (t *index) List(offset, limit int) ([]*meta.Index, error) {
 	return indexes, nil
 }
 
+func (t *index) ListNames(offset, limit int) ([]string, error) {
+	keys, err := db.ListKeys(t.key(""), offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(keys))
+	for _, d := range keys {
+		names = append(names, string(d))
+	}
+	return names, nil
+}
+
 func (t *index) Get(id string) (*meta.Index, error) {
 	data, err := db.Get(t.key(id))
 	if err != nil {

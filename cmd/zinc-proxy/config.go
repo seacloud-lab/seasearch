@@ -12,28 +12,19 @@ import (
 	"time"
 )
 
-var (
-	conf = new(ClusterManagerConfig)
-)
-
-type ClusterManagerConfig struct {
+type ProxyConfig struct {
 	General GeneralConfig
-	Manager ManagerConfig
-	Cluster ClusterConfig
+	Proxy   ClusterProxyConfig
 }
 
 type GeneralConfig struct {
-	LogDir string `env:"ZINC_CLUSTER_MANAGER_LOG_DIR"`
+	LogDir string `env:"ZINC_CLUSTER_PROXY_LOG_DIR"`
 }
 
-type ManagerConfig struct {
-	Host string `env:"ZINC_CLUSTER_MANAGER_HOST"`
-	Port int    `env:"ZINC_CLUSTER_MANAGER_PORT"`
-}
-
-type ClusterConfig struct {
-	EtcdEndpoints []string `env:"ZINC_ETCD_ENDPOINTS"`
-	EtcdPrefix    string   `env:"ZINC_ETCD_PREFIX,default=/zinc"`
+type ClusterProxyConfig struct {
+	Host               string `env:"ZINC_CLUSTER_PROXY_HOST"`
+	Port               int    `env:"ZINC_CLUSTER_PROXY_PORT"`
+	ClusterManagerAddr string `env:"ZINC_CLUSTER_MANAGER_ADDR"`
 }
 
 func initConfig() {
@@ -42,9 +33,9 @@ func initConfig() {
 		log.Print(err.Error())
 	}
 	loadConfig(reflect.ValueOf(conf).Elem())
-
 	gin.SetMode(gin.ReleaseMode)
 }
+
 func loadConfig(rv reflect.Value) {
 	rt := rv.Type()
 	for i := 0; i < rt.NumField(); i++ {

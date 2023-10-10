@@ -138,3 +138,62 @@ func LoadZincIndexFromMetadata(version string, readIndex *meta.Index) error {
 	ZINC_INDEX_LIST.Add(index)
 	return nil
 }
+
+// GetZincIndexesFromMetadata
+// Proxy directly gets metadata
+func GetZincIndexesFromMetadata() ([]*Index, error) {
+	indexes, err := metadata.Index.List(0, 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*Index, len(indexes))
+	for i := range indexes {
+		readIndex := indexes[i]
+		index := new(Index)
+		index.ref = new(meta.Index)
+		index.ref.Name = readIndex.Name
+		index.ref.StorageType = readIndex.StorageType
+		index.ref.Settings = readIndex.Settings
+		index.ref.Mappings = readIndex.Mappings
+		index.ref.Stats = readIndex.Stats
+
+		// init shards
+		index.ref.ShardNum = readIndex.ShardNum
+		index.ref.Shards = make(map[string]*meta.IndexShard, index.shardNum)
+		for id := range readIndex.Shards {
+			index.ref.Shards[id] = &meta.IndexShard{
+				ID:       readIndex.Shards[id].ID,
+				ShardNum: readIndex.Shards[id].ShardNum,
+				Stats:    readIndex.Shards[id].Stats,
+			}
+			index.ref.Shards[id].Shards = make([]*meta.IndexSecondShard, index.ref.Shards[id].ShardNum)
+			for j := range readIndex.Shards[id].Shards {
+				index.ref.Shards[id].Shards[j] = &meta.IndexSecondShard{
+					ID:    readIndex.Shards[id].Shards[j].ID,
+					Stats: readIndex.Shards[id].Shards[j].Stats,
+				}
+			}
+		}
+
+		// init shards wrapper
+		index.shardNum = index.ref.ShardNum
+		index.shards = make(map[string]*IndexShard, index.shardNum)
+		for id := range index.ref.Shards {
+			index.shards[id] = &IndexShard{
+				root: index,
+				ref:  index.ref.Shards[id],
+				name: index.ref.Name + "/" + index.ref.Shards[id].ID,
+			}
+			index.shards[id].shards = make([]*IndexSecondShard, index.ref.Shards[id].ShardNum)
+			for j := range index.ref.Shards[id].Shards {
+				index.shards[id].shards[j] = &IndexSecondShard{
+					root: index,
+					ref:  index.ref.Shards[id].Shards[j],
+				}
+			}
+		}
+		result[i] = index
+	}
+
+	return result, nil
+}

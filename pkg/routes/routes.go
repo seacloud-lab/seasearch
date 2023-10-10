@@ -190,7 +190,7 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/es/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, document.ESBulk)
 	r.POST("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
 	r.PUT("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
-	r.POST("/es/:target/_refresh", AuthMiddleware("index.Refresh"), index.Refresh)
+	r.POST("/es/:target/_refresh", AuthMiddleware("index.Refresh"), ClusterMiddleware, index.Refresh)
 	// ES Document
 	r.POST("/es/:target/_doc", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)        // create
 	r.PUT("/es/:target/_doc/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)     // create or update

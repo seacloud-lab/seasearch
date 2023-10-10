@@ -51,6 +51,15 @@ func (t *cachedPermissions) Delete(id string) {
 	delete(t.pm, id)
 }
 
+func (t *cachedPermissions) Put(roles []*meta.Role) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.pm = make(map[string]map[string]struct{})
+	for _, role := range roles {
+		t.pm[role.ID] = strArrayToMap(role.Permission)
+	}
+}
+
 func strArrayToMap(ss []string) map[string]struct{} {
 	m := map[string]struct{}{}
 	for _, v := range ss {

@@ -50,6 +50,10 @@ func Create(c *gin.Context) {
 	indexName := c.Param("target")
 	err := CreateIndexWorker(&newIndex, indexName)
 	if err != nil {
+		if errors.Is(err, core.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

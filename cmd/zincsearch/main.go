@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/rs/zerolog"
+	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/wal"
@@ -77,6 +78,8 @@ func main() {
 	cluster.Init()
 	// init assign watch
 	core.InitIndexList()
+	// init auth wath
+	auth.Init()
 	// lru cache
 	cache.Init()
 	// Initialize WAL
@@ -112,6 +115,8 @@ func main() {
 		log.Info().Err(err).Msgf("Index closed")
 		// close index list update
 		core.CloseIndexList()
+		// close auth
+		auth.Close()
 		// close cluster
 		cluster.Close()
 		// close metadata

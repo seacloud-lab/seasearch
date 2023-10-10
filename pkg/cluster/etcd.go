@@ -235,6 +235,7 @@ type ClusterInfoEvent struct {
 	Info        []NodeInfo
 	Valid       bool
 	ItemUpdated bool
+	Err         error
 }
 
 func WatchClusterInfo(ctx context.Context) <-chan *ClusterInfoEvent {
@@ -265,6 +266,9 @@ func watchClusterInfo(ctx context.Context, cancel context.CancelFunc, watcher cl
 
 		case rsp := <-rspCh:
 			if rsp.Err() != nil || len(rsp.Events) == 0 {
+				ch <- &ClusterInfoEvent{
+					Err: rsp.Err(),
+				}
 				return
 			}
 
@@ -312,5 +316,123 @@ func SendHeartBeat(key string, curLeaseId client.LeaseID, ls client.Lease) (clie
 			return 0, fmt.Errorf("keep alive error: %w", err)
 		}
 		return curLeaseId, nil
+	}
+}
+
+type UserInfoEvent struct {
+	meta.User
+	Err         error
+	Valid       bool
+	ItemUpdated bool
+}
+
+func WatchUserInfo(ctx context.Context) <-chan *UserInfoEvent {
+	prefix := fmt.Sprintf("%s/metadata/user/", prefix)
+	watcher := client.NewWatcher(cli)
+	ctx, cancel := context.WithCancel(ctx)
+	rspCh := watcher.Watch(client.WithRequireLeader(ctx), prefix, client.WithPrefix())
+	ch := make(chan *UserInfoEvent)
+	go watchUserInfo(ctx, cancel, watcher, rspCh, ch)
+
+	return ch
+}
+
+func watchUserInfo(ctx context.Context, cancel context.CancelFunc, watcher client.Watcher, rspCh client.WatchChan, ch chan *UserInfoEvent) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("watch clsuter info goroutine crashed: %v\n%s", err, debug.Stack())
+		}
+		close(ch)
+		cancel()
+		watcher.Close()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case rsp := <-rspCh:
+			if rsp.Err() != nil || len(rsp.Events) == 0 {
+				ch <- &UserInfoEvent{
+					Err: rsp.Err(),
+				}
+				return
+			}
+
+			for _, event := range rsp.Events {
+				var userEvent UserInfoEvent
+				if event.Type == client.EventTypePut {
+					userEvent.ItemUpdated = true
+					var err error
+					err = json.Unmarshal(event.Kv.Value, &userEvent.User)
+					if err != nil {
+						log.Warn().Err(err).Msgf("malformed value in %q", event.Kv.Key)
+						continue
+					}
+				}
+				userEvent.Valid = true
+				ch <- &userEvent
+			}
+		}
+	}
+}
+
+type RoleEvent struct {
+	meta.Role
+	Err         error
+	Valid       bool
+	ItemUpdated bool
+}
+
+func WatchRoleInfo(ctx context.Context) <-chan *RoleEvent {
+	prefix := fmt.Sprintf("%s/metadata/role/", prefix)
+	watcher := client.NewWatcher(cli)
+	ctx, cancel := context.WithCancel(ctx)
+	rspCh := watcher.Watch(client.WithRequireLeader(ctx), prefix, client.WithPrefix())
+	ch := make(chan *RoleEvent)
+	go watchRoleInfo(ctx, cancel, watcher, rspCh, ch)
+
+	return ch
+}
+
+func watchRoleInfo(ctx context.Context, cancel context.CancelFunc, watcher client.Watcher, rspCh client.WatchChan, ch chan *RoleEvent) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("watch clsuter info goroutine crashed: %v\n%s", err, debug.Stack())
+		}
+		close(ch)
+		cancel()
+		watcher.Close()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case rsp := <-rspCh:
+			if rsp.Err() != nil || len(rsp.Events) == 0 {
+				ch <- &RoleEvent{
+					Err: rsp.Err(),
+				}
+				return
+			}
+
+			for _, event := range rsp.Events {
+				var roleEvent RoleEvent
+				if event.Type == client.EventTypePut {
+					roleEvent.ItemUpdated = true
+					var err error
+					err = json.Unmarshal(event.Kv.Value, &roleEvent.Role)
+					if err != nil {
+						log.Warn().Err(err).Msgf("malformed value in %q", event.Kv.Key)
+						continue
+					}
+				}
+				roleEvent.Valid = true
+				ch <- &roleEvent
+			}
+		}
 	}
 }

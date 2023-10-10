@@ -107,13 +107,14 @@ func (b *S3Backend) read(key string) (io.ReadCloser, error) {
 	return b.client.GetObject(context.Background(), b.bucketName, key, minio.GetObjectOptions{})
 }
 
-func (b *S3Backend) write(key string, r io.Reader) error {
+func (b *S3Backend) write(key string, r io.Reader, l int) error {
 	opts := minio.PutObjectOptions{}
-	return b.writeWithMeta(key, opts, r)
+	return b.writeWithMeta(key, opts, r, int64(l))
 }
 
-func (b *S3Backend) writeWithMeta(key string, opts minio.PutObjectOptions, r io.Reader) error {
-	_, err := b.client.PutObject(context.Background(), b.bucketName, key, r, -1, opts)
+func (b *S3Backend) writeWithMeta(key string, opts minio.PutObjectOptions, r io.Reader, l int64) error {
+	// we should always set objectSize instead of -1 to reduce memory overhead
+	_, err := b.client.PutObject(context.Background(), b.bucketName, key, r, l, opts)
 	if err != nil {
 		return err
 	}
@@ -174,11 +175,13 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		_ = reader.Close()
+	}()
 	err = b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	_ = reader.Close()
 	return b.cache.Load(path.Join(b.path, key))
 }
 
@@ -200,7 +203,7 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 			ch <- err
 			return
 		}
-		err = b.write(backendKey, &buffer)
+		err = b.write(backendKey, &buffer, buffer.Len())
 		if err != nil {
 			ch <- err
 			return

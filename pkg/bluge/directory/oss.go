@@ -158,11 +158,13 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		_ = reader.Close()
+	}()
 	err = b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	_ = reader.Close()
 	return b.cache.Load(path.Join(b.path, key))
 }
 

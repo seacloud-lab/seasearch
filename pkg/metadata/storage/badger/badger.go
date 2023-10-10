@@ -16,6 +16,7 @@
 package badger
 
 import (
+	"fmt"
 	"path"
 
 	"github.com/dgraph-io/badger/v3"
@@ -68,6 +69,29 @@ func (t *badgerStorage) List(prefix string, _, _ int) ([][]byte, error) {
 				return err
 			}
 			data = append(data, buf)
+		}
+		return nil
+	})
+	return data, err
+}
+
+func (t *badgerStorage) ListKeys(prefix string, _, _ int) ([][]byte, error) {
+	data := make([][]byte, 0)
+	pre := []byte(prefix)
+	err := t.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(pre); it.ValidForPrefix(pre); it.Next() {
+			item := it.Item()
+			k := item.KeyCopy(nil)
+			var key string
+			_, err := fmt.Sscanf(string(k), prefix+"%s", &key)
+			if err != nil {
+				return fmt.Errorf("malformed key in %q: %v", k, err)
+			}
+			data = append(data, []byte(key))
 		}
 		return nil
 	})

@@ -17,6 +17,7 @@ package storage
 
 type Storager interface {
 	List(string, int, int) ([][]byte, error)
+	ListKeys(string, int, int) ([][]byte, error)
 	Get(string) ([]byte, error)
 	Set(string, []byte) error
 	Delete(string) error

@@ -37,6 +37,7 @@ const (
 	WalStorageTypeMysql = "mysql"
 
 	ServerModeCluster = "cluster"
+	ServerModeProxy   = "proxy"
 )
 
 type config struct {
