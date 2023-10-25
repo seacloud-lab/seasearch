@@ -17,12 +17,11 @@ package core
 
 import (
 	"fmt"
-	"strings"
-	"sync/atomic"
-
 	"github.com/blugelabs/bluge"
 	blugeindex "github.com/blugelabs/bluge/index"
 	"github.com/rs/zerolog/log"
+	"strings"
+	"sync/atomic"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
@@ -37,6 +36,10 @@ const MaxBatchSize = 10240
 
 // OpenWAL open WAL for index
 func (s *IndexShard) OpenWAL() error {
+	if !config.Global.EnableWal {
+		return nil
+	}
+
 	if atomic.LoadUint64(&s.open) == 1 {
 		return nil
 	}
@@ -307,7 +310,17 @@ func (w *walMergeDocs) Reset() {
 func (w *walMergeDocs) AddDocument(data map[string]interface{}) {
 	action := data[meta.ActionFieldName].(string)
 	docID := data[meta.IDFieldName].(string)
-	shardID := int64(data[meta.ShardFieldName].(float64))
+	// zincSearch use go-json lib and it unmarshal json numbers to float64，
+	// but the value of doc would be int64 if we don't use WAL (without serialization)
+	var shardID int64
+	switch data[meta.ShardFieldName].(type) {
+	case float64:
+		shardID = int64(data[meta.ShardFieldName].(float64))
+	case int64:
+		shardID = data[meta.ShardFieldName].(int64)
+	default:
+		panic("invalid shardID type")
+	}
 	shard, ok := (*w)[shardID]
 	if !ok {
 		shard = make(map[string]*walDocument)
@@ -432,7 +445,6 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 			return fmt.Errorf("walMergeDocs: invalid action type [%s]", firstAction)
 		}
 	}
-
 	if err := writer.Batch(batch); err != nil {
 		return err
 	}

@@ -36,6 +36,9 @@ type IndexShardWALList struct {
 
 func init() {
 	ZINC_INDEX_SHARD_WAL_LIST.Shards = make(map[string]*IndexShard)
+	if !config.Global.EnableWal {
+		return
+	}
 	go ZINC_INDEX_SHARD_WAL_LIST.ConsumeWAL()
 }
 

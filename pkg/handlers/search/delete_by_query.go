@@ -1,6 +1,7 @@
 package search
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"net/http"
 	"time"
 
@@ -42,12 +43,26 @@ func DeleteByQuery(c *gin.Context) {
 		return
 	}
 
+	deleteIds := make([]string, len(resp.Hits.Hits))
 	failures := []string{}
-	for _, hit := range resp.Hits.Hits {
-		index, _ := core.GetIndex(hit.Index)
-		err := index.DeleteDocument(hit.ID)
+	for i, hit := range resp.Hits.Hits {
+		if config.Global.EnableWal {
+			index, _ := core.GetIndex(hit.Index)
+			err := index.DeleteDocument(hit.ID)
+			if err != nil {
+				failures = append(failures, hit.ID)
+			}
+		} else {
+			deleteIds[i] = hit.ID
+		}
+	}
+	if !config.Global.EnableWal {
+		index, _ := core.GetIndex(indexName)
+		err := index.DeleteDocuments(deleteIds)
 		if err != nil {
-			failures = append(failures, hit.ID)
+			log.Error().Err(err).Msg("delete index failed")
+			// mark all deletes are failed
+			failures = deleteIds
 		}
 	}
 

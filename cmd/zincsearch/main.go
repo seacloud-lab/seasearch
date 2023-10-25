@@ -80,10 +80,14 @@ func main() {
 	core.InitIndexList()
 	// init auth wath
 	auth.Init()
+	// init async metadata update
+	core.InitAsyncMetaDataUpdate()
 	// lru cache
 	cache.Init()
 	// Initialize WAL
-	wal.Init()
+	if config.Global.EnableWal {
+		wal.Init()
+	}
 
 	// HTTP init
 	app := gin.New()
@@ -113,6 +117,8 @@ func main() {
 		// close indexes
 		err := core.ZINC_INDEX_LIST.Close()
 		log.Info().Err(err).Msgf("Index closed")
+		// close metadata update
+		core.CloseAsyncMetaDataUpdate()
 		// close index list update
 		core.CloseIndexList()
 		// close auth
@@ -126,7 +132,9 @@ func main() {
 		cache.Close()
 		log.Info().Msgf("LruCache closed")
 		// close wal
-		wal.ShutDown()
+		if config.Global.EnableWal {
+			wal.ShutDown()
+		}
 
 		done <- struct{}{}
 	})

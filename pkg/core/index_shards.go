@@ -78,6 +78,10 @@ func (index *Index) GetShardByDocID(docID string) *IndexShard {
 	return index.shards[shardKey]
 }
 
+func (index *Index) GetShardByShardKey(shardKey string) *IndexShard {
+	return index.shards[shardKey]
+}
+
 // CheckShards check all shards status if need create new second layer shard
 func (index *Index) CheckShards() error {
 	for _, shard := range index.shards {
@@ -177,8 +181,10 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	}
 
 	// check WAL
-	if err := s.OpenWAL(); err != nil {
-		return nil, err
+	if config.Global.EnableWal {
+		if err := s.OpenWAL(); err != nil {
+			return nil, err
+		}
 	}
 
 	secondShard.lock.RLock()
@@ -282,11 +288,12 @@ func (s *IndexShard) Close() error {
 		}
 		secondShard.writer = nil
 	}
-
-	if err := s.wal.Close(); err != nil {
-		return err
+	if config.Global.EnableWal {
+		if err := s.wal.Close(); err != nil {
+			return err
+		}
+		s.wal = nil
 	}
-	s.wal = nil
 
 	return nil
 }

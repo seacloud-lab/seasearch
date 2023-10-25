@@ -80,6 +80,7 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 		return count, err
 	}
 
+	ops := make([]core.DocOperation, 0)
 	for scanner.Scan() { // Read each line
 		for k := range doc {
 			delete(doc, k)
@@ -100,10 +101,17 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 		} else {
 			update = true
 		}
-
-		err = newIndex.CreateDocument(docID, doc, update)
-		if err != nil {
-			return count, err
+		if config.Global.EnableWal {
+			err = newIndex.CreateDocument(docID, doc, update)
+			if err != nil {
+				return count, err
+			}
+		} else {
+			ops = append(ops, core.DocOperation{
+				Doc:    doc,
+				DocId:  docID,
+				Update: update,
+			})
 		}
 
 		count++
@@ -111,6 +119,13 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 
 	if err := scanner.Err(); err != nil {
 		return count, err
+	}
+
+	if !config.Global.EnableWal {
+		err := newIndex.CreateDocuments(ops)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	return count, nil

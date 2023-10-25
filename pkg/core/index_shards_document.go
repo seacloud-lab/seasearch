@@ -72,7 +72,17 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 	timestamp := time.Now()
 	if value, ok := doc[meta.TimeFieldName]; ok {
 		delete(doc, meta.TimeFieldName)
-		timestamp = time.Unix(0, int64(value.(float64)))
+		// zincSearch use go-json lib and it unmarshal json numbers to float64，
+		// but the value of doc would be int64 if we don't use WAL (without serialization)
+		switch value.(type) {
+		case float64:
+			timestamp = time.Unix(0, int64(value.(float64)))
+		case int64:
+			timestamp = time.Unix(0, value.(int64))
+		default:
+			return nil, fmt.Errorf("invalid timestamp data type")
+		}
+
 	}
 	bdoc.AddField(bluge.NewDateTimeField(meta.TimeFieldName, timestamp).StoreValue().Sortable().Aggregatable())
 
@@ -154,6 +164,16 @@ func (s *IndexShard) buildField(mappings *meta.Mappings, bdoc *bluge.Document, k
 
 // CheckDocument checks if the document is valid.
 func (s *IndexShard) CheckDocument(docID string, doc map[string]interface{}, update bool, shard int64) ([]byte, error) {
+	flatDoc, err := s.CheckDocumentOperation(docID, doc, update, shard)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(flatDoc)
+}
+
+// CheckDocumentOperation
+// checks if the document is valid, and return the operation.
+func (s *IndexShard) CheckDocumentOperation(docID string, doc map[string]interface{}, update bool, shard int64) (map[string]interface{}, error) {
 	// Pick the index mapping from the cache if it already exists
 	mappings := s.root.GetMappings()
 	mappingsNeedsUpdate := false
@@ -221,7 +241,7 @@ func (s *IndexShard) CheckDocument(docID string, doc map[string]interface{}, upd
 	flatDoc[meta.TimeFieldName] = timestamp.UnixNano()
 	flatDoc[meta.SourceFieldName] = doc
 
-	return json.Marshal(flatDoc)
+	return flatDoc, nil
 }
 
 // checkProperty returns if need update mappings

@@ -67,6 +67,7 @@ type config struct {
 	WalSyncInterval           time.Duration `env:"ZINC_WAL_SYNC_INTERVAL,default=1s"`      // sync wal to disk, 1s, 10ms
 	WalRedoLogNoSync          bool          `env:"ZINC_WAL_REDOLOG_NO_SYNC,default=false"` // control sync after every write
 	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
+	EnableWal                 bool          `env:"ZINC_WAL_ENABLE,default=true"`
 	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
 	WalConfig                 walConfig
 	StorageType               string `env:"ZINC_STORAGE_TYPE,default=disk"`
@@ -256,6 +257,10 @@ func loadConfig(rv reflect.Value) {
 }
 
 func checkWalConfig() {
+	if !Global.EnableWal {
+		return
+	}
+
 	if Global.WalStorageType == WalStorageTypeDisk {
 		return
 	}

@@ -16,6 +16,7 @@
 package document
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"net/http"
 
@@ -77,7 +78,7 @@ func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 	if err != nil {
 		return count, err
 	}
-
+	ops := make([]core.DocOperation, 0)
 	for _, doc := range body.Records { // Read each line
 		update := false
 
@@ -90,13 +91,26 @@ func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 		} else {
 			update = true
 		}
-
-		err = newIndex.CreateDocument(docID, doc, update)
-		if err != nil {
-			return count, err
+		if config.Global.EnableWal {
+			err = newIndex.CreateDocument(docID, doc, update)
+			if err != nil {
+				return count, err
+			}
+		} else {
+			ops = append(ops, core.DocOperation{
+				DocId:  docID,
+				Doc:    doc,
+				Update: update,
+			})
 		}
 
 		count++
+	}
+	if !config.Global.EnableWal {
+		err := newIndex.CreateDocuments(ops)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	return count, nil

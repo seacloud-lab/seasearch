@@ -16,6 +16,11 @@
 package core
 
 import (
+	blugeindex "github.com/blugelabs/bluge/index"
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"golang.org/x/sync/errgroup"
 	"strings"
 	"time"
 
@@ -24,27 +29,120 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
+type DocOperation struct {
+	Update bool
+	DocId  string
+	Doc    map[string]interface{}
+}
+
+// metaDataUpdateCloser
+// used for update metadata without WAL
+var metaDataUpdateCloser = z.NewCloser(1)
+var metaDataUpdateCh = make(chan *Index, 100)
+
+func InitAsyncMetaDataUpdate() {
+	if config.Global.EnableWal {
+		return
+	}
+	go updateMetadataProcess()
+}
+
+func updateMetadataProcess() {
+	defer metaDataUpdateCloser.Done()
+	ticker := time.NewTicker(time.Second * 1)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-metaDataUpdateCloser.HasBeenClosed():
+			return
+		case <-ticker.C:
+		OUTER:
+			for {
+				select {
+				case index := <-metaDataUpdateCh:
+					if index != nil {
+						if err := index.UpdateMetadata(); err != nil {
+							log.Error().Err(err).Msgf("update index %s metadata error", index.GetName())
+						}
+					}
+				// there is no index need to update, we just out
+				default:
+					break OUTER
+				}
+			}
+		}
+	}
+}
+
+func CloseAsyncMetaDataUpdate() {
+	metaDataUpdateCloser.SignalAndWait()
+}
+
 // CreateDocument inserts or updates a document in the zinc index
 func (index *Index) CreateDocument(docID string, doc map[string]interface{}, update bool) error {
 	// metrics
 	IncrMetricStatsByIndex(index.GetName(), "wal_request")
 
-	// check WAL
 	shard := index.GetShardByDocID(docID)
-	if err := shard.OpenWAL(); err != nil {
-		return err
-	}
-
 	secondShardID := ShardIDNeedLatest
 	if update {
 		secondShardID = ShardIDNeedUpdate
 	}
-	data, err := shard.CheckDocument(docID, doc, update, secondShardID)
+	if config.Global.EnableWal {
+		// check WAL
+		if err := shard.OpenWAL(); err != nil {
+			return err
+		}
+		data, err := shard.CheckDocument(docID, doc, update, secondShardID)
+		if err != nil {
+			return err
+		}
+		return shard.wal.Write(data)
+	}
+	op, err := shard.CheckDocumentOperation(docID, doc, update, secondShardID)
 	if err != nil {
 		return err
 	}
+	return CommitOperations(shard, []map[string]interface{}{op})
+}
 
-	return shard.wal.Write(data)
+func (index *Index) CreateDocuments(ops []DocOperation) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	// shardId -> docs
+	shardMap := make(map[string][]map[string]interface{})
+
+	for _, op := range ops {
+		shard := index.GetShardByDocID(op.DocId)
+		secondShardID := ShardIDNeedLatest
+		if op.Update {
+			secondShardID = ShardIDNeedUpdate
+		}
+		doc, err := shard.CheckDocumentOperation(op.DocId, op.Doc, op.Update, secondShardID)
+		if err != nil {
+			return err
+		}
+		if list, ok := shardMap[shard.GetID()]; ok {
+			shardMap[shard.GetID()] = append(list, doc)
+		} else {
+			shardMap[shard.GetID()] = []map[string]interface{}{doc}
+		}
+	}
+
+	// each shard is immutable and has independent writer,
+	// so we commit concurrently
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.GoroutineNum)
+	for shardId, docs := range shardMap {
+		shardId := shardId
+		docs := docs
+		eg.Go(func() error {
+			shard := index.GetShardByShardKey(shardId)
+			return CommitOperations(shard, docs)
+		})
+	}
+	return eg.Wait()
 }
 
 // GetDocument get a document in the zinc index
@@ -54,7 +152,6 @@ func (index *Index) GetDocument(docID string) (*meta.Hit, error) {
 	if err := shard.OpenWAL(); err != nil {
 		return nil, err
 	}
-
 	return shard.FindDocumentByDocID(docID)
 }
 
@@ -65,10 +162,6 @@ func (index *Index) UpdateDocument(docID string, doc map[string]interface{}, ins
 
 	// check WAL
 	shard := index.GetShardByDocID(docID)
-	if err := shard.OpenWAL(); err != nil {
-		return err
-	}
-
 	update := true
 	secondShardID, err := shard.FindShardByDocID(docID)
 	if err != nil {
@@ -78,13 +171,22 @@ func (index *Index) UpdateDocument(docID string, doc map[string]interface{}, ins
 			return err
 		}
 	}
+	if config.Global.EnableWal {
+		if err := shard.OpenWAL(); err != nil {
+			return err
+		}
+		data, err := shard.CheckDocument(docID, doc, update, secondShardID)
+		if err != nil {
+			return err
+		}
 
-	data, err := shard.CheckDocument(docID, doc, update, secondShardID)
+		return shard.wal.Write(data)
+	}
+	op, err := shard.CheckDocumentOperation(docID, doc, update, secondShardID)
 	if err != nil {
 		return err
 	}
-
-	return shard.wal.Write(data)
+	return CommitOperations(shard, []map[string]interface{}{op})
 }
 
 // DeleteDocument deletes a document in the zinc index
@@ -92,12 +194,7 @@ func (index *Index) DeleteDocument(docID string) error {
 	// metrics
 	IncrMetricStatsByIndex(index.GetName(), "wal_request")
 
-	// check WAL
 	shard := index.GetShardByDocID(docID)
-	if err := shard.OpenWAL(); err != nil {
-		return err
-	}
-
 	secondShardID, err := shard.FindShardByDocID(docID)
 	if err != nil {
 		return err
@@ -108,11 +205,54 @@ func (index *Index) DeleteDocument(docID string) error {
 		meta.ActionFieldName: meta.ActionTypeDelete,
 		meta.ShardFieldName:  secondShardID,
 	}
-	jstr, err := json.Marshal(data)
-	if err != nil {
-		return err
+	if config.Global.EnableWal {
+		jstr, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		// check WAL
+		if err := shard.OpenWAL(); err != nil {
+			return err
+		}
+		return shard.wal.Write(jstr)
 	}
-	return shard.wal.Write(jstr)
+	return CommitOperations(shard, []map[string]interface{}{data})
+}
+
+func (index *Index) DeleteDocuments(docIDs []string) error {
+	// shardId -> doc
+	shardMap := make(map[string][]map[string]interface{})
+
+	for _, docID := range docIDs {
+		shard := index.GetShardByDocID(docID)
+		secondShardID, err := shard.FindShardByDocID(docID)
+		if err != nil {
+			return err
+		}
+		data := map[string]interface{}{
+			meta.IDFieldName:     docID,
+			meta.ActionFieldName: meta.ActionTypeDelete,
+			meta.ShardFieldName:  secondShardID,
+		}
+		if list, ok := shardMap[shard.GetID()]; ok {
+			shardMap[shard.GetID()] = append(list, data)
+		} else {
+			shardMap[shard.GetID()] = []map[string]interface{}{data}
+		}
+	}
+
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.GoroutineNum)
+
+	for shardKey, list := range shardMap {
+		shardKey := shardKey
+		list := list
+		eg.Go(func() error {
+			shard := index.GetShardByShardKey(shardKey)
+			return CommitOperations(shard, list)
+		})
+	}
+	return eg.Wait()
 }
 
 // isDateProperty returns true if the given value matches the default date format.
@@ -140,4 +280,38 @@ func detectTimeLayout(value string) string {
 	}
 
 	return layout
+}
+
+func CommitOperations(shard *IndexShard, opList []map[string]interface{}) error {
+	docsList := make([]walMergeDocs, 0)
+
+	for i := 0; i < len(opList); i += config.Global.BatchSize {
+		end := i + config.Global.BatchSize
+		if end > len(opList) {
+			end = len(opList)
+		}
+		docs := make(walMergeDocs)
+		for _, doc := range opList[i:end] {
+			docs.AddDocument(doc)
+		}
+		docsList = append(docsList, docs)
+	}
+
+	for _, docs := range docsList {
+		batch := blugeindex.NewBatch()
+		err := docs.WriteTo(shard, batch, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := shard.CheckShards(); err != nil {
+		log.Error().Err(err).Str("index", shard.GetIndexName()).Str("shard", shard.GetID()).Msg("index.CheckShards()")
+		return err
+	}
+
+	shard.root.UpdateMetadataByShard(shard.GetID())
+
+	metaDataUpdateCh <- shard.root
+	return nil
 }

@@ -112,6 +112,9 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	nextLineIsData := false
 	lastLineMetaData := make(map[string]interface{})
 
+	// disable wal write indexName -> []ops
+	indexDocMap := make(map[string][]core.DocOperation)
+
 	var doc map[string]interface{}
 	var err error
 	for scanner.Scan() { // Read each line
@@ -165,14 +168,29 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			default:
 			}
 
-			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
-			if err != nil {
-				return bulkRes, err
-			}
-
-			err = newIndex.CreateDocument(docID, doc, update)
-			if err != nil {
-				return bulkRes, err
+			if config.Global.EnableWal {
+				newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+				if err != nil {
+					return bulkRes, err
+				}
+				err = newIndex.CreateDocument(docID, doc, update)
+				if err != nil {
+					return bulkRes, err
+				}
+			} else {
+				if list, ok := indexDocMap[indexName]; ok {
+					indexDocMap[indexName] = append(list, core.DocOperation{
+						DocId:  docID,
+						Doc:    doc,
+						Update: update,
+					})
+				} else {
+					indexDocMap[indexName] = []core.DocOperation{{
+						Doc:    doc,
+						DocId:  docID,
+						Update: update,
+					}}
+				}
 			}
 
 		} else { // This branch will process the metadata line in the request. Each metadata line is preceded by a data line.
@@ -230,6 +248,19 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 	if err := scanner.Err(); err != nil {
 		return bulkRes, err
+	}
+
+	if !config.Global.EnableWal {
+		for indexName, ops := range indexDocMap {
+			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+			if err != nil {
+				return bulkRes, err
+			}
+			err = newIndex.CreateDocuments(ops)
+			if err != nil {
+				return bulkRes, err
+			}
+		}
 	}
 
 	return bulkRes, nil
