@@ -67,6 +67,10 @@ func SetupHttp(r *gin.Engine) {
 	r.HEAD("/api/index/:target", AuthMiddlewareNoCache("index.Exists"), Exists)
 	r.POST("/api/index/:target/refresh", directForwarding)
 
+	// vector
+	r.POST("/api/:target/_search/vector", SearchVector)
+	r.POST("/api/:target/:field/_rebuild", directForwarding)
+
 	// index settings
 	r.GET("/api/:target/_mapping", directForwarding)
 	r.PUT("/api/:target/_mapping", directForwarding)

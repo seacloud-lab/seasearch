@@ -24,6 +24,20 @@ type Index struct {
 	Shards      map[string]*IndexShard `json:"shards"`
 	Stats       IndexStat              `json:"stats"`
 	Version     string                 `json:"version"`
+	VecIndexes  map[string]*VecIndex   `json:"vec_indexes"`
+}
+
+type VecIndex struct {
+	Type string `json:"type"`
+	// the final vec index type
+	TargetType string `json:"target_type"`
+	Dims       int    `json:"dims"`
+	NBits      int    `json:"nbits"`
+	NList      int    `json:"nlist"`
+	M          int    `json:"m"`
+	Count      int64  `json:"count"`
+	// Stored whether the index has been persisted
+	Stored bool `json:"stored"`
 }
 
 type IndexShard struct {

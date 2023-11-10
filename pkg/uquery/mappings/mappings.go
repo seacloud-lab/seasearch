@@ -17,6 +17,7 @@ package mappings
 
 import (
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"strings"
 
 	"github.com/blugelabs/bluge/analysis"
@@ -107,6 +108,9 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 			newProp = meta.NewProperty("bool")
 		case "time", "datetime":
 			newProp = meta.NewProperty("date")
+		case "vector":
+			newProp = meta.NewProperty("vector")
+			newProp.Store = true
 		case "flattened", "object", "nested", "wildcard", "byte", "alias", "geo_point", "ip", "ip_range", "scaled_float":
 			// ignore
 		default:
@@ -139,6 +143,20 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				newProp.Aggregatable = v.(bool)
 			case "highlightable":
 				newProp.Highlightable = v.(bool)
+			case "dims":
+				var err error
+				newProp.Dims, err = zutils.ToInt(v)
+				if err != nil {
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s dims parse err %s", field, err.Error()))
+				}
+			case "m":
+				var err error
+				newProp.M, err = zutils.ToInt(v)
+				if err != nil {
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s M parse err %s", field, err.Error()))
+				}
+			case "vec_index_type":
+				newProp.VecIndexType = v.(string)
 			default:
 				// ignore unknown options
 				// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] properties [%s] unknown option [%s]", field, k))
@@ -152,7 +170,24 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 		if newProp.Type != "" {
 			mappings.SetProperty(field, newProp)
 		}
-
+		// check settings
+		if newProp.Type == "vector" {
+			if newProp.Dims < 0 {
+				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should greater than 0", field))
+			}
+			if newProp.M < 0 {
+				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s m should greater than 0", field))
+			}
+			if newProp.NBits < 0 {
+				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s NBits should greater than 0", field))
+			}
+			if newProp.Dims%newProp.M != 0 {
+				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
+			}
+			if newProp.VecIndexType != vector.Flat && newProp.VecIndexType != vector.IvfPQ {
+				return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s vec_index_type parse err invalid vec type", field))
+			}
+		}
 		if newProp.Type == "text" {
 			fields, err := convertToField(propFields)
 			if err != nil {

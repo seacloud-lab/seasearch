@@ -16,6 +16,7 @@
 package core
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"sync"
 	"sync/atomic"
 
@@ -230,6 +231,18 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 	}
 	for field, prop := range mappings.ListProperty() {
 		index.ref.Mappings.SetProperty(field, prop)
+		if prop.Type == "vector" {
+			if index.ref.VecIndexes == nil {
+				index.ref.VecIndexes = make(map[string]*meta.VecIndex)
+			}
+			index.ref.VecIndexes[field] = &meta.VecIndex{
+				Type:       vector.Flat,
+				TargetType: prop.VecIndexType,
+				Dims:       prop.Dims,
+				NBits:      prop.NBits,
+				M:          prop.M,
+			}
+		}
 	}
 	index.lock.Unlock()
 
@@ -278,6 +291,18 @@ func (index *Index) UpdateMetadata() error {
 		atomic.StoreUint64(&index.ref.Stats.StorageSize, totalSize)
 		index.lock.Unlock()
 	}
+
+	return storeIndex(index)
+}
+
+// SaveVecIndexMeta update vector index metadata
+func (index *Index) SaveVecIndexMeta(fieldName string, vecIndex *meta.VecIndex) error {
+	index.lock.Lock()
+	if index.ref.VecIndexes == nil {
+		index.ref.VecIndexes = make(map[string]*meta.VecIndex)
+	}
+	index.ref.VecIndexes[fieldName] = vecIndex
+	index.lock.Unlock()
 
 	return storeIndex(index)
 }
@@ -345,6 +370,23 @@ func (index *Index) UpdateStatsBySecondShard(id string, secondIndex int64) {
 // Deprecated: it will be removed in the future
 func (index *Index) Reopen() error {
 	return index.Close()
+}
+
+func (index *Index) GetVecIndex(fieldName string) (*meta.VecIndex, bool) {
+	index.lock.RLock()
+	defer index.lock.RUnlock()
+
+	if len(index.ref.VecIndexes) == 0 {
+		return nil, false
+	}
+	result, ok := index.ref.VecIndexes[fieldName]
+	return result, ok
+}
+
+func (index *Index) GetVecIndexes() map[string]*meta.VecIndex {
+	index.lock.RLock()
+	defer index.lock.RUnlock()
+	return index.ref.VecIndexes
 }
 
 func (index *Index) Close() error {

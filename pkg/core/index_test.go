@@ -284,7 +284,7 @@ func TestIndex_BuildBlugeDocumentFromJSON(t *testing.T) {
 			err = json.Unmarshal(got, &doc)
 			assert.NoError(t, err)
 			assert.NotNil(t, doc)
-			got2, err := shard.BuildBlugeDocumentFromJSON(tt.args.docID, doc)
+			got2, _, err := shard.BuildBlugeDocumentFromJSON(tt.args.docID, doc)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

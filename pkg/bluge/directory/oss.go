@@ -8,8 +8,8 @@ import (
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 
 	"io"
 	"os"
@@ -26,7 +26,7 @@ type OssBackend struct {
 	pid    *os.File
 	lock   sync.Mutex
 	prefix string
-	cache  *cache.CacheManager
+	cache  *lru_cache.LruCache
 }
 
 func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
@@ -59,7 +59,7 @@ func CreateOSSBackend(dataPath string, indexName string) (*OssBackend, error) {
 		return nil, err
 	}
 
-	o.cache = cache.Manager
+	o.cache = lru_cache.Instance
 	o.prefix = indexName
 	o.path = path.Join(dataPath, indexName)
 
@@ -126,7 +126,7 @@ func (b *OssBackend) remove(key string) error {
 }
 
 func (b *OssBackend) Setup(readOnly bool) error {
-	return cache.Manager.Setup(b.path, readOnly)
+	return b.cache.Setup(b.path, readOnly)
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {
@@ -161,11 +161,11 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 	defer func() {
 		_ = reader.Close()
 	}()
-	err = b.cache.CacheFile(path.Join(b.path, key), reader)
+	f, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	return b.cache.Load(path.Join(b.path, key))
+	return f.LoadReadOnlyData()
 }
 
 func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh chan struct{}) error {
@@ -268,7 +268,7 @@ func (b *OssBackend) Stats() (numItems uint64, numBytes uint64) {
 }
 
 func (b *OssBackend) Sync() error {
-	return cache.Manager.Sync(b.path)
+	return b.cache.Sync(b.path)
 }
 
 func (b *OssBackend) Lock() error {
@@ -283,5 +283,5 @@ func (b *OssBackend) Unlock() error {
 	if err != nil {
 		return fmt.Errorf("error closing pid file: %w", err)
 	}
-	return cache.Manager.Unlock(b.path)
+	return b.cache.Unlock(b.path)
 }

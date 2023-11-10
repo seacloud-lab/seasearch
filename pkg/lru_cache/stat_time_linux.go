@@ -1,12 +1,12 @@
 //go:build linux
 
-package cache
+package lru_cache
 
 import (
 	"syscall"
 	"time"
 )
 
-func getAtime(st *syscall.Stat_t) time.Time {
+func GetAtime(st *syscall.Stat_t) time.Time {
 	return time.Unix(st.Atim.Sec, st.Atim.Nsec)
 }

@@ -28,7 +28,7 @@ type Mappings struct {
 }
 
 type Property struct {
-	Type           string `json:"type"` // text, keyword, date, numeric, boolean, geo_point
+	Type           string `json:"type"` // text, keyword, date, numeric, boolean, geo_point, vector
 	Analyzer       string `json:"analyzer,omitempty"`
 	SearchAnalyzer string `json:"search_analyzer,omitempty"`
 	Format         string `json:"format,omitempty"`    // date format yyyy-MM-dd HH:mm:ss || yyyy-MM-dd || epoch_millis
@@ -45,6 +45,12 @@ type Property struct {
 	//
 	// Currently, only "text" fields support the Fields parameter.
 	Fields map[string]Property `json:"fields,omitempty"`
+	// Dims for vector field
+	Dims int `json:"dims"`
+	// M for vector field, make sure Dims mod M == 0
+	M            int    `json:"m"`
+	NBits        int    `json:"nbits"`
+	VecIndexType string `json:"vec_index_type"`
 }
 
 func NewMappings() *Mappings {

@@ -31,6 +31,14 @@ func DeleteIndex(name string) error {
 	if !exists {
 		return errors.New("index " + name + " does not exists")
 	}
+	// delete vecIndexes
+	vecIndexes := index.GetVecIndexes()
+	for vecIndex, _ := range vecIndexes {
+		err := DeleteVecIndex(name, vecIndex)
+		if err != nil {
+			return err
+		}
+	}
 
 	// 2. Close and Delete from cache
 	ZINC_INDEX_LIST.Delete(name)
@@ -41,7 +49,6 @@ func DeleteIndex(name string) error {
 	if err != nil {
 		log.Error().Err(err).Msg("failed to delete index")
 	}
-
 	// 4. Delete form metadata
 	return metadata.Index.Delete(name)
 }

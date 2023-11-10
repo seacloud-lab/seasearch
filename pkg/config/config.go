@@ -73,6 +73,7 @@ type config struct {
 	StorageType               string `env:"ZINC_STORAGE_TYPE,default=disk"`
 	ObjCache                  objCache
 	LogConfig                 logConfig
+	VectorConfig              vectorConfig
 	S3                        s3
 	Oss                       oss
 	Cluster                   cluster
@@ -154,6 +155,10 @@ type walConfig struct {
 	Db       string `env:"ZINC_WAL_SQL_DB"`
 	User     string `env:"ZINC_WAL_SQL_USER"`
 	Password string `env:"ZINC_WAL_SQL_PWD"`
+}
+
+type vectorConfig struct {
+	IvfPqThreshold int64 `env:"ZINC_VECTOR_IVFPQ_THRESHOLD,default=50000"`
 }
 
 var Global = new(config)

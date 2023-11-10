@@ -10,8 +10,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 
 	"io"
 	"os"
@@ -46,7 +46,7 @@ type S3Backend struct {
 	path       string
 	pid        *os.File
 	lock       sync.Mutex
-	cache      *cache.CacheManager
+	cache      *lru_cache.LruCache
 	bucketName string
 }
 
@@ -67,7 +67,7 @@ func CreateS3Backend(dataPath string, indexName string) (*S3Backend, error) {
 		return nil, err
 	}
 
-	s3.cache = cache.Manager
+	s3.cache = lru_cache.Instance
 	s3.prefix = indexName
 	s3.path = path.Join(dataPath, indexName)
 
@@ -143,7 +143,7 @@ func (b *S3Backend) remove(key string) error {
 }
 
 func (b *S3Backend) Setup(readOnly bool) error {
-	return cache.Manager.Setup(b.path, readOnly)
+	return b.cache.Setup(b.path, readOnly)
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {
@@ -178,11 +178,11 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 	defer func() {
 		_ = reader.Close()
 	}()
-	err = b.cache.CacheFile(path.Join(b.path, key), reader)
+	cf, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	return b.cache.Load(path.Join(b.path, key))
+	return cf.LoadReadOnlyData()
 }
 
 func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh chan struct{}) error {
@@ -284,7 +284,7 @@ func (b *S3Backend) Stats() (numItems uint64, numBytes uint64) {
 }
 
 func (b *S3Backend) Sync() error {
-	return cache.Manager.Sync(b.path)
+	return b.cache.Sync(b.path)
 }
 
 func (b *S3Backend) Lock() error {
@@ -299,7 +299,7 @@ func (b *S3Backend) Unlock() error {
 	if err != nil {
 		return fmt.Errorf("error closing pid file: %w", err)
 	}
-	return cache.Manager.Unlock(b.path)
+	return b.cache.Unlock(b.path)
 }
 
 func fileName(kind string, id uint64) string {

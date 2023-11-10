@@ -17,6 +17,11 @@ package core
 
 import (
 	"fmt"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
+
+	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+	"path"
+
 	"github.com/blugelabs/bluge"
 	blugeindex "github.com/blugelabs/bluge/index"
 	"github.com/rs/zerolog/log"
@@ -382,25 +387,34 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 		otherWriters = otherWriters[:len(ws)-1]
 	}
 	var firstAction, lastAction string
+
+	vecActions := make([]*vector.VecAction, 0)
+
 	for _, doc := range docs {
 		// str, err := json.Marshal(doc.data)
 		// fmt.Printf("%s, %v, %v\n", str, err, doc.actions)
-		bdoc, err := shard.BuildBlugeDocumentFromJSON(doc.docID, doc.data)
+		bdoc, vecMap, err := shard.BuildBlugeDocumentFromJSON(doc.docID, doc.data)
 		if err != nil {
 			return err
 		}
 		firstAction = doc.actions[0]
+		// Actual write operation
+		finalAction := vector.None
+
 		switch firstAction {
 		case meta.ActionTypeInsert:
 			if len(doc.actions) == 1 {
 				batch.Insert(bdoc)
+				finalAction = vector.Insert
 			} else {
 				lastAction = doc.actions[len(doc.actions)-1]
 				switch lastAction {
 				case meta.ActionTypeInsert:
 					batch.Insert(bdoc)
+					finalAction = vector.Insert
 				case meta.ActionTypeUpdate:
 					batch.Insert(bdoc)
+					finalAction = vector.Insert
 				case meta.ActionTypeDelete:
 					// noop
 				}
@@ -409,40 +423,63 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 			if len(doc.actions) == 1 {
 				batch.Update(bdoc.ID(), bdoc)
 				otherBatch.Delete(bdoc.ID())
+				finalAction = vector.Update
 			} else {
 				lastAction = doc.actions[len(doc.actions)-1]
 				switch lastAction {
 				case meta.ActionTypeInsert:
 					batch.Update(bdoc.ID(), bdoc)
 					otherBatch.Delete(bdoc.ID())
+					finalAction = vector.Update
 				case meta.ActionTypeUpdate:
 					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
 					otherBatch.Delete(bdoc.ID())
 				case meta.ActionTypeDelete:
 					batch.Delete(bdoc.ID())
+					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
 				}
 			}
 		case meta.ActionTypeDelete:
 			if len(doc.actions) == 1 {
 				batch.Delete(bdoc.ID())
+				finalAction = vector.Delete
 				otherBatch.Delete(bdoc.ID())
 			} else {
 				lastAction = doc.actions[len(doc.actions)-1]
 				switch lastAction {
 				case meta.ActionTypeInsert:
 					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
 					otherBatch.Delete(bdoc.ID())
 				case meta.ActionTypeUpdate:
 					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
 					otherBatch.Delete(bdoc.ID())
 				case meta.ActionTypeDelete:
 					batch.Delete(bdoc.ID())
+					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
 				}
 			}
 		default:
 			return fmt.Errorf("walMergeDocs: invalid action type [%s]", firstAction)
+		}
+
+		// append vector action
+		if finalAction == vector.None {
+			continue
+		}
+		for field, vec := range vecMap {
+			action := &vector.VecAction{
+				DocId:  doc.docID,
+				Action: finalAction,
+				Index:  shard.root.ref.Name,
+				Vector: vec,
+				Field:  field,
+			}
+			vecActions = append(vecActions, action)
 		}
 	}
 	if err := writer.Batch(batch); err != nil {
@@ -453,7 +490,9 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 			return err
 		}
 	}
-	return nil
+
+	// process vectors
+	return BatchVectors(vecActions)
 }
 
 func (w *walMergeDocs) WriteToShardRollback(shard *IndexShard, shardID int64, batch *blugeindex.Batch) error {
@@ -473,7 +512,7 @@ func (w *walMergeDocs) WriteToShardRollback(shard *IndexShard, shardID int64, ba
 	}
 	var firstAction string
 	for _, doc := range docs {
-		bdoc, err := shard.BuildBlugeDocumentFromJSON(doc.docID, doc.data)
+		bdoc, _, err := shard.BuildBlugeDocumentFromJSON(doc.docID, doc.data)
 		if err != nil {
 			return err
 		}
@@ -489,4 +528,72 @@ func (w *walMergeDocs) WriteToShardRollback(shard *IndexShard, shardID int64, ba
 	}
 
 	return writer.Batch(batch)
+}
+
+func BatchVectors(actions []*vector.VecAction) error {
+	if len(actions) == 0 {
+		return nil
+	}
+	// vec IndexName -> actions
+	vecIndexMap := make(map[string][]*vector.VecAction)
+	for _, act := range actions {
+		vecIndexName := path.Join(act.Index, act.Field)
+		if list, ok := vecIndexMap[vecIndexName]; ok {
+			vecIndexMap[vecIndexName] = append(list, act)
+		} else {
+			vecIndexMap[vecIndexName] = []*vector.VecAction{act}
+		}
+	}
+	for _, acts := range vecIndexMap {
+		if len(acts) <= 0 {
+			continue
+		}
+		index, err := GetVectorIndex(acts[0].Index, acts[0].Field)
+		if err != nil {
+			if errors.Is(err, ErrVecIndexCorruption) && config.Global.EnableWal {
+				log.Fatal().Err(err).Msgf("zinc index %s field %s", acts[0].Index, acts[0].Field)
+			}
+			return err
+		}
+
+		insertList := make([][]float32, 0)
+		insertIdList := make([]int64, 0)
+		deleteIdList := make([]int64, 0)
+
+		for _, act := range acts {
+			switch act.Action {
+			case vector.Insert:
+				insertList = append(insertList, act.Vector)
+				insertIdList = append(insertIdList, base62.Decode(act.DocId))
+			case vector.Delete:
+				deleteIdList = append(deleteIdList, base62.Decode(act.DocId))
+			case vector.Update:
+				insertList = append(insertList, act.Vector)
+				insertIdList = append(insertIdList, base62.Decode(act.DocId))
+
+				deleteIdList = append(deleteIdList, base62.Decode(act.DocId))
+			}
+		}
+		// process delete first
+		if len(deleteIdList) > 0 {
+			_, err := index.RemoveIDs(deleteIdList)
+			if err != nil {
+				return err
+			}
+		}
+		if len(insertList) > 0 {
+			err := index.AddVectors(insertList, insertIdList)
+			if err != nil {
+				return err
+			}
+		}
+		err = index.Save()
+		if err != nil {
+			index.Close(false)
+			return fmt.Errorf("save vector index error: %w", err)
+		}
+		index.Close(false)
+	}
+
+	return nil
 }

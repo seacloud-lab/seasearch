@@ -17,6 +17,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"strconv"
 	"time"
 
@@ -33,7 +34,7 @@ import (
 // BuildBlugeDocumentFromJSON returns the bluge document for the json document. It also updates the mapping for the fields if not found.
 // If no mappings are found, it creates te mapping for all the encountered fields. If mapping for some fields is found but not for others
 // then it creates the mapping for the missing fields.
-func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]interface{}) (*bluge.Document, error) {
+func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]interface{}) (*bluge.Document, map[string][]float32, error) {
 	// Pick the index mapping from the cache if it already exists
 	mappings := s.root.GetMappings()
 
@@ -43,6 +44,10 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 
 	// Create a new bluge document
 	bdoc := bluge.NewDocument(docID)
+
+	// vector map field -> vector
+	vecMap := make(map[string][]float32)
+
 	// Iterate through each field and add it to the bluge document
 	for key, value := range doc {
 		if value == nil || key == meta.TimeFieldName || key == meta.SourceFieldName {
@@ -53,17 +58,43 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 		if !ok || !prop.Index {
 			continue // not index, skip
 		}
+		if prop.Type == "vector" {
+			vector := make([]float32, prop.Dims)
+			if array, ok := value.([]interface{}); ok {
+				if len(array) != prop.Dims {
+					log.Fatal().Msgf("invalid vector field: %s, require Dims %d, got Dims: %d", key, prop.Dims, len(array))
+				}
+				for i, val := range array {
+					f64, ok := val.(float64)
+					if !ok {
+						log.Fatal().Msgf("invalid vector field: %s, invalid data: %v", key, array)
+					}
+					vector[i] = float32(f64)
+				}
+			} else {
+				// we should have checked before
+				log.Fatal().Msgf("invalid vector field: %s, invalid value: %v", key, value)
+			}
+			vecMap[key] = vector
 
+			val, _ := json.Marshal(value)
+			field := bluge.NewStoredOnlyField(key, val)
+			if prop.Store {
+				field.StoreValue()
+			}
+			bdoc.AddField(field)
+			continue
+		}
 		switch v := value.(type) {
 		case []interface{}:
 			for _, v := range v {
 				if err := s.buildField(mappings, bdoc, key, v); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		default:
 			if err := s.buildField(mappings, bdoc, key, v); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
@@ -80,7 +111,7 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 		case int64:
 			timestamp = time.Unix(0, value.(int64))
 		default:
-			return nil, fmt.Errorf("invalid timestamp data type")
+			return nil, nil, fmt.Errorf("invalid timestamp data type")
 		}
 
 	}
@@ -104,7 +135,7 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 	// Upate metadata
 	s.SetTimestamp(timestamp.UnixNano())
 
-	return bdoc, nil
+	return bdoc, vecMap, nil
 }
 
 func (s *IndexShard) buildField(mappings *meta.Mappings, bdoc *bluge.Document, key string, value interface{}) error {
@@ -192,6 +223,24 @@ func (s *IndexShard) CheckDocumentOperation(docID string, doc map[string]interfa
 		prop, ok := mappings.GetProperty(key)
 		if !ok || !prop.Index {
 			continue // not index, skip
+		}
+		// check for vector field
+		if prop.Type == "vector" {
+			if vc, ok := value.([]interface{}); ok {
+				if len(vc) != prop.Dims {
+					return nil, fmt.Errorf("vector dims should be %d, but got %d", prop.Dims, len(vc))
+				}
+				for i, v := range vc {
+					num, err := zutils.ToFloat64(v)
+					if err != nil {
+						return nil, fmt.Errorf("invliad vector feild %s: %w", key, err)
+					}
+					sub := flatDoc[key].([]interface{})
+					sub[i] = num
+					flatDoc[key] = sub
+				}
+			}
+			continue
 		}
 
 		switch v := value.(type) {

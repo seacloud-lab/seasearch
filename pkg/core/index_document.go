@@ -75,6 +75,9 @@ func updateMetadataProcess() {
 }
 
 func CloseAsyncMetaDataUpdate() {
+	if config.Global.EnableWal {
+		return
+	}
 	metaDataUpdateCloser.SignalAndWait()
 }
 

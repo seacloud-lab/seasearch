@@ -21,7 +21,8 @@ import (
 	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/zincsearch/zincsearch/pkg/auth"
-	"github.com/zincsearch/zincsearch/pkg/bluge/directory/cache"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/wal"
 	"path"
@@ -78,12 +79,12 @@ func main() {
 	cluster.Init()
 	// init assign watch
 	core.InitIndexList()
+	// init vector index
+	core.InitVecIndexManager()
 	// init auth wath
 	auth.Init()
 	// init async metadata update
 	core.InitAsyncMetaDataUpdate()
-	// lru cache
-	cache.Init()
 	// Initialize WAL
 	if config.Global.EnableWal {
 		wal.Init()
@@ -121,6 +122,8 @@ func main() {
 		core.CloseAsyncMetaDataUpdate()
 		// close index list update
 		core.CloseIndexList()
+		// close vector index
+		core.CloseVecIndexManager()
 		// close auth
 		auth.Close()
 		// close cluster
@@ -129,7 +132,7 @@ func main() {
 		err = metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
 		// cache close
-		cache.Close()
+		_ = lru_cache.Instance.Close()
 		log.Info().Msgf("LruCache closed")
 		// close wal
 		if config.Global.EnableWal {

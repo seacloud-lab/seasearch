@@ -59,6 +59,7 @@ func LoadZincIndexFromMetadata(version string, readIndex *meta.Index) error {
 	index.ref.Settings = readIndex.Settings
 	index.ref.Mappings = readIndex.Mappings
 	index.ref.Stats = readIndex.Stats
+	index.ref.VecIndexes = readIndex.VecIndexes
 
 	// upgrade from old version
 	if readIndex.Version != "" {
@@ -156,6 +157,7 @@ func GetZincIndexesFromMetadata() ([]*Index, error) {
 		index.ref.Settings = readIndex.Settings
 		index.ref.Mappings = readIndex.Mappings
 		index.ref.Stats = readIndex.Stats
+		index.ref.VecIndexes = readIndex.VecIndexes
 
 		// init shards
 		index.ref.ShardNum = readIndex.ShardNum
@@ -192,6 +194,7 @@ func GetZincIndexesFromMetadata() ([]*Index, error) {
 				}
 			}
 		}
+
 		result[i] = index
 	}
 

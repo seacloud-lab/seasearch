@@ -1,7 +1,8 @@
-package cache
+package lru_cache
 
 import (
 	"bytes"
+	"github.com/blugelabs/bluge/index"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path"
@@ -12,30 +13,35 @@ import (
 func TestLru(t *testing.T) {
 	temp := t.TempDir()
 	defer os.Remove(temp)
-	m := CacheManager{
-		caches:   make(map[string]*cacheFile),
+	m := LruCache{
+		caches:   make(map[string]*CacheFile),
+		readyMap: make(map[string]chan struct{}),
 		maxSize:  1000,
 		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
 	}
 
 	// this will be removed, it's the first access file
-	cache1 := &cacheFile{
+	cache1 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t1.seg"),
 	}
 	// this will be remained, cause refCount
-	cache2 := &cacheFile{
+	cache2 := &CacheFile{
 		refCount: 1,
 		path:     path.Join(temp, "t2.seg"),
 	}
 
 	// this will be removed
-	cache3 := &cacheFile{
+	cache3 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t3.seg"),
 	}
 	// this will be remained, it's under 70% max
-	cache4 := &cacheFile{
+	cache4 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t4.seg"),
 	}
@@ -45,7 +51,7 @@ func TestLru(t *testing.T) {
 	m.caches[cache3.path] = cache3
 	m.caches[cache4.path] = cache4
 
-	var slice = []*cacheFile{cache1, cache2, cache3, cache4}
+	var slice = []*CacheFile{cache1, cache2, cache3, cache4}
 
 	for _, c := range slice {
 		fi, _ := os.OpenFile(c.path, os.O_CREATE|os.O_RDWR, 0777)
@@ -77,10 +83,14 @@ func TestLru(t *testing.T) {
 func TestCacheFile(t *testing.T) {
 	temp := t.TempDir()
 	defer os.Remove(temp)
-	Manager = &CacheManager{
-		caches:   make(map[string]*cacheFile),
+	Manager := &LruCache{
+		caches:   make(map[string]*CacheFile),
 		maxSize:  1000,
 		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
 	}
 	writer, err := Manager.OpenWriter(path.Join(temp, "t1.seg"))
 	assert.Nil(t, err)
@@ -95,7 +105,9 @@ func TestCacheFile(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, uint(0), cf.refCount)
 
-	data, closer, err := Manager.Load(path.Join(temp, "t1.seg"))
+	cf, exists := Manager.GetCacheFile(path.Join(temp, "t1.seg"))
+	assert.True(t, exists)
+	data, closer, err := cf.LoadReadOnlyData()
 	assert.Nil(t, err)
 	assert.Equal(t, uint(1), cf.refCount)
 

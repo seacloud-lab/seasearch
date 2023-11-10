@@ -15,7 +15,9 @@
 
 package zutils
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func GetStringFromMap(m interface{}, key string) (string, error) {
 	v, err := GetAnyFromMap(m, key)

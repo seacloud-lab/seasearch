@@ -1,15 +1,15 @@
-package cache
+package lru_cache
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"github.com/blevesearch/mmap-go"
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"golang.org/x/sys/unix"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"io"
 	"io/fs"
 	"os"
@@ -22,70 +22,61 @@ import (
 )
 
 const pidFilename = "bluge.pid"
-const tempExt = ".temp"
+const TempExt = ".temp"
 
-var (
-	ErrFileNotCached = errors.New("file is not cached")
-	Manager          *CacheManager
-)
-
-type CacheManager struct {
-	caches   map[string]*cacheFile
+type LruCache struct {
+	caches   map[string]*CacheFile
 	readyMap map[string]chan struct{}
-	rootPath string
 	maxSize  int64
 	lock     sync.RWMutex
-	closer   context.Context
-	close    context.CancelFunc
-	wg       sync.WaitGroup
+	closer   *z.Closer
+	// check cache file Ext name
+	fileExt extCheck
+	// check temp file Ext name
+	tempExt  string
+	rootPath string
 }
 
-type cacheFile struct {
-	path     string
-	refCount uint
-}
+type extCheck func(ext string) bool
 
-type closerFunc func() error
+// Instance for bluge directory to avoid multiple cache instances
+var Instance = GetCache(config.Global.DataPath, func(ext string) bool {
+	return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+}, TempExt)
 
-func (c closerFunc) Close() error {
-	return c()
-}
-
-func Init() {
-	if config.Global.StorageType != "oss" && config.Global.StorageType != "s3" {
-		return
-	}
-	ctx, closer := context.WithCancel(context.Background())
-	Manager = &CacheManager{
-		caches:   make(map[string]*cacheFile),
+func GetCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
+	cacheManager := &LruCache{
+		caches:   make(map[string]*CacheFile),
 		maxSize:  config.Global.ObjCache.MaxCacheSize,
-		rootPath: config.Global.DataPath,
-		closer:   ctx,
-		close:    closer,
+		closer:   z.NewCloser(1),
 		readyMap: make(map[string]chan struct{}),
+		rootPath: rootPath,
+		fileExt:  fileExt,
+		tempExt:  tempExt,
 	}
-	err := Manager.InitCache()
+	err := cacheManager.init()
 	if err != nil {
 		panic(fmt.Sprintf("init cache error: %v", err))
 	}
 
-	go Manager.cleanup()
+	go cacheManager.cleanup()
+	return cacheManager
 }
 
-func Close() {
-	if config.Global.StorageType != "oss" && config.Global.StorageType != "s3" {
-		return
-	}
-	if Manager == nil {
-		return
-	}
-
-	Manager.close()
-	Manager.wg.Wait()
+func (c *LruCache) Close() error {
+	c.closer.SignalAndWait()
+	return nil
 }
 
-func (c *CacheManager) InitCache() error {
-	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
+func (c *LruCache) init() error {
+	_, err := os.Stat(c.rootPath)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(c.rootPath, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+	err = filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -96,13 +87,13 @@ func (c *CacheManager) InitCache() error {
 
 		ext := path.Ext(info.Name())
 		// remove temp files
-		if ext == tempExt {
+		if ext == c.tempExt {
 			return os.Remove(p)
 		}
-		if ext != index.ItemKindSegment && ext != index.ItemKindSnapshot {
+		if !c.fileExt(ext) {
 			return err
 		}
-		c.caches[p] = &cacheFile{
+		c.caches[p] = &CacheFile{
 			path:     p,
 			refCount: 0,
 		}
@@ -112,9 +103,8 @@ func (c *CacheManager) InitCache() error {
 	return err
 }
 
-func (c *CacheManager) cleanup() {
-	c.wg.Add(1)
-	defer c.wg.Done()
+func (c *LruCache) cleanup() {
+	defer c.closer.Done()
 
 	tick := time.NewTicker(time.Minute * 5)
 	for {
@@ -124,7 +114,7 @@ func (c *CacheManager) cleanup() {
 			if err != nil {
 				log.Error().Err(err).Msgf("cleanup error: %s", err)
 			}
-		case <-c.closer.Done():
+		case <-c.closer.HasBeenClosed():
 			return
 		}
 	}
@@ -136,7 +126,7 @@ type tempFile struct {
 	size  int64
 }
 
-func (c *CacheManager) doCleanup() error {
+func (c *LruCache) doCleanup() error {
 	var tempFiles []tempFile
 	var curSize int64 = 0
 	var targetSize = float64(c.maxSize) * 0.7
@@ -151,7 +141,7 @@ func (c *CacheManager) doCleanup() error {
 		}
 
 		ext := path.Ext(info.Name())
-		if ext != index.ItemKindSegment && ext != index.ItemKindSnapshot {
+		if !c.fileExt(ext) {
 			return err
 		}
 		fi, err1 := os.Stat(p)
@@ -164,7 +154,7 @@ func (c *CacheManager) doCleanup() error {
 		statT := fi.Sys().(*syscall.Stat_t)
 
 		tempFiles = append(tempFiles, tempFile{
-			aTime: getAtime(statT),
+			aTime: GetAtime(statT),
 			size:  fi.Size(),
 			path:  p,
 		})
@@ -213,17 +203,119 @@ func (c *CacheManager) doCleanup() error {
 	return nil
 }
 
-func (c *CacheManager) Load(filepath string) (*segment.Data, io.Closer, error) {
-	c.lock.Lock()
-	if f, ok := c.caches[filepath]; ok {
-		f.refCount++
+// CacheFile
+// Prevent duplicate downloads from obj_store
+func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, error) {
+	for {
+		c.lock.Lock()
+		// the file has already in local and cached.
+		if cf, ok := c.caches[filePath]; ok {
+			cf.refCount++
+			c.lock.Unlock()
+			return cf, nil
+		}
+		if ready, ok := c.readyMap[filePath]; ok {
+			c.lock.Unlock()
+			<-ready
+			continue
+		}
+
+		ready := make(chan struct{})
+		c.readyMap[filePath] = ready
 		c.lock.Unlock()
-		return f.loadReadOnlyData()
+
+		tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", c.tempExt))
+		cleanup := func() {
+			c.lock.Lock()
+			close(ready)
+			delete(c.readyMap, filePath)
+			c.lock.Unlock()
+		}
+		if err != nil {
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
+			cleanup()
+			return nil, err
+		}
+		_, err = io.Copy(tempfile, reader)
+		if err != nil {
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
+			cleanup()
+			return nil, err
+		}
+		err = os.Rename(tempfile.Name(), filePath)
+		if err != nil {
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
+			cleanup()
+			return nil, err
+		}
+		err = tempfile.Sync()
+		if err != nil {
+			_ = tempfile.Close()
+			_ = c.Remove(filePath)
+			cleanup()
+			return nil, err
+		}
+		err = tempfile.Close()
+		if err != nil {
+			_ = tempfile.Close()
+			_ = c.Remove(filePath)
+			cleanup()
+			return nil, err
+		}
+
+		c.lock.Lock()
+		close(ready) // wakes all goroutines waiting on the channel
+		c.caches[filePath] = &CacheFile{
+			path:     filePath,
+			ref:      c,
+			refCount: 1,
+		}
+		delete(c.readyMap, filePath)
+		c.lock.Unlock()
+
+		return c.caches[filePath], nil
 	}
-	return nil, nil, ErrFileNotCached
 }
 
-func (c *CacheManager) Setup(path string, readOnly bool) error {
+func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFile, error) {
+	err := os.Rename(inputFile, filePath)
+	if err != nil {
+		return nil, err
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if cf, ok := c.caches[filePath]; ok {
+		return cf, nil
+	}
+	c.caches[filePath] = &CacheFile{
+		ref:      c,
+		path:     filePath,
+		refCount: 1,
+	}
+	return c.caches[filePath], nil
+}
+
+func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	f, ok := c.caches[filePath]
+	if !ok {
+		return nil, false
+	}
+	f.refCount++
+
+	_, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		delete(c.caches, filePath)
+		return nil, false
+	}
+	return f, true
+}
+
+func (c *LruCache) Setup(path string, readOnly bool) error {
 	dirExists, err := dirExists(path)
 	if err != nil {
 		return fmt.Errorf("error checking if directory exists '%s': %w", path, err)
@@ -239,7 +331,6 @@ func (c *CacheManager) Setup(path string, readOnly bool) error {
 	}
 	return nil
 }
-
 func dirExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -251,82 +342,7 @@ func dirExists(path string) (bool, error) {
 	return true, err
 }
 
-// CacheFile
-// Prevent duplicate downloads from obj_store
-func (c *CacheManager) CacheFile(filePath string, reader io.Reader) error {
-	for {
-		c.lock.Lock()
-		// the file has already in local and traced.
-		if _, ok := c.caches[filePath]; ok {
-			c.lock.Unlock()
-			return nil
-		}
-		if ready, ok := c.readyMap[filePath]; ok {
-			c.lock.Unlock()
-			<-ready
-			continue
-		}
-
-		ready := make(chan struct{})
-		c.readyMap[filePath] = ready
-		c.lock.Unlock()
-
-		tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", tempExt))
-		cleanup := func() {
-			c.lock.Lock()
-			close(ready)
-			delete(c.readyMap, filePath)
-			c.lock.Unlock()
-		}
-		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
-			cleanup()
-			return err
-		}
-		_, err = io.Copy(tempfile, reader)
-		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
-			cleanup()
-			return err
-		}
-		err = os.Rename(tempfile.Name(), filePath)
-		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
-			cleanup()
-			return err
-		}
-		err = tempfile.Sync()
-		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(filePath)
-			cleanup()
-			return err
-		}
-		err = tempfile.Close()
-		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(filePath)
-			cleanup()
-			return err
-		}
-
-		c.lock.Lock()
-		close(ready) // wakes all goroutines waiting on the channel
-		c.caches[filePath] = &cacheFile{
-			path:     filePath,
-			refCount: 0,
-		}
-		delete(c.readyMap, filePath)
-		c.lock.Unlock()
-
-		return nil
-	}
-}
-
-func (c *CacheManager) Remove(filepath string) error {
+func (c *LruCache) Remove(filepath string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -334,47 +350,23 @@ func (c *CacheManager) Remove(filepath string) error {
 	return os.Remove(filepath)
 }
 
-type tempWriteFile struct {
-	f        *os.File
-	cf       *cacheFile
-	tempPath string
-	realPath string
-}
-
-func (t *tempWriteFile) Write(p []byte) (n int, err error) {
-	return t.f.Write(p)
-}
-
-func (t *tempWriteFile) Close() error {
-	t.cf.Close()
-	err := os.Rename(t.tempPath, t.realPath)
-	if err != nil {
-		return err
-	}
-	err = t.f.Sync()
-	if err != nil {
-		return err
-	}
-	return t.f.Close()
-}
-
-func (c *CacheManager) OpenWriter(filePath string) (io.WriteCloser, error) {
+func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	c.lock.Lock()
-	var cf *cacheFile
+	var cf *CacheFile
 	var ok bool
 	if cf, ok = c.caches[filePath]; ok {
 		cf.refCount++
 		c.lock.Unlock()
 	} else {
-		cf = &cacheFile{
+		cf = &CacheFile{
 			path:     filePath,
 			refCount: 1,
+			ref:      c,
 		}
 		c.caches[filePath] = cf
 		c.lock.Unlock()
 	}
-	tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", tempExt))
-
+	tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", c.tempExt))
 	if err != nil {
 		_ = tempfile.Close()
 		return nil, err
@@ -388,7 +380,7 @@ func (c *CacheManager) OpenWriter(filePath string) (io.WriteCloser, error) {
 	return wc, nil
 }
 
-func (c *CacheManager) Sync(path string) error {
+func (c *LruCache) Sync(path string) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("error opening directory for sync: %w", err)
@@ -405,7 +397,7 @@ func (c *CacheManager) Sync(path string) error {
 	return nil
 }
 
-func (c *CacheManager) Lock(path string) (pid *os.File, err error) {
+func (c *LruCache) Lock(path string) (pid *os.File, err error) {
 	pidPath := filepath.Join(path, pidFilename)
 	pid, err = os.OpenFile(pidPath, os.O_CREATE|os.O_RDWR, 0777)
 	err = unix.Flock(int(pid.Fd()), unix.LOCK_EX|unix.LOCK_NB)
@@ -431,7 +423,7 @@ func (c *CacheManager) Lock(path string) (pid *os.File, err error) {
 	return
 }
 
-func (c *CacheManager) Unlock(path string) error {
+func (c *LruCache) Unlock(path string) error {
 	pidPath := filepath.Join(path, pidFilename)
 	err := os.RemoveAll(pidPath)
 	if err != nil {
@@ -440,7 +432,75 @@ func (c *CacheManager) Unlock(path string) error {
 	return nil
 }
 
-func (c *cacheFile) loadReadOnlyData() (*segment.Data, io.Closer, error) {
+type tempWriteFile struct {
+	f        *os.File
+	cf       *CacheFile
+	tempPath string
+	realPath string
+}
+
+func (t *tempWriteFile) Write(p []byte) (n int, err error) {
+	return t.f.Write(p)
+}
+
+func (t *tempWriteFile) Close() error {
+	t.cf.Close()
+	err := os.Rename(t.tempPath, t.realPath)
+	if err != nil {
+		return err
+	}
+	err = t.f.Sync()
+	if err != nil {
+		return err
+	}
+	return t.f.Close()
+}
+
+type CacheFile struct {
+	ref      *LruCache
+	path     string
+	refCount uint
+}
+
+func (c *CacheFile) GetPath() string {
+	return c.path
+}
+
+func (c *CacheFile) Close() error {
+	if c == nil {
+		return nil
+	}
+	if c.ref == nil {
+		return nil
+	}
+	c.ref.lock.Lock()
+	c.refCount--
+	c.ref.lock.Unlock()
+	return nil
+}
+
+type closerFunc func() error
+
+func (c closerFunc) Close() error {
+	return c()
+}
+
+func (c *CacheFile) getMmCloser(mm mmap.MMap, f *os.File) closerFunc {
+	cf := func() error {
+		err := mm.Unmap()
+		// try to close file even if unmap failed
+		err2 := f.Close()
+		if err == nil {
+			// try to return first error
+			err = err2
+		}
+		_ = c.Close()
+		return err
+	}
+	return cf
+}
+
+func (c *CacheFile) LoadReadOnlyData() (*segment.Data, io.Closer, error) {
 	f, err := os.OpenFile(c.path, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, nil, err
@@ -458,26 +518,5 @@ func (c *cacheFile) loadReadOnlyData() (*segment.Data, io.Closer, error) {
 		return nil, nil, err
 	}
 
-	return segment.NewDataBytes(mm), c.getCloser(mm, f), nil
-}
-
-func (c *cacheFile) getCloser(mm mmap.MMap, f *os.File) closerFunc {
-	cf := func() error {
-		err := mm.Unmap()
-		// try to close file even if unmap failed
-		err2 := f.Close()
-		if err == nil {
-			// try to return first error
-			err = err2
-		}
-		c.Close()
-		return err
-	}
-	return cf
-}
-
-func (c *cacheFile) Close() {
-	Manager.lock.Lock()
-	c.refCount--
-	Manager.lock.Unlock()
+	return segment.NewDataBytes(mm), c.getMmCloser(mm, f), nil
 }

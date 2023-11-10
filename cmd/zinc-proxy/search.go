@@ -98,7 +98,7 @@ func SearchDSL(c *gin.Context) {
 			mutex.Lock()
 			result.Hits.Total.Value += res.Hits.Total.Value
 			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
-			result.Hits.Hits = append(res.Hits.Hits, res.Hits.Hits...)
+			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
 			result.Took = res.Took
 			result.Shards.Total += res.Shards.Total
 			result.Shards.Skipped += res.Shards.Skipped
