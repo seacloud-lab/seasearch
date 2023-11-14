@@ -17,7 +17,7 @@ ARG COMMIT_HASH
 ARG BUILD_DATE
 
 # build faiss
-RUN sed -i 's#http://deb.debian.org/#http://mirrors.tuna.tsinghua.edu.cn/#g' /etc/apt/urces.list.d/debian.sources   \
+RUN sed -i 's#http://deb.debian.org/#http://mirrors.tuna.tsinghua.edu.cn/#g' /etc/apt/sources.list.d/debian.sources   \
     && wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
     | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null \
     && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
