@@ -172,17 +172,19 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 		}
 		// check settings
 		if newProp.Type == "vector" {
-			if newProp.Dims < 0 {
+			if newProp.Dims <= 0 {
 				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should greater than 0", field))
 			}
-			if newProp.M < 0 {
-				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s m should greater than 0", field))
-			}
-			if newProp.NBits < 0 {
-				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s NBits should greater than 0", field))
-			}
-			if newProp.Dims%newProp.M != 0 {
-				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
+			if newProp.VecIndexType == vector.IvfPQ {
+				if newProp.M <= 0 {
+					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s m should greater than 0", field))
+				}
+				if newProp.NBits <= 0 {
+					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s NBits should greater than 0", field))
+				}
+				if newProp.Dims%newProp.M != 0 {
+					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
+				}
 			}
 			if newProp.VecIndexType != vector.Flat && newProp.VecIndexType != vector.IvfPQ {
 				return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s vec_index_type parse err invalid vec type", field))
