@@ -2,14 +2,6 @@ package lru_cache
 
 import (
 	"fmt"
-	"github.com/blevesearch/mmap-go"
-	"github.com/blugelabs/bluge/index"
-	segment "github.com/blugelabs/bluge_segment_api"
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
-	"golang.org/x/sys/unix"
-
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"io"
 	"io/fs"
 	"os"
@@ -19,6 +11,15 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/blevesearch/mmap-go"
+	"github.com/blugelabs/bluge/index"
+	segment "github.com/blugelabs/bluge_segment_api"
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sys/unix"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 const pidFilename = "bluge.pid"

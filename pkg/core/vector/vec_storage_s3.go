@@ -2,14 +2,14 @@ package vector
 
 import (
 	"context"
+	"io"
+	"os"
+	"path"
+
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
 )
 
 type s3Storage struct {
@@ -63,22 +63,6 @@ func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
 	return cf.GetPath(), cf, nil
 }
 
-func checkPath(localPath string) error {
-	localDir, _ := filepath.Split(localPath)
-	_, err := os.Stat(localDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err = os.MkdirAll(localDir, os.ModePerm)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	f, err := os.OpenFile(inputFile, os.O_RDONLY, os.ModePerm)
 	if err != nil {
@@ -99,6 +83,10 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 
 	// cache file
 	localPath := path.Join(s.cachePath, name)
+	err = checkPath(localPath)
+	if err != nil {
+		return err
+	}
 	_, err = s.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }

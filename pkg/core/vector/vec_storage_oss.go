@@ -1,12 +1,13 @@
 package vector
 
 import (
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"io"
 	"os"
 	"path"
+
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
 
 type OssStorage struct {
@@ -73,6 +74,10 @@ func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
 		return err
 	}
 	localPath := path.Join(o.cachePath, fileName)
+	err = checkPath(localPath)
+	if err != nil {
+		return err
+	}
 	_, err = o.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }
