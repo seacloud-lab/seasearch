@@ -40,10 +40,6 @@ func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
 	if cf, ok := s.cache.GetCacheFile(localPath); ok {
 		return cf.GetPath(), cf, nil
 	}
-	err := s.cache.Setup(path.Join(s.cachePath), false)
-	if err != nil {
-		return "", nil, err
-	}
 	key := path.Join(s.prefix, fileName)
 	reader, err := s.cli.GetObject(context.Background(), s.bucketName, key, minio.GetObjectOptions{})
 	if err != nil {
@@ -52,10 +48,6 @@ func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
 	defer func() {
 		_ = reader.Close()
 	}()
-	err = checkPath(localPath)
-	if err != nil {
-		return "", nil, err
-	}
 	cf, err := s.cache.CacheFile(localPath, reader)
 	if err != nil {
 		return "", nil, err
@@ -83,10 +75,6 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 
 	// cache file
 	localPath := path.Join(s.cachePath, name)
-	err = checkPath(localPath)
-	if err != nil {
-		return err
-	}
 	_, err = s.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }

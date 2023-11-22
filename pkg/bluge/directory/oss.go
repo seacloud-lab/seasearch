@@ -3,6 +3,13 @@ package directory
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"sync"
+
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
@@ -10,13 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
-
-	"io"
-	"os"
-	"path"
-	"path/filepath"
-	"strconv"
-	"sync"
 )
 
 type OssBackend struct {
@@ -126,7 +126,7 @@ func (b *OssBackend) remove(key string) error {
 }
 
 func (b *OssBackend) Setup(readOnly bool) error {
-	return b.cache.Setup(b.path, readOnly)
+	return nil
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {

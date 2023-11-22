@@ -206,7 +206,13 @@ func (c *LruCache) doCleanup() error {
 
 // CacheFile
 // Prevent duplicate downloads from obj_store
+// the filePath is the absolute path of cache file.
 func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, error) {
+	dir, _ := filepath.Split(filePath)
+	err := c.setup(dir, false)
+	if err != nil {
+		return nil, err
+	}
 	for {
 		c.lock.Lock()
 		// the file has already in local and cached.
@@ -281,8 +287,15 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 	}
 }
 
+// UpdateCacheFile
+// the filePath is the absolute path of cache file.
 func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFile, error) {
-	err := os.Rename(inputFile, filePath)
+	dir, _ := filepath.Split(filePath)
+	err := c.setup(dir, false)
+	if err != nil {
+		return nil, err
+	}
+	err = os.Rename(inputFile, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -299,6 +312,8 @@ func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFil
 	return c.caches[filePath], nil
 }
 
+// GetCacheFile
+// the filePath is the absolute path of cache file.
 func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -316,7 +331,7 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 	return f, true
 }
 
-func (c *LruCache) Setup(path string, readOnly bool) error {
+func (c *LruCache) setup(path string, readOnly bool) error {
 	dirExists, err := dirExists(path)
 	if err != nil {
 		return fmt.Errorf("error checking if directory exists '%s': %w", path, err)
@@ -332,6 +347,7 @@ func (c *LruCache) Setup(path string, readOnly bool) error {
 	}
 	return nil
 }
+
 func dirExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -343,6 +359,8 @@ func dirExists(path string) (bool, error) {
 	return true, err
 }
 
+// Remove
+// the filePath is the absolute path of cache file.
 func (c *LruCache) Remove(filepath string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -352,6 +370,11 @@ func (c *LruCache) Remove(filepath string) error {
 }
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
+	dir, _ := filepath.Split(filePath)
+	err := c.setup(dir, false)
+	if err != nil {
+		return nil, err
+	}
 	c.lock.Lock()
 	var cf *CacheFile
 	var ok bool

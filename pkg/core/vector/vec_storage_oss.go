@@ -18,10 +18,6 @@ type OssStorage struct {
 	cachePath string
 }
 
-func (o *OssStorage) GetCacheRoot() string {
-	return o.cachePath
-}
-
 func (o *OssStorage) Close() error {
 	return o.cache.Close()
 }
@@ -37,10 +33,6 @@ func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
 	if cf, ok := o.cache.GetCacheFile(localPath); ok {
 		return cf.GetPath(), cf, nil
 	}
-	err := o.cache.Setup(path.Join(o.cachePath, fileName), false)
-	if err != nil {
-		return "", nil, err
-	}
 	key := path.Join(o.prefix, fileName)
 	reader, err := o.bucket.GetObject(key)
 	if err != nil {
@@ -49,10 +41,6 @@ func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
 	defer func() {
 		_ = reader.Close()
 	}()
-	err = checkPath(localPath)
-	if err != nil {
-		return "", nil, err
-	}
 	cf, err := o.cache.CacheFile(localPath, reader)
 	if err != nil {
 		return "", nil, err
@@ -74,10 +62,6 @@ func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
 		return err
 	}
 	localPath := path.Join(o.cachePath, fileName)
-	err = checkPath(localPath)
-	if err != nil {
-		return err
-	}
 	_, err = o.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }

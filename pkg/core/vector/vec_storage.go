@@ -2,12 +2,16 @@ package vector
 
 import (
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"io"
 	"os"
 	"path"
+	"path/filepath"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
+// ObjStore
+// fileName format: $zincIndexName/$vectorIndexName/index.index
 type ObjStore interface {
 	// ExistsFile check the file exists
 	ExistsFile(fileName string) (bool, error)
@@ -41,10 +45,6 @@ func createDiskStore() (ObjStore, error) {
 	return &diskStore{
 		rootPath: path.Join(config.Global.DataPath, VecPrefix),
 	}, nil
-}
-
-func (d *diskStore) GetCacheRoot() string {
-	return d.rootPath
 }
 
 func (d *diskStore) Close() error {
@@ -82,6 +82,22 @@ func (d *diskStore) SaveFile(inputFile string, fileName string) error {
 		return err
 	}
 	return os.Rename(inputFile, localPath)
+}
+
+func checkPath(localPath string) error {
+	localDir, _ := filepath.Split(localPath)
+	_, err := os.Stat(localDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(localDir, os.ModePerm)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *diskStore) Remove(name string) error {

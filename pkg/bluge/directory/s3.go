@@ -4,6 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"sync"
+
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
@@ -12,13 +19,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
-
-	"io"
-	"os"
-	"path"
-	"path/filepath"
-	"strconv"
-	"sync"
 )
 
 func GetS3Config(rootPath string, indexName string, timeRange ...int64) bluge.Config {
@@ -143,7 +143,7 @@ func (b *S3Backend) remove(key string) error {
 }
 
 func (b *S3Backend) Setup(readOnly bool) error {
-	return b.cache.Setup(b.path, readOnly)
+	return nil
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {

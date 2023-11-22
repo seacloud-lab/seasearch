@@ -1,10 +1,5 @@
 package vector
 
-import (
-	"os"
-	"path/filepath"
-)
-
 const IndexExt = ".index"
 const TempExt = ".temp"
 
@@ -32,20 +27,4 @@ type VecAction struct {
 	// zinc index name
 	Index string
 	Field string
-}
-
-func checkPath(localPath string) error {
-	localDir, _ := filepath.Split(localPath)
-	_, err := os.Stat(localDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err = os.MkdirAll(localDir, os.ModePerm)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-	return nil
 }
