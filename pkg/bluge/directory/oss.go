@@ -126,7 +126,7 @@ func (b *OssBackend) remove(key string) error {
 }
 
 func (b *OssBackend) Setup(readOnly bool) error {
-	return nil
+	return b.cache.Setup(b.path, readOnly)
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {

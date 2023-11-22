@@ -143,7 +143,7 @@ func (b *S3Backend) remove(key string) error {
 }
 
 func (b *S3Backend) Setup(readOnly bool) error {
-	return nil
+	return b.cache.Setup(b.path, readOnly)
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {
