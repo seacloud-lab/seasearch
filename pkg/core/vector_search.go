@@ -8,15 +8,18 @@ import (
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
+	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 )
 
 type VectorQuery struct {
-	ReturnFields []string  `json:"return_fields"`
-	QueryField   string    `json:"query_field"`
-	Vector       []float32 `json:"vector"`
-	K            int64     `json:"k"`
+	ReturnFields interface{} `json:"return_fields"`
+	QueryField   string      `json:"query_field"`
+	Vector       []float32   `json:"vector"`
+	K            int64       `json:"k"`
 	// Nprobe only used for ivf_pq index
-	Nprobe int `json:"nprobe"`
+	Nprobe int         `json:"nprobe"`
+	Source interface{} `json:"_source"`
 }
 
 func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*meta.SearchResponse, error) {
@@ -69,19 +72,18 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 		return nil, err
 	}
 
-	fields := make([]*meta.Field, 0)
-	query := &meta.ZincQuery{
-		Fields: []*meta.Field{},
-		Source: &meta.Source{
-			Enable: true,
-		},
+	query := &meta.ZincQuery{}
+	query.Source, err = source.Request(q.Source)
+	if err != nil {
+		return nil, err
 	}
-	for _, f := range q.ReturnFields {
-		fields = append(fields, &meta.Field{
-			Field: f,
-		})
+	if q.ReturnFields != nil {
+		if v, ok := q.ReturnFields.([]interface{}); ok {
+			if query.Fields, err = fields.Request(v); err != nil {
+				return nil, err
+			}
+		}
 	}
-	query.Fields = fields
 	resp, err := searchV2(zincIndex.GetAllShardNum(), int64(len(readers)), dmi, query, mappings)
 	if err != nil {
 		return nil, err
