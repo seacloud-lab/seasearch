@@ -1,11 +1,9 @@
-# syntax=docker/dockerfile:experimental
-############################
-# STEP 1 build web dist
-############################
+# build Seasearch
 FROM node:18.16.0-slim as webBuilder
 WORKDIR /web
 COPY ./web /web/
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm install
 RUN npm run build
 
@@ -13,10 +11,34 @@ RUN npm run build
 # STEP 2 build executable binary
 ############################
 # FROM golang:alpine AS builder
-FROM public.ecr.aws/docker/library/golang:1.19 as builder
+FROM golang:latest as builder
 ARG VERSION
 ARG COMMIT_HASH
 ARG BUILD_DATE
+
+# build faiss
+RUN sed -i 's#http://deb.debian.org/#http://mirrors.tuna.tsinghua.edu.cn/#g' /etc/apt/sources.list.d/debian.sources   \
+    && wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+    | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null \
+    && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
+    && apt update \
+    && apt install -y gcc cmake \
+    && apt install -y intel-oneapi-mkl-devel \
+    && export MKL_PATH=/opt/intel/oneapi/mkl/latest/lib/intel64 \
+    && apt install -y swig\
+    && cd /tmp \
+    && git clone https://github.com/facebookresearch/faiss.git \
+    && cd faiss \
+    && cmake -B build -DFAISS_ENABLE_GPU=OFF \
+    -DFAISS_ENABLE_C_API=ON \
+    -DFAISS_ENABLE_PYTHON=OFF \
+    -DBLA_VENDOR=Intel10_64_dyn  \
+    -DBUILD_SHARED_LIBS=ON \
+    "-DMKL_LIBRARIES=-Wl,--start-group;${MKL_PATH}/libmkl_intel_lp64.a;${MKL_PATH}/libmkl_gnu_thread.a;${MKL_PATH}/libmkl_core.a;-Wl,--end-group" \
+    . \
+    && make -C build \
+    && make -C build install \
+    && cp /tmp/faiss/build/c_api/libfaiss_c.so /usr/lib
 
 RUN update-ca-certificates
 # RUN apk update && apk add --no-cache git
@@ -42,40 +64,15 @@ RUN adduser \
 RUN mkdir -p /var/lib/zincsearch /data && chown zincsearch:zincsearch /var/lib/zincsearch /data
 WORKDIR $GOPATH/src/github.com/zincsearch/zincsearch/
 COPY . .
+
 COPY --from=webBuilder /web/dist web/dist
 
 # Fetch dependencies.
 # Using go get.
 RUN go mod tidy
 
-ENV VERSION=$VERSION
-ENV COMMIT_HASH=$COMMIT_HASH
-ENV BUILD_DATE=$BUILD_DATE
+RUN go build -o SeaSearch cmd/zincsearch/main.go
 
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/zincsearch/zincsearch/pkg/meta.Version=${VERSION} -X github.com/zincsearch/zincsearch/pkg/meta.CommitHash=${COMMIT_HASH} -X github.com/zincsearch/zincsearch/pkg/meta.BuildDate=${BUILD_DATE}" -o zincsearch cmd/zincsearch/main.go
-############################
-# STEP 3 build a small image
-############################
-# FROM public.ecr.aws/lts/ubuntu:latest
-FROM scratch
-
-# Import the user and group files from the builder.
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
-
-# Copy the ssl certificates
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-
-# Copy our static executable.
-COPY --from=builder  /go/src/github.com/zincsearch/zincsearch/zincsearch /go/bin/zincsearch
-
-# Create directories that can be used to keep ZincSearch data persistent along with host source or named volumes
-COPY --from=builder --chown=zincsearch:zincsearch /var/lib/zincsearch /var/lib/zincsearch
-COPY --from=builder --chown=zincsearch:zincsearch /data /data
-
-# Use an unprivileged user.
-USER zincsearch:zincsearch
-# Port on which the service will be exposed.
 EXPOSE 4080
 # Run the zincsearch binary.
-ENTRYPOINT ["/go/bin/zincsearch"]
+ENTRYPOINT ["/go/src/github.com/zincsearch/zincsearch/SeaSearch"]
