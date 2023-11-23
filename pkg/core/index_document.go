@@ -16,13 +16,14 @@
 package core
 
 import (
+	"strings"
+	"time"
+
 	blugeindex "github.com/blugelabs/bluge/index"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"golang.org/x/sync/errgroup"
-	"strings"
-	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"

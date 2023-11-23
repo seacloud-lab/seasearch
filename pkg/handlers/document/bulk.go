@@ -178,15 +178,18 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					return bulkRes, err
 				}
 			} else {
+				// the 'doc' object is reused, we create a temp doc to prevent the 'doc' modified
+				var tempDoc map[string]interface{}
+				_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
 				if list, ok := indexDocMap[indexName]; ok {
 					indexDocMap[indexName] = append(list, core.DocOperation{
 						DocId:  docID,
-						Doc:    doc,
+						Doc:    tempDoc,
 						Update: update,
 					})
 				} else {
 					indexDocMap[indexName] = []core.DocOperation{{
-						Doc:    doc,
+						Doc:    tempDoc,
 						DocId:  docID,
 						Update: update,
 					}}

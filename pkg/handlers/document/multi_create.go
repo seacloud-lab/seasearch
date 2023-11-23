@@ -107,8 +107,11 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 				return count, err
 			}
 		} else {
+			// the 'doc' object is reused, we create a temp doc to prevent the 'doc' modified
+			var tempDoc map[string]interface{}
+			_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
 			ops = append(ops, core.DocOperation{
-				Doc:    doc,
+				Doc:    tempDoc,
 				DocId:  docID,
 				Update: update,
 			})

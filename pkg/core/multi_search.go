@@ -18,9 +18,13 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
@@ -41,6 +45,7 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	timeMin, timeMax := timerange.Query(query.Query)
 	isMatched := false
 	hasIndex := false
+	searchIndex := make([]*Index, 0)
 	for _, index := range ZINC_INDEX_LIST.List() {
 		// this index should not handle by this servers
 		if !cluster.AssignCheck(index.GetName()) {
@@ -58,20 +63,33 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 				continue
 			}
 		}
-
-		reader, err := index.GetReaders(timeMin, timeMax)
-		if err != nil {
-			return nil, err
-		}
-		readers = append(readers, reader...)
-		shardNum += index.GetShardNum()
-		if mappings == nil {
-			mappings = index.GetMappings()
-			analyzers = index.GetAnalyzers()
-		}
-
+		searchIndex = append(searchIndex, index)
 	}
-
+	mutex := sync.Mutex{}
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	for _, index := range searchIndex {
+		index := index
+		eg.Go(func() error {
+			reader, err := index.GetReaders(timeMin, timeMax)
+			if err != nil {
+				return err
+			}
+			mutex.Lock()
+			readers = append(readers, reader...)
+			shardNum += index.GetShardNum()
+			if mappings == nil {
+				mappings = index.GetMappings()
+				analyzers = index.GetAnalyzers()
+			}
+			mutex.Unlock()
+			return nil
+		})
+	}
+	err := eg.Wait()
+	if err != nil {
+		return nil, err
+	}
 	if len(readers) == 0 {
 		if !hasIndex {
 			return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
@@ -85,7 +103,7 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		}
 	}()
 
-	_, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}

@@ -20,6 +20,7 @@ import (
 	"os"
 
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -44,11 +45,28 @@ func DeleteIndex(name string) error {
 	ZINC_INDEX_LIST.Delete(name)
 
 	// 3. Physically delete the index
-	dataPath := config.Global.DataPath
-	err := os.RemoveAll(dataPath + "/" + index.GetName())
+	err := delIndex(index)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to delete index")
+		return err
 	}
 	// 4. Delete form metadata
 	return metadata.Index.Delete(name)
+}
+
+func delIndex(index *Index) error {
+	var err error
+	if index.ref.StorageType == "oss" {
+		err = directory.RemoveOssIndex(index.GetName())
+	} else if index.ref.StorageType == "s3" {
+		err = directory.RemoveS3Index(index.GetName())
+	}
+	if err != nil {
+		return err
+	}
+	dataPath := config.Global.DataPath
+	err = os.RemoveAll(dataPath + "/" + index.GetName())
+	if err != nil {
+		log.Error().Err(err).Msg("failed to delete index")
+	}
+	return err
 }

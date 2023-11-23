@@ -2,11 +2,12 @@ package core
 
 import (
 	"context"
+	"math"
+	"sort"
+
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"math"
-	"sort"
 )
 
 type VectorQuery struct {
@@ -26,6 +27,9 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 		}
 		return nil, err
 	}
+	defer func() {
+		vecIndex.Close(false)
+	}()
 
 	vecResult, err := vecIndex.Search(q.Vector, q.K, q.Nprobe)
 	if err != nil {

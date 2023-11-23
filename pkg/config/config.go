@@ -121,6 +121,8 @@ type shard struct {
 	Num int64 `env:"ZINC_SHARD_NUM,default=3"`
 	// MaxSize is the maximum size limit for one shard, or will create a new shard.
 	MaxSize uint64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
+	// LoadObjGoroutineNum concurrently load index from Obj storage
+	LoadObjGoroutineNum int `env:"ZINC_SHARD_LOAD_OBJS_GOROUTINE_NUM,default=1"`
 }
 
 type etcd struct {

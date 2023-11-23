@@ -20,13 +20,17 @@ import (
 )
 
 type OssBackend struct {
-	client *oss.Client
-	bucket *oss.Bucket
 	path   string
 	pid    *os.File
 	lock   sync.Mutex
 	prefix string
 	cache  *lru_cache.LruCache
+	ossClient
+}
+
+type ossClient struct {
+	client *oss.Client
+	bucket *oss.Bucket
 }
 
 func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
@@ -49,44 +53,89 @@ func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.C
 }
 
 func CreateOSSBackend(dataPath string, indexName string) (*OssBackend, error) {
-	accessKeyID := config.Global.Oss.AccessId
-	accessKeySecret := config.Global.Oss.AccessSecret
-	bucketName := config.Global.Oss.Bucket
-	endPoint := config.Global.Oss.Endpoint
-
-	o, err := newOSSBackend(endPoint, accessKeyID, accessKeySecret, bucketName)
+	cli, err := createOssClient()
 	if err != nil {
 		return nil, err
 	}
-
+	o := &OssBackend{}
 	o.cache = lru_cache.Instance
 	o.prefix = indexName
 	o.path = path.Join(dataPath, indexName)
-
+	o.ossClient = *cli
 	return o, nil
 }
 
-func newOSSBackend(endPoint, accessKeyID, accessKeySecret, bucketName string) (*OssBackend, error) {
+var createOssOnce = sync.Once{}
+var ossBackend *ossClient
 
+func createOssClient() (*ossClient, error) {
+	var err error
+	createOssOnce.Do(func() {
+		accessKeyID := config.Global.Oss.AccessId
+		accessKeySecret := config.Global.Oss.AccessSecret
+		bucketName := config.Global.Oss.Bucket
+		endPoint := config.Global.Oss.Endpoint
+		ossBackend, err = newOSSClient(endPoint, accessKeyID, accessKeySecret, bucketName)
+	})
+	return ossBackend, err
+}
+
+func newOSSClient(endPoint, accessKeyID, accessKeySecret, bucketName string) (*ossClient, error) {
 	client, err := oss.New(endPoint, accessKeyID, accessKeySecret)
 	if err != nil {
 		return nil, err
 	}
-
-	backend := new(OssBackend)
-	backend.client = client
-	backend.bucket, err = client.Bucket(bucketName)
+	cli := new(ossClient)
+	cli.client = client
+	cli.bucket, err = client.Bucket(bucketName)
 	if err != nil {
 		return nil, err
 	}
-	return backend, nil
+	return cli, nil
 }
 
-func (b *OssBackend) read(key string) (io.ReadCloser, error) {
+// RemoveOssIndex
+// used for delete all Index files
+func RemoveOssIndex(indexName string) error {
+	o, err := createOssClient()
+	if err != nil {
+		return err
+	}
+	objs, err := o.listObjects(indexName)
+	if err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	for _, obj := range objs {
+		err = o.remove(obj.Key)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OssExists
+// used for test index delete
+func OssExists(indexName string) (bool, error) {
+	o, err := createOssClient()
+	if err != nil {
+		return false, err
+	}
+	objs, err := o.listObjects(indexName)
+	if err != nil {
+		return false, err
+	}
+	return len(objs) > 0, nil
+}
+
+func (b *ossClient) read(key string) (io.ReadCloser, error) {
 	return b.bucket.GetObject(key)
 }
 
-func (b *OssBackend) write(key string, r io.Reader) error {
+func (b *ossClient) write(key string, r io.Reader) error {
 	err := b.bucket.PutObject(key, io.NopCloser(r))
 	if err != nil {
 		return err
@@ -95,7 +144,7 @@ func (b *OssBackend) write(key string, r io.Reader) error {
 	return nil
 }
 
-func (b *OssBackend) listObjects(prefix string) ([]oss.ObjectProperties, error) {
+func (b *ossClient) listObjects(prefix string) ([]oss.ObjectProperties, error) {
 	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
 
 	var info []oss.ObjectProperties
@@ -120,7 +169,7 @@ func (b *OssBackend) listObjects(prefix string) ([]oss.ObjectProperties, error) 
 	return info, nil
 }
 
-func (b *OssBackend) remove(key string) error {
+func (b *ossClient) remove(key string) error {
 	err := b.bucket.DeleteObject(key)
 	return err
 }
