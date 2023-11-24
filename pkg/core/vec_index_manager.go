@@ -5,6 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"os"
+	"path"
+	"sync"
+	"time"
+
 	"github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/blugelabs/bluge"
 	"github.com/dgraph-io/ristretto/z"
@@ -15,11 +21,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"golang.org/x/sync/errgroup"
-	"math"
-	"os"
-	"path"
-	"sync"
-	"time"
 )
 
 var (
@@ -149,7 +150,7 @@ func execGC() (bool, error) {
 	manager.lock.Lock()
 	close(ready) // wakes all goroutines waiting on the channel
 	delete(manager.ready, expired.name)
-	manager.lock.Lock()
+	manager.lock.Unlock()
 
 	return true, nil
 }
