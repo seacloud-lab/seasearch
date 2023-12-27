@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"golang.org/x/sync/errgroup"
@@ -156,7 +155,7 @@ func MultipleSearch(c *gin.Context) {
 		}
 	}
 
-	responses = append(responses, multiSearchIndex(searches))
+	responses = append(responses, multiSearchIndex(searches)...)
 
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
 }
@@ -169,20 +168,18 @@ type search struct {
 func multiSearchIndex(searches []search) []interface{} {
 	eg := errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
-	var res = make([]interface{}, 0, len(searches))
-	lock := sync.Mutex{}
+	var res = make([]interface{}, len(searches))
 
-	for _, s := range searches {
+	for i, s := range searches {
+		s := s
+		i := i
 		eg.Go(func() error {
-			s := s
 			rsp, err := searchIndex(s.indexNames, s.query)
-			lock.Lock()
 			if err != nil {
-				res = append(res, &meta.SearchResponse{Error: err.Error()})
+				res[i] = &meta.SearchResponse{Error: err.Error()}
 			} else {
-				res = append(res, rsp)
+				res[i] = rsp
 			}
-			lock.Unlock()
 			return nil
 		})
 	}
