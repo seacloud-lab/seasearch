@@ -203,6 +203,10 @@ func (b *OssBackend) List(kind string) ([]uint64, error) {
 
 func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, error) {
 	key := fileName(kind, id)
+	if cf, ok := b.cache.GetCacheFile(path.Join(b.path, key)); ok {
+		return cf.LoadReadOnlyData()
+	}
+
 	reader, err := b.read(path.Join(b.prefix, key))
 	if err != nil {
 		return nil, nil, err
@@ -210,6 +214,7 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 	defer func() {
 		_ = reader.Close()
 	}()
+
 	f, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
@@ -321,16 +326,9 @@ func (b *OssBackend) Sync() error {
 }
 
 func (b *OssBackend) Lock() error {
-	var err error
-	b.pid, err = b.cache.Lock(b.path)
-	return err
+	return nil
 }
 
 func (b *OssBackend) Unlock() error {
-	var err error
-	err = b.pid.Close()
-	if err != nil {
-		return fmt.Errorf("error closing pid file: %w", err)
-	}
-	return b.cache.Unlock(b.path)
+	return nil
 }

@@ -83,8 +83,8 @@ type config struct {
 }
 
 type logConfig struct {
-	OutputToFile bool   `env:"ZINC_LOG_OUTPUT,default=false"`
-	LogDir       string `env:"ZINC_LOG_DIR"`
+	OutputToFile bool   `env:"ZINC_LOG_OUTPUT,default=true"`
+	LogDir       string `env:"ZINC_LOG_DIR,default=./log"`
 	LogLevel     string `env:"ZINC_LOG_LEVEL,default=debug"`
 }
 
@@ -118,7 +118,7 @@ type shard struct {
 	// control goroutine number for read
 	GoroutineNum int `env:"ZINC_SHARD_GOROUTINE_NUM,default=3"`
 	// DefaultNum is the default number of shards.
-	Num int64 `env:"ZINC_SHARD_NUM,default=3"`
+	Num int64 `env:"ZINC_SHARD_NUM,default=1"`
 	// MaxSize is the maximum size limit for one shard, or will create a new shard.
 	MaxSize uint64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
 	// LoadObjGoroutineNum concurrently load index from Obj storage

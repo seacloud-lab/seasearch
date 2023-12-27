@@ -19,20 +19,20 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"path"
+	"strings"
+	"syscall"
+	"time"
+
 	"github.com/rs/zerolog"
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/wal"
-	"path"
-
-	"net/http"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
@@ -194,7 +194,7 @@ func setLog() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
 	}
-	file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "zinc.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "seasearch.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
 	}

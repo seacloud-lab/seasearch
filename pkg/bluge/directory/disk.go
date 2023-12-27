@@ -27,6 +27,12 @@ import (
 // indexName: the name of the index to use.
 func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
 	config := index.DefaultConfig(path.Join(rootPath, indexName))
+	config.DirectoryFunc = func() index.Directory {
+		fs := index.NewFileSystemDirectory(path.Join(rootPath, indexName))
+		return &fileSystemDirectory{
+			FileSystemDirectory: *fs,
+		}
+	}
 	config = config.WithPersisterNapTimeMSec(50)
 	if len(timeRange) == 2 {
 		if timeRange[0] <= timeRange[1] {
@@ -34,4 +40,19 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 		}
 	}
 	return bluge.DefaultConfigWithIndexConfig(config)
+}
+
+// fileSystemDirectory
+// The locking operation is not necessary for us.
+// In the case of loading many indexes, many lock operations will take more time.
+type fileSystemDirectory struct {
+	index.FileSystemDirectory
+}
+
+func (d *fileSystemDirectory) Lock() error {
+	return nil
+}
+
+func (d *fileSystemDirectory) Unlock() error {
+	return nil
 }

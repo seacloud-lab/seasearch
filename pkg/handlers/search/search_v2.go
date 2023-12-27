@@ -18,9 +18,12 @@ package search
 import (
 	"bufio"
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"net/http"
 	"strings"
+	"sync"
+
+	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -103,7 +106,7 @@ func MultipleSearch(c *gin.Context) {
 	}
 
 	responses := make([]interface{}, 0)
-
+	searches := make([]search, 0)
 	// Prepare to read the entire raw text of the body
 	scanner := bufio.NewScanner(c.Request.Body)
 	defer c.Request.Body.Close()
@@ -127,17 +130,10 @@ func MultipleSearch(c *gin.Context) {
 				continue
 			}
 			// search query
-			resp, err := searchIndex(indexNames, query)
-			if err != nil {
-				if errors.Is(err, core.ErrIndexServerMismatch) {
-					zutils.GinRenderJSON(c, http.StatusNotAcceptable, &meta.SearchResponse{Error: err.Error()})
-					return
-				}
-				log.Error().Msgf("handlers.search.MultipleSearch.searchIndex: err %s", err.Error())
-				responses = append(responses, &meta.SearchResponse{Error: err.Error()})
-			} else {
-				responses = append(responses, resp)
-			}
+			searches = append(searches, search{
+				indexNames: indexNames,
+				query:      query,
+			})
 		} else {
 			nextLineIsData = true
 			indexNames = indexNames[:0]
@@ -160,7 +156,39 @@ func MultipleSearch(c *gin.Context) {
 		}
 	}
 
+	responses = append(responses, multiSearchIndex(searches))
+
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
+}
+
+type search struct {
+	indexNames []string
+	query      *meta.ZincQuery
+}
+
+func multiSearchIndex(searches []search) []interface{} {
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	var res = make([]interface{}, 0, len(searches))
+	lock := sync.Mutex{}
+
+	for _, s := range searches {
+		eg.Go(func() error {
+			s := s
+			rsp, err := searchIndex(s.indexNames, s.query)
+			lock.Lock()
+			if err != nil {
+				res = append(res, &meta.SearchResponse{Error: err.Error()})
+			} else {
+				res = append(res, rsp)
+			}
+			lock.Unlock()
+			return nil
+		})
+	}
+
+	_ = eg.Wait()
+	return res
 }
 
 func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {

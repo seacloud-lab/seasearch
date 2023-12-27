@@ -220,6 +220,10 @@ func (b *S3Backend) List(kind string) ([]uint64, error) {
 
 func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, error) {
 	key := fileName(kind, id)
+	if cf, ok := b.cache.GetCacheFile(path.Join(b.path, key)); ok {
+		return cf.LoadReadOnlyData()
+	}
+
 	reader, err := b.read(path.Join(b.prefix, key))
 	if err != nil {
 		return nil, nil, err
@@ -227,6 +231,7 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 	defer func() {
 		_ = reader.Close()
 	}()
+
 	cf, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
 		return nil, nil, err
@@ -337,18 +342,11 @@ func (b *S3Backend) Sync() error {
 }
 
 func (b *S3Backend) Lock() error {
-	var err error
-	b.pid, err = b.cache.Lock(b.path)
-	return err
+	return nil
 }
 
 func (b *S3Backend) Unlock() error {
-	var err error
-	err = b.pid.Close()
-	if err != nil {
-		return fmt.Errorf("error closing pid file: %w", err)
-	}
-	return b.cache.Unlock(b.path)
+	return nil
 }
 
 func fileName(kind string, id uint64) string {
