@@ -129,8 +129,10 @@ func MultipleSearch(c *gin.Context) {
 				continue
 			}
 			// search query
+			names := make([]string, 0, len(indexNames))
+			names = append(names, indexNames...)
 			searches = append(searches, search{
-				indexNames: indexNames,
+				indexNames: names,
 				query:      query,
 			})
 		} else {
