@@ -364,9 +364,8 @@ func dirExists(path string) (bool, error) {
 func (c *LruCache) Remove(filepath string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-
 	delete(c.caches, filepath)
-	return os.Remove(filepath)
+	return os.RemoveAll(filepath)
 }
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {

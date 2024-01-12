@@ -293,7 +293,7 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 	} else if err == nil {
 		vecIndex.Close(true)
 	}
-	err = manager.storage.Remove(path.Join(indexName, fieldName, getFileName()))
+	err = manager.storage.Remove(path.Join(indexName, fieldName))
 	if err != nil {
 		return fmt.Errorf("failed to remove index %s/%s: %w", indexName, fieldName, err)
 	}

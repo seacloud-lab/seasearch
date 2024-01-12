@@ -18,9 +18,11 @@ package core
 import (
 	"errors"
 	"os"
+	"path"
 
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -41,11 +43,16 @@ func DeleteIndex(name string) error {
 		}
 	}
 
+	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, name))
+	if err != nil {
+		return err
+	}
+
 	// 2. Close and Delete from cache
 	ZINC_INDEX_LIST.Delete(name)
 
 	// 3. Physically delete the index
-	err := delIndex(index)
+	err = delIndex(index)
 	if err != nil {
 		return err
 	}

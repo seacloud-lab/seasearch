@@ -79,15 +79,25 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	return err
 }
 
+// Remove vector index, the input name should be index_name/vec_index_name
 func (s *s3Storage) Remove(name string) error {
-	key := path.Join(s.prefix, name)
-	err := s.cli.RemoveObject(context.Background(), s.bucketName, key, minio.RemoveObjectOptions{})
-	localPath := path.Join(s.cachePath, name)
-	err2 := s.cache.Remove(localPath)
-	if err == nil {
-		err = err2
+	prefix := path.Join(s.prefix, name)
+	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
+
+	objs := s.cli.ListObjects(context.Background(), s.bucketName, opts)
+	for obj := range objs {
+		// remove local file
+		err := s.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
+		if err != nil {
+			return err
+		}
+		err = s.cli.RemoveObject(context.Background(), s.bucketName, obj.Key, minio.RemoveObjectOptions{})
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	// remove folder
+	return os.RemoveAll(path.Join(s.cachePath, name))
 }
 
 func (s *s3Storage) Close() error {

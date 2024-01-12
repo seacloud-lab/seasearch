@@ -1,6 +1,7 @@
 package vector
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -66,15 +67,51 @@ func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
 	return err
 }
 
+// Remove vector index, the input name should be index_name/vec_index_name
 func (o *OssStorage) Remove(name string) error {
-	key := path.Join(o.prefix, name)
-	err := o.bucket.DeleteObject(key)
-
-	err2 := o.cache.Remove(path.Join(o.cachePath, name))
-	if err == nil {
-		err = err2
+	prefix := path.Join(o.prefix, name)
+	objs, err := o.listObjects(prefix)
+	if err != nil {
+		return err
 	}
-	return err
+
+	for _, obj := range objs {
+		// remove local file
+		err = o.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
+		if err != nil {
+			return err
+		}
+		err = o.bucket.DeleteObject(obj.Key)
+		if err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(path.Join(o.cachePath, name))
+}
+
+func (o *OssStorage) listObjects(prefix string) ([]oss.ObjectProperties, error) {
+	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
+
+	var info []oss.ObjectProperties
+	for i := 0; ; i++ {
+		result, err := o.bucket.ListObjectsV2(opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list objects: %w", err)
+		}
+		for _, obj := range result.Objects {
+			info = append(info, obj)
+		}
+
+		if !result.IsTruncated {
+			break
+		} else if i == 0 {
+			opts = append(opts, oss.ContinuationToken(result.NextContinuationToken))
+		} else {
+			opts[len(opts)-1] = oss.ContinuationToken(result.NextContinuationToken)
+		}
+	}
+
+	return info, nil
 }
 
 func createOssStorage() (ObjStore, error) {

@@ -102,5 +102,5 @@ func checkPath(localPath string) error {
 
 func (d *diskStore) Remove(name string) error {
 	localPath := path.Join(d.rootPath, name)
-	return os.Remove(localPath)
+	return os.RemoveAll(localPath)
 }
