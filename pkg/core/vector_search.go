@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 
@@ -33,6 +34,10 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 	defer func() {
 		vecIndex.Close(false)
 	}()
+
+	if vecIndex.ref.Dims != len(q.Vector) {
+		return nil, fmt.Errorf("invalid query vector, the vector dims should be %d", vecIndex.ref.Dims)
+	}
 
 	vecResult, err := vecIndex.Search(q.Vector, q.K, q.Nprobe)
 	if err != nil {

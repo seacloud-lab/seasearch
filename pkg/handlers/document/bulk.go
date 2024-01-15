@@ -86,6 +86,9 @@ func ESBulk(c *gin.Context) {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, &meta.HTTPResponseError{Error: err.Error()})
 		}
+		if ret == nil {
+			ret = &BulkResponse{}
+		}
 		ret.Error = err.Error()
 	}
 
