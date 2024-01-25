@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
@@ -408,7 +407,6 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 			if dmi.Aggregations().Count() > 0 {
 				var id string
 				var indexName string
-				var timestamp time.Time
 				var sourceData map[string]interface{}
 				if next, err := dmi.Next(); err == nil {
 					_ = next.VisitStoredFields(func(field string, value []byte) bool {
@@ -417,8 +415,6 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 							id = string(value)
 						case "_index":
 							indexName = string(value)
-						case "@timestamp":
-							timestamp, _ = bluge.DecodeDateTime(value)
 						case "_source":
 							sourceData = source.Response(&meta.Source{Enable: true}, value)
 						default: // do nothing
@@ -427,12 +423,11 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 					})
 				}
 				hit = &meta.Hit{
-					Index:     indexName,
-					Type:      "_doc",
-					ID:        id,
-					Score:     0,
-					Timestamp: timestamp,
-					Source:    sourceData,
+					Index:  indexName,
+					Type:   "_doc",
+					ID:     id,
+					Score:  0,
+					Source: sourceData,
 				}
 				return errors.ErrCancelSignal // check err, if returns err with cancel other all goroutines.
 			}

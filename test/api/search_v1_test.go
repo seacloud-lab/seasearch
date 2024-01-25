@@ -17,18 +17,21 @@ package api
 
 import (
 	"bytes"
-	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/config"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
 func TestSearchV1(t *testing.T) {
+	config.Global.EnableWal = false
+	defer func() {
+		config.Global.EnableWal = true
+	}()
 	t.Run("init data for search", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(indexData)
@@ -62,7 +65,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document with exist term", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "match", "query": {"term": "DEMTSCHENKO"}}`)
+			body.WriteString(`{"search_type": "match", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -84,7 +87,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: wildcard", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "wildcard", "query": {"term": "dem*"}}`)
+			body.WriteString(`{"search_type": "wildcard", "query": {"field":"Athlete","term": "dem*"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -95,7 +98,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: fuzzy", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "fuzzy", "query": {"term": "demtschenk"}}`)
+			body.WriteString(`{"search_type": "fuzzy", "query": {"field":"Athlete","term": "demtschenk"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -121,26 +124,7 @@ func TestSearchV1(t *testing.T) {
 			assert.NoError(t, err)
 			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
 		})
-		t.Run("search document type: daterange", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(fmt.Sprintf(`{
-				"search_type": "daterange",
-				"query": {
-					"start_time": "%s",
-					"end_time": "%s"
-				}
-			}`,
-				time.Now().UTC().Add(time.Hour*-24).Format("2006-01-02T15:04:05Z"),
-				time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-			))
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
 
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
 		t.Run("search document type: matchall", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
 			body.WriteString(`{"search_type": "matchall", "query": {"term": "demtschenk"}}`)
@@ -154,7 +138,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: match", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "match", "query": {"term": "DEMTSCHENKO"}}`)
+			body.WriteString(`{"search_type": "match", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -165,7 +149,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: matchphrase", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "matchphrase", "query": {"term": "DEMTSCHENKO"}}`)
+			body.WriteString(`{"search_type": "matchphrase", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -195,7 +179,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: prefix", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "prefix", "query": {"term": "dem"}}`)
+			body.WriteString(`{"search_type": "prefix", "query": {"field":"Athlete","term": "dem"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -206,7 +190,7 @@ func TestSearchV1(t *testing.T) {
 		})
 		t.Run("search document type: querystring", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "querystring", "query": {"term": "DEMTSCHENKO"}}`)
+			body.WriteString(`{"search_type": "querystring", "query": {"term": "Athlete:DEMTSCHENKO"}}`)
 			resp := request("POST", "/api/"+indexName+"/_search", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 

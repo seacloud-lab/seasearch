@@ -15,8 +15,6 @@
 
 package meta
 
-import "time"
-
 // SearchResponse for a query
 type SearchResponse struct {
 	Took         int                            `json:"took"` // Time it took to generate the response
@@ -45,7 +43,6 @@ type Hit struct {
 	Type      string                 `json:"_type"`
 	ID        string                 `json:"_id"`
 	Score     float64                `json:"_score"`
-	Timestamp time.Time              `json:"@timestamp"`
 	Source    interface{}            `json:"_source,omitempty"`
 	Fields    map[string]interface{} `json:"fields,omitempty"`
 	Highlight map[string]interface{} `json:"highlight,omitempty"`

@@ -19,7 +19,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/search"
 	"github.com/blugelabs/bluge/search/highlight"
 	"github.com/rs/zerolog/log"
@@ -96,7 +95,7 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 	for err == nil && next != nil {
 		var id string
 		var indexName string
-		var timestamp time.Time
+
 		var sourceData map[string]interface{}
 		var fieldsData map[string]interface{}
 		var highlightData map[string]interface{}
@@ -109,8 +108,6 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 				id = string(value)
 			case "_index":
 				indexName = string(value)
-			case "@timestamp":
-				timestamp, _ = bluge.DecodeDateTime(value)
 			case "_source":
 				sourceData = source.Response(query.Source.(*meta.Source), value)
 				if query.Fields != nil {
@@ -139,13 +136,11 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 			continue
 		}
 
-		sourceData["@timestamp"] = timestamp
 		hit := meta.Hit{
 			Index:     indexName,
 			Type:      "_doc",
 			ID:        id,
 			Score:     next.Score,
-			Timestamp: timestamp,
 			Source:    sourceData,
 			Fields:    fieldsData,
 			Highlight: highlightData,

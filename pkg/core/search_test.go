@@ -43,7 +43,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Match: map[string]*meta.MatchQuery{
-							"_all": {
+							"name": {
 								Query: "Prabhat",
 							},
 						},
@@ -58,7 +58,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Term: map[string]*meta.TermQuery{
-							"_all": {
+							"address.city": {
 								Value: "angeles",
 							},
 						},
@@ -85,7 +85,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Wildcard: map[string]*meta.WildcardQuery{
-							"_all": {
+							"address.city": {
 								Value: "san*",
 							},
 						},
@@ -100,7 +100,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Fuzzy: map[string]*meta.FuzzyQuery{
-							"_all": {
+							"address.city": {
 								Value: "fransisco", // note the wrong spelling
 							},
 						},
@@ -115,7 +115,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Fuzzy: map[string]*meta.FuzzyQuery{
-							"_all": {
+							"address.city": {
 								Value:     "fransisco", // note the wrong spelling,
 								Fuzziness: "AUTO",
 							},
@@ -131,7 +131,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Fuzzy: map[string]*meta.FuzzyQuery{
-							"_all": {
+							"address.city": {
 								Value:     "fransisco", // note the wrong spelling,
 								Fuzziness: "AUTO:3,6",
 							},
@@ -147,7 +147,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						Fuzzy: map[string]*meta.FuzzyQuery{
-							"_all": {
+							"address.city": {
 								Value:     "fransisco", // note the wrong spelling,
 								Fuzziness: 2,
 							},
@@ -163,7 +163,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						QueryString: &meta.QueryStringQuery{
-							Query: "angeles",
+							Query: "address.city:angeles",
 						},
 					},
 					Size: 10,
@@ -176,7 +176,7 @@ func TestIndex_Search(t *testing.T) {
 				iQuery: &meta.ZincQuery{
 					Query: &meta.Query{
 						QueryString: &meta.QueryStringQuery{
-							Query: "angeles",
+							Query: "address.city:angeles",
 						},
 					},
 					Timeout: 1,

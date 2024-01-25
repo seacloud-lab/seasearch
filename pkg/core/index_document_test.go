@@ -117,7 +117,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 			query := &meta.ZincQuery{
 				Query: &meta.Query{
 					Match: map[string]*meta.MatchQuery{
-						"_all": {
+						"name": {
 							Query: "Hello",
 						},
 					},

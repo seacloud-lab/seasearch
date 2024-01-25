@@ -17,9 +17,10 @@ package core
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"strconv"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/blugelabs/bluge"
 
@@ -115,7 +116,6 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 		}
 
 	}
-	bdoc.AddField(bluge.NewDateTimeField(meta.TimeFieldName, timestamp).StoreValue().Sortable().Aggregatable())
 
 	// set source
 	var sourceByteVal []byte
@@ -128,7 +128,6 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 	bdoc.AddField(bluge.NewStoredOnlyField("_source", sourceByteVal))
 
 	bdoc.AddField(bluge.NewStoredOnlyField("_index", []byte(s.GetIndexName())))
-	bdoc.AddField(bluge.NewCompositeFieldExcluding("_all", []string{"_id", "_index", "_source", meta.TimeFieldName}))
 
 	// Add time for index
 	bdoc.SetTimestamp(timestamp.UnixNano())

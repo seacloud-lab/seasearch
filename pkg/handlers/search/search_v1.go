@@ -19,7 +19,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	v1 "github.com/zincsearch/zincsearch/pkg/meta/v1"
