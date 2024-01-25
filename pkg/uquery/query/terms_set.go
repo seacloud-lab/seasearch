@@ -24,3 +24,7 @@ import (
 func TermsSetQuery(query map[string]interface{}) (bluge.Query, error) {
 	return nil, errors.New(errors.ErrorTypeNotImplemented, "[terms_set] query doesn't support")
 }
+
+func TermsSetQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[terms_set] query doesn't support")
+}

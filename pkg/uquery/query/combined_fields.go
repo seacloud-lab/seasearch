@@ -24,3 +24,7 @@ import (
 func CombinedFieldsQuery(query map[string]interface{}) (bluge.Query, error) {
 	return nil, errors.New(errors.ErrorTypeNotImplemented, "[combined_fields] query doesn't support")
 }
+
+func CombinedFieldsQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[combined_fields] query doesn't support")
+}

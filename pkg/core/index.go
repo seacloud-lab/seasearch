@@ -16,11 +16,12 @@
 package core
 
 import (
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"sync"
 	"sync/atomic"
 
 	"github.com/blugelabs/bluge"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
+
 	"github.com/blugelabs/bluge/analysis"
 	"golang.org/x/sync/errgroup"
 

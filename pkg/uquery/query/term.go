@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/blugelabs/bluge"
+	"github.com/blugelabs/bluge/numeric"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -110,4 +111,66 @@ func TermQueryText(field string, value *meta.TermQuery) (bluge.Query, error) {
 		subq.SetBoost(value.Boost)
 	}
 	return subq, nil
+}
+
+func TermQueryTerms(query map[string]interface{}, mappings *meta.Mappings) ([]Term, error) {
+	if len(query) > 1 {
+		return nil, errors.New(errors.ErrorTypeParsingException, "[term] query doesn't support multiple fields")
+	}
+
+	field := ""
+	value := new(meta.TermQuery)
+	value.Boost = -1.0
+	for k, v := range query {
+		field = k
+		switch v := v.(type) {
+		case string:
+			value.Value = v
+		case float64:
+			value.Value = v
+		case bool:
+			value.Value = v
+		case map[string]interface{}:
+			for k, v := range v {
+				k := strings.ToLower(k)
+				switch k {
+				case "value":
+					value.Value = v
+				case "case_insensitive":
+					value.CaseInsensitive = v.(bool)
+				case "boost":
+					value.Boost = v.(float64)
+				default:
+					// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[term] unknown field [%s]", k))
+				}
+			}
+		default:
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[term] doesn't support values of type: %T", v))
+		}
+	}
+
+	prop, _ := mappings.GetProperty(field)
+	switch prop.Type {
+	case "numeric":
+		// bluge index Numeric with special encode, we need to convert number to it.
+		val, err := zutils.ToFloat64(value.Value)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[term] convert value to numeric error: %s", err))
+		}
+		numberInt64 := numeric.Float64ToInt64(val)
+		prefixCoded := numeric.MustNewPrefixCodedInt64(numberInt64, 0)
+		return []Term{NewTerm(field, prefixCoded)}, nil
+	case "bool":
+		val, err := zutils.ToBool(value.Value)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[term] convert value to numeric error: %s", err))
+		}
+		return []Term{NewTerm(field, []byte(strconv.FormatBool(val)))}, nil
+	default:
+		val, err := zutils.ToString(value.Value)
+		if err != nil {
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[term] convert value to string error: %s", err))
+		}
+		return []Term{NewTerm(field, []byte(val))}, nil
+	}
 }

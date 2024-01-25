@@ -21,6 +21,7 @@ import (
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/blugelabs/bluge/analysis/analyzer"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -85,4 +86,65 @@ func MatchPhraseQuery(query map[string]interface{}, mappings *meta.Mappings, ana
 	}
 
 	return subq, nil
+}
+
+func MatchPhraseQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	if len(query) > 1 {
+		return nil, errors.New(errors.ErrorTypeParsingException, "[match_phrase] query doesn't support multiple fields")
+	}
+
+	field := ""
+	value := new(meta.MatchPhraseQuery)
+	for k, v := range query {
+		field = k
+		switch v := v.(type) {
+		case string:
+			value.Query = v
+		case map[string]interface{}:
+			for k, v := range v {
+				k := strings.ToLower(k)
+				switch k {
+				case "query":
+					value.Query = v.(string)
+				case "analyzer":
+					value.Analyzer = v.(string)
+				default:
+					// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[match_phrase] unknown field [%s]", k))
+				}
+			}
+		default:
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[match_phrase] %s doesn't support values of type: %T", k, v))
+		}
+	}
+
+	var err error
+	var zer *analysis.Analyzer
+	if value.Analyzer != "" {
+		zer, err = zincanalysis.QueryAnalyzer(analyzers, value.Analyzer)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		indexZer, searchZer := zincanalysis.QueryAnalyzerForField(analyzers, mappings, field)
+		if zer == nil && searchZer != nil {
+			zer = searchZer
+		}
+		if zer == nil && indexZer != nil {
+			zer = indexZer
+		}
+	}
+
+	if zer == nil {
+		zer = analyzer.NewStandardAnalyzer()
+	}
+
+	tokens := zer.Analyze([]byte(value.Query))
+	if len(tokens) > 0 {
+		result := make([]Term, len(tokens))
+		for i, tk := range tokens {
+			result[i] = NewTerm(field, tk.Term)
+		}
+		return result, nil
+	}
+	return nil, nil
 }

@@ -98,3 +98,7 @@ func QueryStringQuery(query map[string]interface{}, mappings *meta.Mappings, ana
 
 	return querystr.ParseQueryString(value.Query, options)
 }
+
+func QueryStringQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[query_string] query doesn't support in unified search")
+}

@@ -99,3 +99,7 @@ func MatchPhrasePrefixQuery(query map[string]interface{}, mappings *meta.Mapping
 
 	return subq, nil
 }
+
+func MatchPhrasePrefixQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeParsingException, "[match_phrase_prefix] query doesn't support in unified search")
+}

@@ -36,3 +36,19 @@ func GeoPolygonQuery(query map[string]interface{}) (bluge.Query, error) {
 func GeoShapeQuery(query map[string]interface{}) (bluge.Query, error) {
 	return nil, errors.New(errors.ErrorTypeNotImplemented, "[geo_shape] query doesn't support")
 }
+
+func GeoBoundingBoxQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[geo_bounding_box] query doesn't support")
+}
+
+func GeoDistanceQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[geo_distance] query doesn't support")
+}
+
+func GeoPolygonQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[geo_polygon] query doesn't support")
+}
+
+func GeoShapeQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[geo_shape] query doesn't support")
+}

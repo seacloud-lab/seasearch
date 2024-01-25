@@ -25,3 +25,7 @@ import (
 func SimpleQueryStringQuery(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) (bluge.Query, error) {
 	return QueryStringQuery(query, mappings, analyzers)
 }
+
+func SimpleQueryStringQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	return QueryStringQueryTerms(query, mappings, analyzers)
+}

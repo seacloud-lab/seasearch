@@ -72,7 +72,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 			},
 		},
 		Size: len(docIdSlice),
-	}, mappings, nil, readers...)
+	}, mappings, nil, ToSearcher(readers)...)
 	if err != nil {
 		return nil, err
 	}

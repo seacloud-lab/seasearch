@@ -62,3 +62,7 @@ func PrefixQuery(query map[string]interface{}) (bluge.Query, error) {
 
 	return subq, nil
 }
+
+func PrefixQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeParsingException, "[prefix] query doesn't support in unified search")
+}

@@ -25,8 +25,7 @@ import (
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
-	zincanalyzer "github.com/zincsearch/zincsearch/pkg/uquery/analysis/analyzer"
-
+	"github.com/blugelabs/bluge/analysis/analyzer"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
@@ -128,9 +127,73 @@ func MatchQuery(query map[string]interface{}, mappings *meta.Mappings, analyzers
 	return subq, err
 }
 
+func MatchQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	if len(query) > 1 {
+		return nil, errors.New(errors.ErrorTypeParsingException, "[match] query doesn't support multiple fields")
+	}
+	field := ""
+	value := new(meta.MatchQuery)
+
+	for k, v := range query {
+		field = k
+		switch v := v.(type) {
+		case string:
+			value.Query = v
+		case map[string]interface{}:
+			for k, v := range v {
+				k := strings.ToLower(k)
+				switch k {
+				case "query":
+					value.Query, _ = zutils.ToString(v)
+				case "analyzer":
+					value.Analyzer, _ = zutils.ToString(v)
+				case "fuzziness":
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[match] unified search unsupport [%s]", k))
+				case "prefix_length":
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[match] unified search unsupport [%s]", k))
+				default:
+					// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[match] unknown field [%s]", k))
+				}
+			}
+		default:
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[match] %s doesn't support values of type: %T", k, v))
+		}
+	}
+
+	var err error
+	var zer *analysis.Analyzer
+	if value.Analyzer != "" {
+		zer, err = zincanalysis.QueryAnalyzer(analyzers, value.Analyzer)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		indexZer, searchZer := zincanalysis.QueryAnalyzerForField(analyzers, mappings, field)
+		if zer == nil && searchZer != nil {
+			zer = searchZer
+		}
+		if zer == nil && indexZer != nil {
+			zer = indexZer
+		}
+	}
+	if zer == nil {
+		zer = analyzer.NewStandardAnalyzer()
+	}
+
+	tokens := zer.Analyze([]byte(value.Query))
+	if len(tokens) > 0 {
+		result := make([]Term, len(tokens))
+		for i, tk := range tokens {
+			result[i] = NewTerm(field, tk.Term)
+		}
+		return result, nil
+	}
+	return nil, nil
+}
+
 func genQueryWithMinimumShouldMatch(ana *analysis.Analyzer, field string, value *meta.MatchQuery, minimumShouldMatch interface{}) (bluge.Query, error) {
 	if ana == nil {
-		ana, _ = zincanalyzer.NewStandardAnalyzer(nil)
+		ana = analyzer.NewStandardAnalyzer()
 	}
 
 	var fuzziness int

@@ -130,3 +130,7 @@ func ParseFuzziness(fuzziness interface{}, query string, zer *analysis.Analyzer)
 	}
 	return v
 }
+
+func FuzzyQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeParsingException, "[fuzzy] query doesn't support in unified search")
+}

@@ -218,3 +218,7 @@ func RangeQueryTime(field string, query map[string]interface{}, mappings *meta.M
 
 	return subq, nil
 }
+
+func RangeQueryTerms(query map[string]interface{}, mappings *meta.Mappings) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeParsingException, "[range] query doesn't support in unified search")
+}

@@ -1,9 +1,10 @@
 package search
 
 import (
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"net/http"
 	"time"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"

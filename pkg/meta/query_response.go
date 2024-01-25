@@ -15,6 +15,10 @@
 
 package meta
 
+import (
+	"github.com/blugelabs/bluge/search"
+)
+
 // SearchResponse for a query
 type SearchResponse struct {
 	Took         int                            `json:"took"` // Time it took to generate the response
@@ -46,6 +50,7 @@ type Hit struct {
 	Source    interface{}            `json:"_source,omitempty"`
 	Fields    map[string]interface{} `json:"fields,omitempty"`
 	Highlight map[string]interface{} `json:"highlight,omitempty"`
+	Explain   *search.Explanation    `json:"explain,omitempty"`
 }
 
 type Total struct {

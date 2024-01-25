@@ -127,3 +127,74 @@ func BoolQuery(query map[string]interface{}, mappings *meta.Mappings, analyzers 
 
 	return boolQuery, nil
 }
+
+func BoolQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	var result []Term
+	for k, v := range query {
+		k := strings.ToLower(k)
+		switch k {
+		case "should":
+			switch v := v.(type) {
+			case map[string]interface{}:
+				if terms, err := QueryTerms(v, mappings, analyzers); err != nil {
+					return nil, errors.New(errors.ErrorTypeXContentParseException, "[should] failed to parse field").Cause(err)
+				} else {
+					result = append(result, terms...)
+				}
+			case []interface{}:
+				for _, vv := range v {
+					if terms, err := QueryTerms(vv.(map[string]interface{}), mappings, analyzers); err != nil {
+						return nil, errors.New(errors.ErrorTypeXContentParseException, "[should] failed to parse field").Cause(err)
+					} else {
+						result = append(result, terms...)
+					}
+				}
+			default:
+				return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[bool] %s doesn't support values of type: %T", k, v))
+			}
+		case "must":
+			switch v := v.(type) {
+			case map[string]interface{}:
+				if terms, err := QueryTerms(v, mappings, analyzers); err != nil {
+					return nil, errors.New(errors.ErrorTypeXContentParseException, "[must] failed to parse field").Cause(err)
+				} else {
+					result = append(result, terms...)
+				}
+			case []interface{}:
+				for _, vv := range v {
+					if terms, err := QueryTerms(vv.(map[string]interface{}), mappings, analyzers); err != nil {
+						return nil, errors.New(errors.ErrorTypeXContentParseException, "[must] failed to parse field").Cause(err)
+					} else {
+						result = append(result, terms...)
+					}
+				}
+			default:
+				return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[bool] %s doesn't support values of type: %T", k, v))
+			}
+		case "must_not":
+			switch v := v.(type) {
+			case map[string]interface{}:
+				if terms, err := QueryTerms(v, mappings, analyzers); err != nil {
+					return nil, errors.New(errors.ErrorTypeXContentParseException, "[must_not] failed to parse field").Cause(err)
+				} else {
+					result = append(result, terms...)
+				}
+			case []interface{}:
+				for _, vv := range v {
+					if terms, err := QueryTerms(vv.(map[string]interface{}), mappings, analyzers); err != nil {
+						return nil, errors.New(errors.ErrorTypeXContentParseException, "[must_not] failed to parse field").Cause(err)
+					} else {
+						result = append(result, terms...)
+					}
+				}
+			default:
+				return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[bool] %s doesn't support values of type: %T", k, v))
+			}
+		case "filter":
+		// filter doesn't affect the score, so we ignore it when returning to term
+		default:
+		}
+	}
+
+	return result, nil
+}

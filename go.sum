@@ -303,6 +303,8 @@ github.com/rs/zerolog v1.29.0 h1:Zes4hju04hjbvkVkOhdl2HpZa+0PmVwigmo8XoORE5w=
 github.com/rs/zerolog v1.29.0/go.mod h1:NILgTygv/Uej1ra5XxGf82ZFSLk58MFGAUS2o6usyD0=
 github.com/russross/blackfriday v1.5.2/go.mod h1:JO/DiYxRf+HjHt06OyowR9PTA263kcR/rfWxYHBV53g=
 github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
+github.com/seafileltd/bluge v1.0.1 h1:T4dZSRoG811dom7n7/AJixCP3A4D55qEPpsCOTTk3GA=
+github.com/seafileltd/bluge v1.0.1/go.mod h1:IG9JlDUzUGRIxylWmLyF7e1QwMdRWu9FkNSivJ4VB+E=
 github.com/segmentio/analytics-go/v3 v3.2.1 h1:G+f90zxtc1p9G+WigVyTR0xNfOghOGs/PYAlljLOyeg=
 github.com/segmentio/analytics-go/v3 v3.2.1/go.mod h1:p8owAF8X+5o27jmvUognuXxdtqvSGtD0ZrfY2kcS9bE=
 github.com/segmentio/backo-go v1.0.0 h1:kbOAtGJY2DqOR0jfRkYEorx/b18RgtepGtY3+Cpe6qA=
@@ -369,8 +371,6 @@ github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1
 github.com/yuin/goldmark v1.4.0/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
 github.com/yusufpapurcu/wmi v1.2.2 h1:KBNDSne4vP5mbSWnJbO+51IMOXJB67QiYCSBrubbPRg=
 github.com/yusufpapurcu/wmi v1.2.2/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zincsearch/bluge v1.1.5 h1:RTau2kvvguPpiOB35VZ4kNXZ1fxjlN/ZjsmdV9JZCYA=
-github.com/zincsearch/bluge v1.1.5/go.mod h1:IG9JlDUzUGRIxylWmLyF7e1QwMdRWu9FkNSivJ4VB+E=
 github.com/zincsearch/bluge_segment_api v1.0.0 h1:lcgI8+fwd4i4tOVcKZOShAVnMroubJjvj9D5U44S7z8=
 github.com/zincsearch/bluge_segment_api v1.0.0/go.mod h1:mYfPVUdXLZ4iXsicXMER+RcI/avwphjMOi8nhN9HDLA=
 github.com/zincsearch/go-gin-prometheus v0.1.1 h1:cQDDv4ygIW1TnQBReZkp1vAVOGyiBD3Da1CQ9Z3GmvQ=

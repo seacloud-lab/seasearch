@@ -21,6 +21,7 @@ import (
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/blugelabs/bluge/analysis/analyzer"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -103,4 +104,58 @@ func MultiMatchQuery(query map[string]interface{}, mappings *meta.Mappings, anal
 	}
 
 	return subq, nil
+}
+
+func MultiMatchQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	value := new(meta.MultiMatchQuery)
+	for k, v := range query {
+		k := strings.ToLower(k)
+		switch k {
+		case "query":
+			value.Query = v.(string)
+		case "analyzer":
+			value.Analyzer = v.(string)
+		case "fields":
+			if vv, ok := v.([]interface{}); ok {
+				for _, vvv := range vv {
+					value.Fields = append(value.Fields, vvv.(string))
+				}
+			}
+		default:
+			// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[multi_match] unknown field [%s]", k))
+		}
+	}
+	var zer *analysis.Analyzer
+	if value.Analyzer != "" {
+		zer, _ = zincanalysis.QueryAnalyzer(analyzers, value.Analyzer)
+	}
+	stdZer := analyzer.NewStandardAnalyzer()
+	var result []Term
+
+	for _, field := range value.Fields {
+		var fieldZer *analysis.Analyzer
+		if zer != nil {
+			fieldZer = zer
+		} else {
+			indexZer, searchZer := zincanalysis.QueryAnalyzerForField(analyzers, mappings, field)
+			if zer == nil && searchZer != nil {
+				fieldZer = searchZer
+			}
+			if zer == nil && indexZer != nil {
+				fieldZer = indexZer
+			}
+			if fieldZer == nil {
+				fieldZer = stdZer
+			}
+		}
+		tokens := stdZer.Analyze([]byte(value.Query))
+		if len(tokens) > 0 {
+			for _, t := range tokens {
+				result = append(result, NewTerm(field, t.Term))
+			}
+		}
+	}
+
+	return result, nil
+
 }

@@ -95,3 +95,7 @@ func MatchBoolPrefixQuery(query map[string]interface{}, mappings *meta.Mappings,
 
 	return subq, nil
 }
+
+func MatchBoolPrefixQueryTerms(query map[string]interface{}, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeXContentParseException, "[match_bool_prefix] doesn't support in unified search")
+}

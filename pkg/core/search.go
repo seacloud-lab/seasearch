@@ -59,7 +59,7 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	dmi, err := zincsearch.MultiSearch(ctx, query, mappings, analyzers, readers...)
+	dmi, err := zincsearch.MultiSearch(ctx, query, mappings, analyzers, ToSearcher(readers)...)
 	if err != nil {
 		log.Printf("index.SearchV2: error executing search: %s", err.Error())
 		if err == context.DeadlineExceeded {
@@ -144,6 +144,9 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 			Source:    sourceData,
 			Fields:    fieldsData,
 			Highlight: highlightData,
+		}
+		if query.Explain {
+			hit.Explain = next.Explanation
 		}
 		Hits = append(Hits, hit)
 

@@ -36,7 +36,7 @@ func MultiSearch(
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
-	readers ...*bluge.Reader,
+	readers ...Searcher,
 ) (search.DocumentMatchIterator, error) {
 	if len(readers) == 0 {
 		return &DocumentList{
@@ -87,7 +87,6 @@ func MultiSearch(
 		}
 		return nil
 	})
-
 	for _, r := range readers {
 		r := r
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)

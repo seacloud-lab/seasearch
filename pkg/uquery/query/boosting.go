@@ -24,3 +24,7 @@ import (
 func BoostingQuery(query map[string]interface{}) (bluge.Query, error) {
 	return nil, errors.New(errors.ErrorTypeNotImplemented, "[boosting] query doesn't support")
 }
+
+func BoostingQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[boosting] query doesn't support")
+}

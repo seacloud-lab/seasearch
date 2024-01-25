@@ -50,7 +50,6 @@ import (
 // @Router /es/{index}/_search [post]
 func SearchDSL(c *gin.Context) {
 	indexName := c.Param("target")
-
 	query := &meta.ZincQuery{Size: 10}
 	if err := zutils.GinBindJSON(c, query); err != nil {
 		log.Printf("handlers.search.searchDSL: %s", err.Error())
@@ -103,6 +102,8 @@ func MultipleSearch(c *gin.Context) {
 	if indexName != "" {
 		defaultIndexNames = strings.Split(indexName, ",")
 	}
+
+	unifyScore := strings.ToUpper(c.Query("unify_score")) == "TRUE"
 
 	responses := make([]interface{}, 0)
 	searches := make([]search, 0)
@@ -157,7 +158,11 @@ func MultipleSearch(c *gin.Context) {
 		}
 	}
 
-	responses = append(responses, multiSearchIndex(searches)...)
+	if unifyScore {
+		responses = append(responses, unifiedMultiSearch(searches)...)
+	} else {
+		responses = append(responses, multiSearchIndex(searches)...)
+	}
 
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
 }
@@ -177,6 +182,58 @@ func multiSearchIndex(searches []search) []interface{} {
 		i := i
 		eg.Go(func() error {
 			rsp, err := searchIndex(s.indexNames, s.query)
+			if err != nil {
+				res[i] = &meta.SearchResponse{Error: err.Error()}
+			} else {
+				res[i] = rsp
+			}
+			return nil
+		})
+	}
+
+	_ = eg.Wait()
+	return res
+}
+
+func unifiedMultiSearch(searches []search) []interface{} {
+	if len(searches) == 0 {
+		return []interface{}{}
+	}
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	var res = make([]interface{}, len(searches))
+
+	allNameMap := make(map[string]struct{})
+	for _, search := range searches {
+		indexNames, err := core.GetMatchedIndexNames(search.indexNames)
+		if err != nil {
+			return []interface{}{&meta.SearchResponse{Error: err.Error()}}
+		}
+		for _, idx := range indexNames {
+			allNameMap[idx] = struct{}{}
+		}
+	}
+	allNames := make([]string, 0, len(allNameMap))
+	for key := range allNameMap {
+		allNames = append(allNames, key)
+	}
+	// for multi query, there may be many queries,
+	// we simplify the processing and use only one of them to get the term list, which is sufficient for our scenario.
+	stats, err := core.QueryStatsInfo(allNames, searches[0].query)
+	if err != nil {
+		return []interface{}{&meta.SearchResponse{Error: err.Error()}}
+	}
+
+	for i, s := range searches {
+		s := s
+		i := i
+		eg.Go(func() error {
+			searchIndexNames, err := core.GetMatchedIndexNames(s.indexNames)
+			if err != nil {
+				res[i] = &meta.SearchResponse{Error: err.Error()}
+				return nil
+			}
+			rsp, err := core.MultiSearchWithStats(searchIndexNames, stats, s.query)
 			if err != nil {
 				res[i] = &meta.SearchResponse{Error: err.Error()}
 			} else {

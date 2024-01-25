@@ -62,3 +62,7 @@ func WildcardQuery(query map[string]interface{}) (bluge.Query, error) {
 
 	return subq, nil
 }
+
+func WildcardQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeParsingException, "[wildcard] query doesn't support in unified search")
+}

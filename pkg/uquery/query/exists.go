@@ -24,3 +24,7 @@ import (
 func ExistsQuery(query map[string]interface{}) (bluge.Query, error) {
 	return nil, errors.New(errors.ErrorTypeNotImplemented, "[exists] query doesn't support")
 }
+
+func ExistsQueryTerms(query map[string]interface{}) ([]Term, error) {
+	return nil, errors.New(errors.ErrorTypeNotImplemented, "[exists] query doesn't support")
+}

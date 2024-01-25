@@ -67,3 +67,48 @@ func IdsQuery(query map[string]interface{}, mappings *meta.Mappings) (bluge.Quer
 		"_id": value.Values,
 	}, mappings)
 }
+
+func IdsQueryTerms(query map[string]interface{}, mappings *meta.Mappings) ([]Term, error) {
+	if len(query) > 1 {
+		return nil, errors.New(errors.ErrorTypeParsingException, "[ids] query doesn't support multiple fields")
+	}
+
+	value := new(meta.IdsQuery)
+	for k, v := range query {
+		switch v := v.(type) {
+		case []string:
+			value.Values = v
+		case []interface{}:
+			value.Values = make([]string, len(v))
+			for i, v := range v {
+				value.Values[i] = v.(string)
+			}
+		case map[string]interface{}:
+			for k, v := range v {
+				k := strings.ToLower(k)
+				switch k {
+				case "value":
+					switch v := v.(type) {
+					case []interface{}:
+						value.Values = make([]string, len(v))
+						for i, v := range v {
+							value.Values[i] = v.(string)
+						}
+					default:
+						return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[ids] %s doesn't support values of type: %T", k, v))
+					}
+				default:
+					// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[ids] unknown field [%s]", k))
+				}
+			}
+		default:
+			return nil, errors.New(errors.ErrorTypeXContentParseException, fmt.Sprintf("[ids] %s doesn't support values of type: %T", k, v))
+		}
+	}
+
+	var result = make([]Term, len(value.Values))
+	for i, val := range value.Values {
+		result[i] = NewTerm("_id", []byte(val))
+	}
+	return result, nil
+}
