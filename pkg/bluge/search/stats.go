@@ -92,6 +92,10 @@ func (m *FieldStats) SumTotalTermFrequency() uint64 {
 }
 
 func (m *FieldStats) Merge(other segment.CollectionStats) {
+	// When index is empty, the CollectionStats returned by bluge.Reader is nil.
+	if other == nil {
+		return
+	}
 	m.TotalDocCount += other.TotalDocumentCount()
 	m.DocCount += other.DocumentCount()
 	m.SumTotalTermFreq += other.SumTotalTermFrequency()
