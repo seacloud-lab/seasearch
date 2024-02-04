@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/meta"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -15,6 +12,10 @@ import (
 	"path"
 	"strings"
 	"sync"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
 var proxyPool *ProxyPool
@@ -97,9 +98,9 @@ func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{
 
 	if rsp.StatusCode/100 == 4 {
 		body, _ := io.ReadAll(rsp.Body)
-		resp := &meta.HTTPResponse{}
+		resp := &meta.HTTPResponseError{}
 		_ = json.Unmarshal(body, &resp)
-		return newHttpClientError(resp.Message, rsp.StatusCode)
+		return newHttpClientError(fmt.Sprintf("bad response from host: %s, err: %s", host, resp.Error), rsp.StatusCode)
 	} else if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to get response from node %s: %s", host, rsp.Status)
 	}

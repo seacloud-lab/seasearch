@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 
+	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"golang.org/x/sync/errgroup"
 
@@ -167,6 +168,100 @@ func MultipleSearch(c *gin.Context) {
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
 }
 
+type PreSearchRequest struct {
+	IndexList []string        `json:"index_list"`
+	Query     *meta.ZincQuery `json:"query"`
+}
+
+func QueryStats(c *gin.Context) {
+	var req *PreSearchRequest
+	if err := zutils.GinBindJSON(c, &req); err != nil {
+		log.Printf("handlers.search.preSearch: %s", err.Error())
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	stats, err := core.QueryStatsInfo(req.IndexList, req.Query)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, stats)
+}
+
+func MultiSearchWithStatistics(c *gin.Context) {
+	indexName := c.Param("target")
+	defaultIndexNames := make([]string, 0)
+	if indexName != "" {
+		defaultIndexNames = strings.Split(indexName, ",")
+	}
+
+	responses := make([]interface{}, 0)
+	searches := make([]search, 0)
+
+	// Prepare to read the entire raw text of the body
+	scanner := bufio.NewScanner(c.Request.Body)
+	defer c.Request.Body.Close()
+	maxCapacityPerLine := config.Global.MaxDocumentSize
+	buf := make([]byte, maxCapacityPerLine)
+	scanner.Buffer(buf, maxCapacityPerLine)
+
+	indexNames := make([]string, 0)
+	nextLineIsData := false
+
+	// the first line is stats info
+	scanner.Scan()
+	var stats *zincsearch.UnifiedStats
+	if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, gin.H{"error": "invalid stats"})
+		log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
+		return
+	}
+
+	var doc map[string]interface{}
+	var err error
+	for scanner.Scan() { // Read each line
+		if nextLineIsData {
+			nextLineIsData = false
+			query := &meta.ZincQuery{Size: 10}
+			if err = json.Unmarshal(scanner.Bytes(), &query); err != nil {
+				log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
+				responses = append(responses, &meta.SearchResponse{Error: err.Error()})
+				continue
+			}
+			// search query
+			names := make([]string, 0, len(indexNames))
+			names = append(names, indexNames...)
+			searches = append(searches, search{
+				indexNames: names,
+				query:      query,
+			})
+		} else {
+			nextLineIsData = true
+			indexNames = indexNames[:0]
+			if err = json.Unmarshal(scanner.Bytes(), &doc); err != nil {
+				log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
+				continue
+			}
+			if v, ok := doc["index"]; ok {
+				switch v := v.(type) {
+				case string:
+					indexNames = append(indexNames, v)
+				case []interface{}:
+					for _, v := range v {
+						indexNames = append(indexNames, v.(string))
+					}
+				}
+			} else {
+				indexNames = append(indexNames, defaultIndexNames...)
+			}
+		}
+	}
+
+	responses = append(responses, unifiedSearchWithStats(searches, stats)...)
+	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
+}
+
 type search struct {
 	indexNames []string
 	query      *meta.ZincQuery
@@ -199,9 +294,6 @@ func unifiedMultiSearch(searches []search) []interface{} {
 	if len(searches) == 0 {
 		return []interface{}{}
 	}
-	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
-	var res = make([]interface{}, len(searches))
 
 	allNameMap := make(map[string]struct{})
 	for _, search := range searches {
@@ -223,6 +315,14 @@ func unifiedMultiSearch(searches []search) []interface{} {
 	if err != nil {
 		return []interface{}{&meta.SearchResponse{Error: err.Error()}}
 	}
+
+	return unifiedSearchWithStats(searches, stats)
+}
+
+func unifiedSearchWithStats(searches []search, stats *zincsearch.UnifiedStats) []interface{} {
+	eg := errgroup.Group{}
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	var res = make([]interface{}, len(searches))
 
 	for i, s := range searches {
 		s := s

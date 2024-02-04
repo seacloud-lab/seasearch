@@ -65,6 +65,9 @@ func SetRoutes(r *gin.Engine) {
 	if err != nil {
 		log.Err(err)
 	}
+	// internal API
+	r.POST("/api/internal/get_stats", AuthMiddleware("search.internal.GetStats"), search.QueryStats)
+	r.POST("/api/internal/unify_search", AuthMiddleware("search.internal.UnifySearch"), search.MultiSearchWithStatistics)
 
 	// UI
 	HTTPCacheForUI(r)

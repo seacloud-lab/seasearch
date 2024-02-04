@@ -5,19 +5,22 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"github.com/zincsearch/zincsearch/pkg/zutils/json"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"math"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
+	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/handlers/search"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+	"github.com/zincsearch/zincsearch/pkg/zutils/json"
+	"golang.org/x/sync/errgroup"
 )
 
 func SearchDSL(c *gin.Context) {
@@ -130,6 +133,7 @@ func MultiSearch(c *gin.Context) {
 	if indexName != "" {
 		defaultIndexNames = strings.Split(indexName, ",")
 	}
+	unifyScore := strings.ToUpper(c.Query("unify_score")) == "TRUE"
 
 	// indexName -> queries
 	indexQueryMap := make(map[string][]*meta.ZincQuery)
@@ -205,6 +209,11 @@ func MultiSearch(c *gin.Context) {
 		}
 	}
 
+	if unifyScore {
+		unifiedMultiSearch(c, addrIndexMap, indexQueryMap)
+		return
+	}
+
 	var (
 		mutex     sync.Mutex
 		clientErr *HttpClientError
@@ -251,6 +260,124 @@ func MultiSearch(c *gin.Context) {
 		})
 	}
 	err = eg.Wait()
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
+}
+
+func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQueryMap map[string][]*meta.ZincQuery) {
+	var (
+		mutex     sync.Mutex
+		clientErr *HttpClientError
+		responses = make([]interface{}, 0)
+		auth      = c.Request.Header.Get("Authorization")
+		stats     = &zincsearch.UnifiedStats{
+			FieldStats: map[string]*zincsearch.FieldStats{},
+		}
+	)
+
+	// get stats info
+	var eg errgroup.Group
+	eg.SetLimit(6)
+	for addr, indexList := range addrIndexMap {
+		host := addr
+		indexes := indexList
+		eg.Go(func() error {
+			var req = &search.PreSearchRequest{
+				IndexList: indexes,
+			}
+			for _, index := range indexes {
+				queries := indexQueryMap[index]
+				// we use first query for stats info
+				if len(queries) > 0 && req.Query == nil {
+					req.Query = queries[0]
+					break
+				}
+			}
+			reqBody, err := json.Marshal(req)
+			if err != nil {
+				return err
+			}
+			var result *zincsearch.UnifiedStats
+
+			err = fetchHTTP(http.MethodPost, host, "/api/internal/get_stats", "", bytes.NewBuffer(reqBody), &result, auth, true)
+			if err != nil {
+				return err
+			}
+
+			mutex.Lock()
+			stats.Merge(result)
+			mutex.Unlock()
+
+			return nil
+		})
+	}
+	err := eg.Wait()
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	statsBytes, err := json.Marshal(stats)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	// do search
+	for addr, indexList := range addrIndexMap {
+		host := addr
+		indexes := indexList
+		eg.Go(func() error {
+			buf := bytes.Buffer{}
+			// first line is stats data
+			_, err := fmt.Fprintln(&buf, string(statsBytes))
+			if err != nil {
+				return err
+			}
+
+			for _, index := range indexes {
+				queries := indexQueryMap[index]
+				for _, query := range queries {
+					indexLine, _ := json.Marshal(map[string]string{
+						"index": index,
+					})
+					_, err := fmt.Fprintln(&buf, string(indexLine))
+					if err != nil {
+						return err
+					}
+					queryLine, _ := json.Marshal(query)
+					_, err = fmt.Fprintln(&buf, string(queryLine))
+					if err != nil {
+						return err
+					}
+				}
+			}
+
+			var result multiSearchRsp
+			err = fetchHTTP(http.MethodPost, host, "/api/internal/unify_search", "", &buf, &result, auth, true)
+			if err != nil {
+				return err
+			}
+
+			mutex.Lock()
+			responses = append(responses, result.Rsp...)
+			mutex.Unlock()
+
+			return nil
+		})
+	}
+	err = eg.Wait()
+
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
 		return
