@@ -149,6 +149,12 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				if err != nil {
 					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s dims parse err %s", field, err.Error()))
 				}
+			case "nbits":
+				var err error
+				newProp.NBits, err = zutils.ToInt(v)
+				if err != nil {
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s nbits parse err %s", field, err.Error()))
+				}
 			case "m":
 				var err error
 				newProp.M, err = zutils.ToInt(v)

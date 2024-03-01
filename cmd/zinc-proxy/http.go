@@ -70,6 +70,7 @@ func SetupHttp(r *gin.Engine) {
 	// vector
 	r.POST("/api/:target/_search/vector", SearchVector)
 	r.POST("/api/:target/:field/_rebuild", directForwarding)
+	r.POST("/api/:target/_recall", directForwarding)
 
 	// index settings
 	r.GET("/api/:target/_mapping", directForwarding)

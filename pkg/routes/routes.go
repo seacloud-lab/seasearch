@@ -125,6 +125,9 @@ func SetRoutes(r *gin.Engine) {
 
 	r.POST("/api/:target/:field/_rebuild", AuthMiddleware("search.Rebuild"), ClusterMiddleware, index.RebuildVectorIndex)
 
+	// vector recall
+	r.POST("/api/:target/_recall", AuthMiddleware("search.vectorRecall"), ClusterMiddleware, search.VectorRecall)
+
 	// document
 	// Document Bulk update/insert
 	r.POST("/api/_bulk", AuthMiddleware("document.Bulk"), document.Bulk)

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
@@ -112,4 +114,66 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 	})
 	resp.Hits.MaxScore = maxScore
 	return resp, nil
+}
+
+func VectorRecall(zincIndex *Index, d int, field string, querySize int, k int64, nprobe int) (float32, error) {
+	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
+	if !ok {
+		return 0, ErrVecIndexNotExists
+	}
+
+	if vecIndexMeta.Type == vector.Flat {
+		return 1.0, nil
+	}
+
+	vecIndex, err := GetVectorIndex(zincIndex.GetName(), field)
+	if err != nil {
+		return 0, err
+	}
+
+	xq := make([][]float32, querySize)
+	for i := 0; i < querySize; i++ {
+		q := make([]float32, d)
+		for j := 0; j < d; j++ {
+			q[j] = rand.Float32()
+		}
+		q[d-1] += float32(i) / 1000
+		xq[i] = q
+	}
+
+	// build a temp flat index
+	flatIdx, err := createTempFlatIndex(zincIndex, field, d)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		// free memory
+		flatIdx.Delete()
+	}()
+
+	correct := int64(0)
+
+	for _, query := range xq {
+		results, err := vecIndex.Search(query, k, nprobe)
+		if err != nil {
+			return 0, err
+		}
+		flatDistances, _, err := flatIdx.Search(query, k)
+		if err != nil {
+			return 0, err
+		}
+		threshold := flatDistances[len(flatDistances)-1] + 1e-3
+		for _, distance := range results {
+			if distance <= threshold {
+				correct++
+			}
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	recall := float32(correct) / float32(k*int64(querySize))
+
+	return recall, nil
 }

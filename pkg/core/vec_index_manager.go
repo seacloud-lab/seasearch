@@ -18,6 +18,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"golang.org/x/sync/errgroup"
@@ -418,14 +419,114 @@ func (v *VecIndex) Search(vec []float32, k int64, nprobe int) (map[string]float3
 	v.lock.RLock()
 	distance, ids, err = v.index.Search(vec, k)
 	v.lock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
 
-	for i, id := range ids {
-		if id == -1 {
+	if v.ref.Type == vector.Flat {
+		for i, id := range ids {
+			if id == -1 {
+				continue
+			}
+			result[base62.Encode(id)] = distance[i]
+		}
+		return result, nil
+	}
+	docIds := make([]string, 0)
+	for i := range ids {
+		if ids[i] == -1 {
 			continue
 		}
-		result[base62.Encode(id)] = distance[i]
+		docIds = append(docIds, base62.Encode(ids[i]))
 	}
-	return result, err
+	if len(docIds) == 0 {
+		return result, nil
+	}
+	// for ivf_pq, we need to get vector and calculate the real distance
+	q, err := query.TermsQuery(map[string]interface{}{
+		"_id": docIds,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	zincIndex, ok := GetIndex(v.zincIndexName)
+	if !ok {
+		return nil, fmt.Errorf("index %s not exists", v.zincIndexName)
+	}
+	readers, err := zincIndex.GetReaders(0, 0)
+	defer func() {
+		for _, r := range readers {
+			_ = r.Close()
+		}
+	}()
+	if err != nil {
+		return nil, err
+	}
+	req := bluge.NewAllMatches(q)
+
+	vectors, ids, err := getVectors(v.field, v.ref.Dims, req, readers...)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ids {
+		realVector := vectors[i*v.ref.Dims : (i+1)*v.ref.Dims]
+		dis, err := L2Distance(vec, realVector)
+		if err != nil {
+			return nil, err
+		}
+		result[base62.Encode(ids[i])] = dis
+	}
+	return result, nil
+}
+
+func L2Distance(slice1, slice2 []float32) (float32, error) {
+	if len(slice1) != len(slice2) {
+		return 0, fmt.Errorf("invliad vectors")
+	}
+
+	var sum float32
+	for i := 0; i < len(slice1); i++ {
+		diff := slice1[i] - slice2[i]
+		sum += diff * diff
+	}
+
+	return sum, nil
+}
+
+// createTempFlatIndex
+// get vectors from bluge and build a temp flat index.
+func createTempFlatIndex(zincIndex *Index, field string, d int) (faiss.Index, error) {
+	// get documents
+	readers, err := zincIndex.GetReaders(0, 0)
+	defer func() {
+		for _, r := range readers {
+			_ = r.Close()
+		}
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	q := bluge.NewMatchAllQuery()
+	req := bluge.NewAllMatches(q)
+	vectors, ids, err := getVectors(field, d, req, readers...)
+	if err != nil {
+		return nil, err
+	}
+
+	var idx faiss.Index
+
+	idx, err = faiss.IndexFactory(d, "IDMap,Flat", faiss.MetricL2)
+	if err != nil {
+		return nil, err
+	}
+	err = idx.AddWithIDs(vectors, ids)
+	if err != nil {
+		idx.Delete()
+		return nil, err
+	}
+
+	return idx, nil
 }
 
 func (v *VecIndex) Close(wait bool) {
@@ -498,7 +599,9 @@ func (v *VecIndex) rebuild() error {
 	v.ref.Count = count
 
 	// free old index
-	v.index.Delete()
+	if v.index != nil {
+		v.index.Delete()
+	}
 	v.index = idx
 
 	return zincIndex.SaveVecIndexMeta(v.field, v.ref)
@@ -584,10 +687,20 @@ func backGroundRebuild() {
 			manager.rebuildLock.Lock()
 			manager.rebuildTaskMp[task.taskName] = struct{}{}
 			manager.rebuildLock.Unlock()
-
+			zincIndex, ok := GetIndex(task.index)
+			if !ok {
+				log.Error().Msgf("rebuild vector index %s err, zincIndex %s not found", task.taskName, task.index)
+				continue
+			}
+			vecIndexMeta, ok := zincIndex.GetVecIndex(task.field)
+			if !ok {
+				log.Error().Msgf("rebuild vector index %s err, vector index meta %s not found", task.taskName, task.index)
+				continue
+			}
 			vecIndex := &VecIndex{
 				zincIndexName: task.index,
 				field:         task.field,
+				ref:           vecIndexMeta,
 			}
 			err := vecIndex.rebuild()
 			if err != nil {
@@ -596,6 +709,7 @@ func backGroundRebuild() {
 			}
 			// rebuild finish, free memory
 			vecIndex.index.Delete()
+			log.Debug().Msgf("%s rebuild finish", task.taskName)
 
 			manager.rebuildLock.Lock()
 			delete(manager.rebuildTaskMp, task.taskName)
@@ -625,7 +739,10 @@ func rebuildVecIndex(indexName string, field string, indexType string) (faiss.In
 		return nil, 0, 0, fmt.Errorf("vector index %s not exists", field)
 	}
 	d := vecIndexMeta.Dims
-	vectors, ids, err := getVectors(field, d, readers...)
+
+	q := bluge.NewMatchAllQuery()
+	req := bluge.NewAllMatches(q)
+	vectors, ids, err := getVectors(field, d, req, readers...)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -668,16 +785,14 @@ func rebuildVecIndex(indexName string, field string, indexType string) (faiss.In
 }
 
 // getVectors get vector from bluge
-func getVectors(field string, d int, readers ...*bluge.Reader) ([]float32, []int64, error) {
+func getVectors(field string, d int, searchReq bluge.SearchRequest, readers ...*bluge.Reader) ([]float32, []int64, error) {
 	ch := make(chan *vecDoc, len(readers)*10)
 	eg := &errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, reader := range readers {
 		r := reader
 		eg.Go(func() error {
-			query := bluge.NewMatchAllQuery()
-			req := bluge.NewAllMatches(query)
-			dmi, err := r.Search(context.Background(), req)
+			dmi, err := r.Search(context.Background(), searchReq)
 			if err != nil {
 				return err
 			}
