@@ -46,7 +46,7 @@ const (
 // then we will can not found the old document, maybe cause duplicate documents.
 // First layer shard just used for distribute not really store documents.
 type IndexShard struct {
-	open   uint64
+	open   uint64 // mark shard has opened WAL
 	name   string // shard name: index/shardID
 	root   *Index
 	ref    *meta.IndexShard
@@ -178,12 +178,12 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	if err := s.openWriter(id); err != nil {
 		return nil, err
 	}
-
 	// check WAL
 	if config.Global.EnableWal {
 		if err := s.OpenWAL(); err != nil {
 			return nil, err
 		}
+		atomic.StoreUint64(&s.open, 1)
 	}
 
 	secondShard.lock.RLock()
@@ -269,12 +269,10 @@ func (s *IndexShard) openWriter(shardID int64) error {
 }
 
 func (s *IndexShard) Close() error {
-	if atomic.LoadUint64(&s.open) == 0 {
-		return nil
+	if config.Global.EnableWal && atomic.LoadUint64(&s.open) == 1 {
+		s.close <- struct{}{}
+		atomic.StoreUint64(&s.open, 0)
 	}
-
-	s.close <- struct{}{}
-	atomic.StoreUint64(&s.open, 0)
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -287,7 +285,7 @@ func (s *IndexShard) Close() error {
 		}
 		secondShard.writer = nil
 	}
-	if config.Global.EnableWal {
+	if config.Global.EnableWal && atomic.LoadUint64(&s.open) == 1 {
 		if err := s.wal.Close(); err != nil {
 			return err
 		}

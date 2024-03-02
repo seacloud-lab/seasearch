@@ -19,6 +19,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
@@ -26,8 +31,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"golang.org/x/sync/errgroup"
-	"sort"
-	"sync"
 )
 
 var (
@@ -37,8 +40,9 @@ var (
 )
 
 type IndexList struct {
-	Indexes map[string]*Index
-	lock    sync.RWMutex
+	Indexes  map[string]*Index
+	lock     sync.RWMutex
+	gcCloser *z.Closer
 }
 
 func init() {
@@ -52,6 +56,9 @@ func init() {
 
 	// start loading index
 	ZINC_INDEX_LIST.Indexes = make(map[string]*Index)
+	ZINC_INDEX_LIST.gcCloser = z.NewCloser(1)
+
+	go ZINC_INDEX_LIST.StartGC()
 
 	// in cluster mode, we load metadata later when assigns ready
 	if config.Global.ServerMode != config.ServerModeCluster {
@@ -78,6 +85,7 @@ func init() {
 func (t *IndexList) Add(index *Index) {
 	t.lock.Lock()
 	t.Indexes[index.GetName()] = index
+	index.atime = time.Now().Unix()
 	t.lock.Unlock()
 }
 
@@ -85,6 +93,9 @@ func (t *IndexList) Get(name string) (*Index, bool) {
 	t.lock.RLock()
 	idx, ok := t.Indexes[name]
 	t.lock.RUnlock()
+	if ok {
+		atomic.StoreInt64(&idx.atime, time.Now().Unix())
+	}
 	return idx, ok
 }
 
@@ -93,6 +104,7 @@ func (t *IndexList) GetOrCreate(name, storageType string, shardNum int64) (*Inde
 	idx, ok := t.Indexes[name]
 	t.lock.RUnlock()
 	if ok {
+		atomic.StoreInt64(&idx.atime, time.Now().Unix())
 		return idx, true, nil
 	}
 	t.lock.Lock()
@@ -114,6 +126,7 @@ func (t *IndexList) GetOrCreate(name, storageType string, shardNum int64) (*Inde
 	}
 	// cache it
 	t.Indexes[idx.GetName()] = idx
+	idx.atime = time.Now().Unix()
 	return idx, false, nil
 }
 
@@ -146,12 +159,13 @@ func (t *IndexList) List() []*Index {
 }
 
 func (t *IndexList) ListMap() map[string]*Index {
-	t.lock.RLock()
-	indexes := make(map[string]*Index, len(t.Indexes))
-	for _, index := range t.Indexes {
+	items := t.List()
+
+	indexes := make(map[string]*Index, len(items))
+	for _, index := range items {
 		indexes[index.ref.Name] = index
 	}
-	t.lock.RUnlock()
+
 	return indexes
 }
 
@@ -177,6 +191,8 @@ func (t *IndexList) ListName() []string {
 func (t *IndexList) Close() error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	t.gcCloser.SignalAndWait()
+
 	eg := errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, index := range t.Indexes {
@@ -188,9 +204,53 @@ func (t *IndexList) Close() error {
 	return eg.Wait()
 }
 
-// GC auto close unused indexes what inactive for a long time (10m)
+func (t *IndexList) StartGC() {
+	defer t.gcCloser.Done()
+
+	ticker := time.NewTicker(600 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+		case <-t.gcCloser.HasBeenClosed():
+			ticker.Stop()
+			return
+		}
+		err := t.GC()
+		if err != nil {
+			log.Error().Msgf("Index GC error %s", err)
+		}
+	}
+}
+
+const indexExpire = 24 * 60 * 60
+
+// GC auto close unused indexes when inactive for a long time (24h)
+// In order to avoid error caused by close an index that is in using,
+// the expiration time is 24 hours.
+// It can be assumed that the index which is not used after this time can be safely close.
 func (t *IndexList) GC() error {
-	return nil // TODO: implement GC
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	var indexList = make([]*Index, 0, len(t.Indexes))
+	for _, index := range t.Indexes {
+		indexList = append(indexList, index)
+	}
+	sort.Slice(indexList, func(i, j int) bool {
+		return atomic.LoadInt64(&indexList[i].atime) < atomic.LoadInt64(&indexList[j].atime)
+	})
+
+	now := time.Now().Unix()
+	for _, index := range indexList {
+		if now-atomic.LoadInt64(&index.atime) < indexExpire {
+			break
+		}
+		err := index.Close()
+		if err != nil {
+			return fmt.Errorf("close index %s error: %w", index.GetName(), err)
+		}
+	}
+	return nil
 }
 
 func InitIndexList() {

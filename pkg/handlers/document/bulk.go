@@ -96,7 +96,6 @@ func ESBulk(c *gin.Context) {
 	ret.Took = int(time.Since(startTime) / time.Millisecond)
 	// update seqNo
 	atomic.AddInt64(&globalSeqNo, int64(ret.Count))
-
 	zutils.GinRenderJSON(c, http.StatusOK, ret)
 }
 

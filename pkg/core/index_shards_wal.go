@@ -17,16 +17,17 @@ package core
 
 import (
 	"fmt"
+	"path"
+	"strings"
+	"sync/atomic"
+
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
-	"path"
 
 	"github.com/blugelabs/bluge"
 	blugeindex "github.com/blugelabs/bluge/index"
 	"github.com/rs/zerolog/log"
-	"strings"
-	"sync/atomic"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
@@ -64,7 +65,6 @@ func (s *IndexShard) OpenWAL() error {
 	}
 	s.lock.Unlock()
 
-	// set wal opened
 	atomic.StoreUint64(&s.open, 1)
 	s.close = make(chan struct{})
 

@@ -19,9 +19,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/blugelabs/bluge"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
+	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"golang.org/x/sync/errgroup"
 
@@ -32,6 +32,7 @@ import (
 )
 
 type Index struct {
+	atime        int64
 	ref          *meta.Index
 	analyzers    map[string]*analysis.Analyzer
 	shards       map[string]*IndexShard
