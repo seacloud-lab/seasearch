@@ -13,6 +13,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 )
 
 type VectorQuery struct {
@@ -158,13 +159,12 @@ func VectorRecall(zincIndex *Index, d int, field string, querySize int, k int64,
 		if err != nil {
 			return 0, err
 		}
-		flatDistances, _, err := flatIdx.Search(query, k)
+		_, ids, err := flatIdx.Search(query, k)
 		if err != nil {
 			return 0, err
 		}
-		threshold := flatDistances[len(flatDistances)-1] + 1e-3
-		for _, distance := range results {
-			if distance <= threshold {
+		for _, id := range ids {
+			if _, ok := results[base62.Encode(id)]; ok {
 				correct++
 			}
 		}

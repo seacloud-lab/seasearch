@@ -571,42 +571,6 @@ func (v *VecIndex) Close(wait bool) {
 	}
 }
 
-// rebuild
-// rebuild index file and update metadata
-func (v *VecIndex) rebuild() error {
-	// get metadata
-	zincIndex, ok := GetIndex(v.zincIndexName)
-	if !ok {
-		return fmt.Errorf("index %s is not exists in metadata", v.zincIndexName)
-	}
-
-	v.lock.Lock()
-	defer v.lock.Unlock()
-	if v.ref.Type == vector.IvfPQ {
-		return nil
-	}
-	t := vector.Flat
-	if v.ref.Count >= config.Global.VectorConfig.IvfPqThreshold {
-		t = vector.IvfPQ
-	}
-
-	idx, count, nlist, err := rebuildVecIndex(v.zincIndexName, v.field, t)
-	if err != nil {
-		return err
-	}
-	v.ref.Type = t
-	v.ref.NList = nlist
-	v.ref.Count = count
-
-	// free old index
-	if v.index != nil {
-		v.index.Delete()
-	}
-	v.index = idx
-
-	return zincIndex.SaveVecIndexMeta(v.field, v.ref)
-}
-
 // RebuildIndex
 // submit a rebuild vector index task
 func RebuildIndex(zincIndexName string, field string) error {
@@ -687,28 +651,18 @@ func backGroundRebuild() {
 			manager.rebuildLock.Lock()
 			manager.rebuildTaskMp[task.taskName] = struct{}{}
 			manager.rebuildLock.Unlock()
-			zincIndex, ok := GetIndex(task.index)
-			if !ok {
-				log.Error().Msgf("rebuild vector index %s err, zincIndex %s not found", task.taskName, task.index)
-				continue
-			}
-			vecIndexMeta, ok := zincIndex.GetVecIndex(task.field)
-			if !ok {
-				log.Error().Msgf("rebuild vector index %s err, vector index meta %s not found", task.taskName, task.index)
-				continue
-			}
-			vecIndex := &VecIndex{
-				zincIndexName: task.index,
-				field:         task.field,
-				ref:           vecIndexMeta,
-			}
-			err := vecIndex.rebuild()
+			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
+				log.Error().Err(err).Msgf("rebuild vector index %s err: get vector index err %s ", task.taskName, task.index)
+				continue
+			}
+			err = vecIndex.rebuild()
+			if err != nil {
+				vecIndex.Close(false)
 				log.Error().Err(err).Msgf("rebuild vector index %s error: %s", task.taskName, err)
 				continue
 			}
-			// rebuild finish, free memory
-			vecIndex.index.Delete()
+			vecIndex.Close(false)
 			log.Debug().Msgf("%s rebuild finish", task.taskName)
 
 			manager.rebuildLock.Lock()
@@ -718,12 +672,25 @@ func backGroundRebuild() {
 	}
 }
 
-// rebuildVecIndex rebuild and save index file
-func rebuildVecIndex(indexName string, field string, indexType string) (faiss.Index, int64, int, error) {
-	zincIndex, ok := GetIndex(indexName)
+// rebuild
+// rebuild index file and update metadata
+func (v *VecIndex) rebuild() error {
+	// get metadata
+	zincIndex, ok := GetIndex(v.zincIndexName)
 	if !ok {
-		return nil, 0, 0, fmt.Errorf("index %s not exists", indexName)
+		return fmt.Errorf("index %s is not exists", v.zincIndexName)
 	}
+
+	t := vector.Flat
+	if v.ref.Count >= config.Global.VectorConfig.IvfPqThreshold {
+		t = vector.IvfPQ
+	}
+
+	return rebuildVecIndex(zincIndex, v, t)
+}
+
+// rebuildVecIndex rebuild and save index file
+func rebuildVecIndex(zincIndex *Index, vecIndex *VecIndex, targetType string) error {
 	// get documents
 	readers, err := zincIndex.GetReaders(0, 0)
 	defer func() {
@@ -732,56 +699,62 @@ func rebuildVecIndex(indexName string, field string, indexType string) (faiss.In
 		}
 	}()
 	if err != nil {
-		return nil, 0, 0, err
+		return err
 	}
-	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
-	if !ok {
-		return nil, 0, 0, fmt.Errorf("vector index %s not exists", field)
-	}
-	d := vecIndexMeta.Dims
+
+	d := vecIndex.ref.Dims
 
 	q := bluge.NewMatchAllQuery()
 	req := bluge.NewAllMatches(q)
-	vectors, ids, err := getVectors(field, d, req, readers...)
+	vectors, ids, err := getVectors(vecIndex.field, d, req, readers...)
 	if err != nil {
-		return nil, 0, 0, err
+		return err
 	}
 	if len(vectors) == 0 {
-		idx, err := faiss.IndexFactory(d, "IDMap,Flat", faiss.MetricL2)
-		if err != nil {
-			return nil, 0, 0, err
-		}
-		return idx, 0, 0, nil
+		// do nothing
+		return nil
 	}
 
 	var idx faiss.Index
 	nlist := 0
-	if indexType == vector.IvfPQ {
+	if targetType == vector.IvfPQ {
 		nlist = int(4 * math.Sqrt(float64(len(ids))))
-		idx, err = faiss.IndexFactory(d, fmt.Sprintf("IVF%d,PQ%dx%d", nlist, vecIndexMeta.M, vecIndexMeta.NBits), faiss.MetricL2)
+		idx, err = faiss.IndexFactory(d, fmt.Sprintf("IVF%d,PQ%dx%d", nlist, vecIndex.ref.M, vecIndex.ref.NBits), faiss.MetricL2)
 		if err != nil {
-			return nil, 0, 0, err
+			return err
 		}
 		err = idx.Train(vectors)
 		if err != nil {
 			idx.Delete()
-			return nil, 0, 0, err
+			return err
 		}
 	} else {
 		idx, err = faiss.IndexFactory(d, "IDMap,Flat", faiss.MetricL2)
 		if err != nil {
-			return nil, 0, 0, err
+			return err
 		}
 	}
 	err = idx.AddWithIDs(vectors, ids)
 	if err != nil {
 		idx.Delete()
-		return nil, 0, 0, err
+		return err
 	}
 
 	// add index
-	err = save(idx, zincIndex.GetName(), field)
-	return idx, int64(len(ids)), nlist, err
+	vecIndex.lock.Lock()
+	err = save(idx, zincIndex.GetName(), vecIndex.field)
+	vecIndex.ref.Type = targetType
+	vecIndex.ref.NList = nlist
+	vecIndex.ref.Count = idx.Ntotal()
+
+	// free old index
+	if vecIndex.index != nil {
+		vecIndex.index.Delete()
+	}
+	vecIndex.index = idx
+	vecIndex.lock.Unlock()
+
+	return zincIndex.SaveVecIndexMeta(vecIndex.field, vecIndex.ref)
 }
 
 // getVectors get vector from bluge

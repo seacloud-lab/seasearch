@@ -287,7 +287,7 @@ func (index *Index) UpdateMetadata() error {
 		totalSize += atomic.LoadUint64(&index.shards[id].ref.Stats.StorageSize)
 	}
 
-	if totalDocNum > 0 && totalSize > 0 {
+	if totalDocNum >= 0 && totalSize > 0 {
 		index.lock.Lock()
 		atomic.StoreUint64(&index.ref.Stats.DocNum, totalDocNum)
 		atomic.StoreUint64(&index.ref.Stats.StorageSize, totalSize)
@@ -320,7 +320,7 @@ func (index *Index) UpdateMetadataByShard(id string) {
 		totalDocNum += atomic.LoadUint64(&shard.ref.Shards[i].Stats.DocNum)
 		totalSize += atomic.LoadUint64(&shard.ref.Shards[i].Stats.StorageSize)
 	}
-	if totalDocNum > 0 && totalSize > 0 {
+	if totalDocNum >= 0 && totalSize > 0 {
 		index.lock.Lock()
 		atomic.StoreUint64(&shard.ref.Stats.DocNum, totalDocNum)
 		atomic.StoreUint64(&shard.ref.Stats.StorageSize, totalSize)
@@ -359,7 +359,7 @@ func (index *Index) UpdateStatsBySecondShard(id string, secondIndex int64) {
 	}
 
 	index.lock.Lock()
-	if docNum > 0 {
+	if docNum >= 0 {
 		atomic.StoreUint64(&secondShard.ref.Stats.DocNum, docNum)
 	}
 	if storageSize > 0 {

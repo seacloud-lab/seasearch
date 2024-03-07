@@ -481,6 +481,18 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 			}
 			vecActions = append(vecActions, action)
 		}
+
+		// delete document operation doesn't exist in vecMap, and we should delete all vector fields.
+		if finalAction == vector.Delete {
+			for field := range shard.root.GetVecIndexes() {
+				vecActions = append(vecActions, &vector.VecAction{
+					DocId:  doc.docID,
+					Action: vector.Delete,
+					Index:  shard.root.ref.Name,
+					Field:  field,
+				})
+			}
+		}
 	}
 	if err := writer.Batch(batch); err != nil {
 		return err
