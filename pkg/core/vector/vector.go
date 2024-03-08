@@ -1,7 +1,6 @@
 package vector
 
 const IndexExt = ".index"
-const TempExt = ".temp"
 
 // VecPrefix Used to distinguish between vec index and bluge data stored in oss
 const VecPrefix = "vec_index"

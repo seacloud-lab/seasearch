@@ -3,6 +3,10 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"strconv"
+	"time"
+
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
@@ -10,9 +14,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	client "go.etcd.io/etcd/client/v3"
-	"runtime/debug"
-	"strconv"
-	"time"
 )
 
 const (
@@ -276,8 +277,7 @@ func watchClusterInfo(ctx context.Context, cancel context.CancelFunc, watcher cl
 				var assign ClusterInfoEvent
 				if event.Type == client.EventTypePut {
 					assign.ItemUpdated = true
-					var err error
-					err = json.Unmarshal(event.Kv.Value, &assign.Info)
+					err := json.Unmarshal(event.Kv.Value, &assign.Info)
 					if err != nil {
 						log.Warn().Err(err).Msgf("malformed value in %q", event.Kv.Key)
 						continue
@@ -364,8 +364,7 @@ func watchUserInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 				var userEvent UserInfoEvent
 				if event.Type == client.EventTypePut {
 					userEvent.ItemUpdated = true
-					var err error
-					err = json.Unmarshal(event.Kv.Value, &userEvent.User)
+					err := json.Unmarshal(event.Kv.Value, &userEvent.User)
 					if err != nil {
 						log.Warn().Err(err).Msgf("malformed value in %q", event.Kv.Key)
 						continue
@@ -423,8 +422,7 @@ func watchRoleInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 				var roleEvent RoleEvent
 				if event.Type == client.EventTypePut {
 					roleEvent.ItemUpdated = true
-					var err error
-					err = json.Unmarshal(event.Kv.Value, &roleEvent.Role)
+					err := json.Unmarshal(event.Kv.Value, &roleEvent.Role)
 					if err != nil {
 						log.Warn().Err(err).Msgf("malformed value in %q", event.Kv.Key)
 						continue

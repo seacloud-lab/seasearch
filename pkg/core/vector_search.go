@@ -52,7 +52,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 
 	docIdSlice := make([]string, len(vecResult))
 	i := 0
-	for docId, _ := range vecResult {
+	for docId := range vecResult {
 		docIdSlice[i] = docId
 		i++
 	}
@@ -98,7 +98,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 	}
 	// set score by distance
 	var maxScore float64 = 0
-	for i, _ := range resp.Hits.Hits {
+	for i := range resp.Hits.Hits {
 		h1d, ok := vecResult[resp.Hits.Hits[i].ID]
 		if !ok {
 			// that's impassable

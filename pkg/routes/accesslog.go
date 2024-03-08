@@ -54,7 +54,7 @@ func AccessLog(app *gin.Engine) {
 			return ""
 		}
 		writer.FormatErrFieldName = func(_ interface{}) string {
-			return fmt.Sprintf("err:")
+			return "err:"
 		}
 		writer.FormatErrFieldValue = func(i interface{}) string {
 			return fmt.Sprintf("%s", i)

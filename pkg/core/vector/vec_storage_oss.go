@@ -19,10 +19,6 @@ type OssStorage struct {
 	cachePath string
 }
 
-func (o *OssStorage) Close() error {
-	return o.cache.Close()
-}
-
 func (o *OssStorage) ExistsFile(name string) (bool, error) {
 	key := path.Join(o.prefix, name)
 	return o.bucket.IsObjectExist(key)
@@ -74,19 +70,21 @@ func (o *OssStorage) Remove(name string) error {
 	if err != nil {
 		return err
 	}
-
+	// remove local file
 	for _, obj := range objs {
-		// remove local file
 		err = o.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
 			return err
 		}
+	}
+	// remove obj storage
+	for _, obj := range objs {
 		err = o.bucket.DeleteObject(obj.Key)
 		if err != nil {
 			return err
 		}
 	}
-	return os.RemoveAll(path.Join(o.cachePath, name))
+	return nil
 }
 
 func (o *OssStorage) listObjects(prefix string) ([]oss.ObjectProperties, error) {
@@ -98,10 +96,7 @@ func (o *OssStorage) listObjects(prefix string) ([]oss.ObjectProperties, error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to list objects: %w", err)
 		}
-		for _, obj := range result.Objects {
-			info = append(info, obj)
-		}
-
+		info = append(info, result.Objects...)
 		if !result.IsTruncated {
 			break
 		} else if i == 0 {
@@ -125,9 +120,7 @@ func createOssStorage() (ObjStore, error) {
 		return nil, err
 	}
 	o := &OssStorage{
-		cache: lru_cache.GetCache(path.Join(config.Global.DataPath, VecPrefix), func(ext string) bool {
-			return ext == IndexExt
-		}, TempExt),
+		cache:     lru_cache.Instance,
 		client:    client,
 		prefix:    VecPrefix,
 		cachePath: path.Join(config.Global.DataPath, VecPrefix),

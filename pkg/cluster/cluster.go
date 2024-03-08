@@ -4,13 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	client "go.etcd.io/etcd/client/v3"
-	"sync"
-	"time"
 )
 
 var (
@@ -121,7 +122,7 @@ func DiffAssigns(inputAssigns map[string]int) (removeMap map[string]struct{}) {
 		}
 	}
 	// not present in inputAssigns, they don't belong to anyone
-	for partition, _ := range assignMap {
+	for partition := range assignMap {
 		if _, ok := inputAssigns[partition]; !ok {
 			delete(assignMap, partition)
 			removeMap[partition] = struct{}{}
@@ -177,7 +178,7 @@ func watchAssign() {
 				// So the events should usually arrive at around the same time.
 				// We only need to update our internal assignment cache when the first event arrives.
 				// So we set a 10s buffer to skip the following events.
-				if time.Now().Sub(lastAssignProcessTime) < 10*time.Second {
+				if time.Since(lastAssignProcessTime) < 10*time.Second {
 					// ignore
 					continue
 				}

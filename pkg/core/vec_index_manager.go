@@ -87,7 +87,6 @@ func InitVecIndexManager() {
 
 func CloseVecIndexManager() {
 	manager.closer.SignalAndWait()
-	_ = manager.storage.Close()
 }
 
 // backGroundGC for free memory
@@ -753,7 +752,9 @@ func rebuildVecIndex(zincIndex *Index, vecIndex *VecIndex, targetType string) er
 	}
 	vecIndex.index = idx
 	vecIndex.lock.Unlock()
-
+	if err != nil {
+		return err
+	}
 	return zincIndex.SaveVecIndexMeta(vecIndex.field, vecIndex.ref)
 }
 

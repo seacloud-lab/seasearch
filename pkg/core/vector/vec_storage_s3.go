@@ -85,23 +85,25 @@ func (s *s3Storage) Remove(name string) error {
 	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
 
 	objs := s.cli.ListObjects(context.Background(), s.bucketName, opts)
+
+	// s3 list objects return a channel that can only traverse once, so we temp store the keys.
+	keys := make([]string, 0)
+	// remove local file
 	for obj := range objs {
-		// remove local file
 		err := s.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
 			return err
 		}
-		err = s.cli.RemoveObject(context.Background(), s.bucketName, obj.Key, minio.RemoveObjectOptions{})
+		keys = append(keys, obj.Key)
+	}
+	// remove obj storage
+	for _, key := range keys {
+		err := s.cli.RemoveObject(context.Background(), s.bucketName, key, minio.RemoveObjectOptions{})
 		if err != nil {
 			return err
 		}
 	}
-	// remove folder
-	return os.RemoveAll(path.Join(s.cachePath, name))
-}
-
-func (s *s3Storage) Close() error {
-	return s.cache.Close()
+	return nil
 }
 
 func createS3Storage() (ObjStore, error) {
@@ -127,9 +129,7 @@ func createS3Storage() (ObjStore, error) {
 	}
 
 	s3 := &s3Storage{
-		cache: lru_cache.GetCache(path.Join(config.Global.DataPath, VecPrefix), func(ext string) bool {
-			return ext == IndexExt
-		}, TempExt),
+		cache:      lru_cache.Instance,
 		bucketName: bucketName,
 		prefix:     VecPrefix,
 		cachePath:  path.Join(config.Global.DataPath, VecPrefix),
@@ -142,12 +142,13 @@ func createS3Storage() (ObjStore, error) {
 			Region:       awsRegion,
 			BucketLookup: bucketLookup,
 		})
+	} else {
+		s3.cli, err = minio.New(endPoint, &minio.Options{
+			Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
+			Secure:       useHTTPS,
+			BucketLookup: bucketLookup,
+		})
 	}
-	s3.cli, err = minio.New(endPoint, &minio.Options{
-		Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
-		Secure:       useHTTPS,
-		BucketLookup: bucketLookup,
-	})
 	if err != nil {
 		return nil, err
 	}

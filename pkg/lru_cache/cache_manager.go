@@ -24,6 +24,7 @@ import (
 
 const pidFilename = "bluge.pid"
 const TempExt = ".temp"
+const VectorIndexExt = ".index"
 
 type LruCache struct {
 	caches   map[string]*CacheFile
@@ -40,12 +41,26 @@ type LruCache struct {
 
 type extCheck func(ext string) bool
 
-// Instance for bluge directory to avoid multiple cache instances
-var Instance = GetCache(config.Global.DataPath, func(ext string) bool {
-	return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
-}, TempExt)
+// Instance lru cache is globally unique, directory and vector_manager share the instance
+var Instance *LruCache
 
-func GetCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
+func Init() {
+	if config.Global.StorageType == "disk" {
+		return
+	}
+	Instance = createCache(config.Global.DataPath, func(ext string) bool {
+		return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment || ext == VectorIndexExt
+	}, TempExt)
+}
+
+func ShutDown() {
+	if config.Global.StorageType == "disk" {
+		return
+	}
+	_ = Instance.Close()
+}
+
+func createCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
 	cacheManager := &LruCache{
 		caches:   make(map[string]*CacheFile),
 		maxSize:  config.Global.ObjCache.MaxCacheSize,
@@ -360,12 +375,39 @@ func dirExists(path string) (bool, error) {
 }
 
 // Remove
-// the filePath is the absolute path of cache file.
+// The filePath is the absolute path of cache file.
+// After remove the specified file, it also removes the file's parent folder recursive if it is empty
+// until the parent is cache root.
 func (c *LruCache) Remove(filepath string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	delete(c.caches, filepath)
-	return os.RemoveAll(filepath)
+	err := os.RemoveAll(filepath)
+	if err != nil {
+		return err
+	}
+
+	// if parent dir is empty, remove parent folder
+	return c.removeParentIfEmpty(filepath)
+}
+
+func (c *LruCache) removeParentIfEmpty(p string) error {
+	if p == c.rootPath {
+		return nil
+	}
+	dirPath := filepath.Dir(p)
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return nil
+	}
+	err = os.RemoveAll(dirPath)
+	if err != nil {
+		return err
+	}
+	return c.removeParentIfEmpty(dirPath)
 }
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
@@ -423,6 +465,10 @@ func (c *LruCache) Sync(path string) error {
 func (c *LruCache) Lock(path string) (pid *os.File, err error) {
 	pidPath := filepath.Join(path, pidFilename)
 	pid, err = os.OpenFile(pidPath, os.O_CREATE|os.O_RDWR, 0777)
+	if err != nil {
+		_ = pid.Close()
+		return
+	}
 	err = unix.Flock(int(pid.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err != nil {
 		_ = pid.Close()

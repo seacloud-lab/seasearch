@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -21,8 +20,6 @@ import (
 
 type OssBackend struct {
 	path   string
-	pid    *os.File
-	lock   sync.Mutex
 	prefix string
 	cache  *lru_cache.LruCache
 	ossClient
@@ -108,10 +105,19 @@ func RemoveOssIndex(indexName string) error {
 	if err != nil {
 		return err
 	}
+	dataPath := config.Global.DataPath
+	// remove local cache
+	for _, obj := range objs {
+		err = lru_cache.Instance.Remove(path.Join(dataPath, obj.Key))
+		if err != nil {
+			return err
+		}
+	}
+	// remove obj storage
 	for _, obj := range objs {
 		err = o.remove(obj.Key)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to delete index: %w", err)
 		}
 	}
 	return nil
@@ -153,10 +159,7 @@ func (b *ossClient) listObjects(prefix string) ([]oss.ObjectProperties, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to list objects: %w", err)
 		}
-		for _, obj := range result.Objects {
-			info = append(info, obj)
-		}
-
+		info = append(info, result.Objects...)
 		if !result.IsTruncated {
 			break
 		} else if i == 0 {
@@ -294,14 +297,12 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 
 func (b *OssBackend) Remove(kind string, id uint64) error {
 	key := fileName(kind, id)
-
-	err := b.remove(path.Join(b.prefix, key))
-
-	err2 := b.cache.Remove(path.Join(b.path, key))
-	if err == nil {
-		err = err2
+	err := b.cache.Remove(path.Join(b.path, key))
+	if err != nil {
+		return err
 	}
-	return err
+
+	return b.remove(path.Join(b.prefix, key))
 }
 
 func (b *OssBackend) Stats() (numItems uint64, numBytes uint64) {

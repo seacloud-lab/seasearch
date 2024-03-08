@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -43,8 +42,6 @@ func GetS3Config(rootPath string, indexName string, timeRange ...int64) bluge.Co
 type S3Backend struct {
 	prefix string
 	path   string
-	pid    *os.File
-	lock   sync.Mutex
 	cache  *lru_cache.LruCache
 	s3Client
 }
@@ -129,10 +126,19 @@ func RemoveS3Index(indexName string) error {
 	if err != nil {
 		return err
 	}
+	dataPath := config.Global.DataPath
+	// remove local cache
+	for _, obj := range objs {
+		err = lru_cache.Instance.Remove(path.Join(dataPath, obj.Key))
+		if err != nil {
+			return err
+		}
+	}
+	// remove obj storage
 	for _, obj := range objs {
 		err = s3.remove(obj.Key)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to delete index: %w", err)
 		}
 	}
 	return nil
@@ -310,14 +316,12 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 
 func (b *S3Backend) Remove(kind string, id uint64) error {
 	key := fileName(kind, id)
-
-	err := b.remove(path.Join(b.prefix, key))
-
-	err2 := b.cache.Remove(path.Join(b.path, key))
-	if err == nil {
-		err = err2
+	err := b.cache.Remove(path.Join(b.path, key))
+	if err != nil {
+		return err
 	}
-	return err
+
+	return b.remove(path.Join(b.prefix, key))
 }
 
 func (b *S3Backend) Stats() (numItems uint64, numBytes uint64) {

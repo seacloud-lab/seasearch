@@ -17,10 +17,10 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path"
 
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
@@ -36,13 +36,13 @@ func DeleteIndex(name string) error {
 	}
 	// delete vecIndexes
 	vecIndexes := index.GetVecIndexes()
-	for vecIndex, _ := range vecIndexes {
+	for vecIndex := range vecIndexes {
 		err := DeleteVecIndex(name, vecIndex)
 		if err != nil {
 			return err
 		}
 	}
-
+	// remove vector index folder
 	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, name))
 	if err != nil {
 		return err
@@ -61,19 +61,17 @@ func DeleteIndex(name string) error {
 }
 
 func delIndex(index *Index) error {
-	var err error
-	if index.ref.StorageType == "oss" {
-		err = directory.RemoveOssIndex(index.GetName())
-	} else if index.ref.StorageType == "s3" {
-		err = directory.RemoveS3Index(index.GetName())
+	switch index.ref.StorageType {
+	case "oss":
+		return directory.RemoveOssIndex(index.GetName())
+	case "s3":
+		return directory.RemoveS3Index(index.GetName())
+	default:
+		dataPath := config.Global.DataPath
+		err := os.RemoveAll(dataPath + "/" + index.GetName())
+		if err != nil {
+			return fmt.Errorf("failed to delete index: %w", err)
+		}
+		return nil
 	}
-	if err != nil {
-		return err
-	}
-	dataPath := config.Global.DataPath
-	err = os.RemoveAll(dataPath + "/" + index.GetName())
-	if err != nil {
-		log.Error().Err(err).Msg("failed to delete index")
-	}
-	return err
 }

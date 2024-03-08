@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewNodeDistribute(t *testing.T) {
@@ -211,7 +212,7 @@ func TestStability(t *testing.T) {
 	result := distribute(curNodes)
 	assert.Equal(t, 249, len(result))
 
-	for partition, _ := range result {
+	for partition := range result {
 		_, ok := curAssignMap[partition]
 		assert.False(t, ok)
 	}

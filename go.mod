@@ -21,11 +21,11 @@ require (
 	github.com/go-ego/gse v0.80.2
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/goccy/go-json v0.10.2
+	github.com/grafana/pyroscope-go v1.1.1
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/prometheus/client_golang v1.15.0
-	github.com/pyroscope-io/client v0.6.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.29.0
 	github.com/segmentio/analytics-go/v3 v3.2.1
@@ -86,9 +86,10 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/grafana/pyroscope-go/godeltaprof v0.1.6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.16.7 // indirect
+	github.com/klauspost/compress v1.17.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
@@ -108,7 +109,6 @@ require (
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
-	github.com/pyroscope-io/godeltaprof v0.1.2 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/segmentio/backo-go v1.0.0 // indirect
 	github.com/tidwall/tinylru v1.1.0 // indirect

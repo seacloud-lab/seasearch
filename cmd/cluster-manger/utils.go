@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"os"
 	"path"
 	"strings"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func setLog() {
@@ -37,7 +38,7 @@ func setLog() {
 		return ""
 	}
 	writer.FormatErrFieldName = func(_ interface{}) string {
-		return fmt.Sprintf("err:")
+		return "err:"
 	}
 	writer.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)

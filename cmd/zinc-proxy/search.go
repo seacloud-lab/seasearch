@@ -194,7 +194,7 @@ func MultiSearch(c *gin.Context) {
 	// addr -> []index
 	addrIndexMap := make(map[string][]string)
 
-	for index, _ := range indexQueryMap {
+	for index := range indexQueryMap {
 		addr, err := GetAddrByIndex(index)
 		if err != nil {
 			zutils.GinRenderJSON(c, http.StatusOK, &meta.HTTPResponseError{Error: err.Error()})

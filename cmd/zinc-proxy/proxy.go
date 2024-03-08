@@ -4,14 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
-
-	"sync"
-	"time"
 )
 
 var (
@@ -56,9 +56,7 @@ func ShutDownProxy() {
 type NodeMap struct {
 	mp       map[int]string
 	nodeList []string
-	// used for round-robin
-	c     int64
-	mutex sync.RWMutex
+	mutex    sync.RWMutex
 }
 
 func GetAddrByIndex(indexName string) (string, error) {

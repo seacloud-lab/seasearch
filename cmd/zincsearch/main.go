@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/grafana/pyroscope-go"
 	"github.com/rs/zerolog"
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
@@ -36,7 +37,6 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
-	"github.com/pyroscope-io/client/pyroscope"
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -77,6 +77,8 @@ func main() {
 	profiling()
 	// init cluster
 	cluster.Init()
+	// init lruCache
+	lru_cache.Init()
 	// init assign watch
 	core.InitIndexList()
 	// init vector index
@@ -128,12 +130,12 @@ func main() {
 		auth.Close()
 		// close cluster
 		cluster.Close()
+		// close lruCache
+		lru_cache.ShutDown()
+		log.Info().Msgf("LruCache closed")
 		// close metadata
 		err = metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
-		// cache close
-		_ = lru_cache.Instance.Close()
-		log.Info().Msgf("LruCache closed")
 		// close wal
 		if config.Global.EnableWal {
 			wal.ShutDown()
@@ -222,7 +224,7 @@ func setLog() {
 		return ""
 	}
 	writer.FormatErrFieldName = func(_ interface{}) string {
-		return fmt.Sprintf("err:")
+		return "err:"
 	}
 	writer.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)

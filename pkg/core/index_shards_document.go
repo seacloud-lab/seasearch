@@ -106,11 +106,11 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 		delete(doc, meta.TimeFieldName)
 		// zincSearch use go-json lib and it unmarshal json numbers to float64，
 		// but the value of doc would be int64 if we don't use WAL (without serialization)
-		switch value.(type) {
+		switch x := value.(type) {
 		case float64:
-			timestamp = time.Unix(0, int64(value.(float64)))
+			timestamp = time.Unix(0, int64(x))
 		case int64:
-			timestamp = time.Unix(0, value.(int64))
+			timestamp = time.Unix(0, x)
 		default:
 			return nil, nil, fmt.Errorf("invalid timestamp data type")
 		}

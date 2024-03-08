@@ -21,7 +21,6 @@ type ObjStore interface {
 	// SaveFile save a disk file into obj storage, and cache it.
 	SaveFile(inputFile string, fileName string) error
 	Remove(name string) error
-	Close() error
 }
 
 func GetVectorStorage() (ObjStore, error) {
@@ -45,10 +44,6 @@ func createDiskStore() (ObjStore, error) {
 	return &diskStore{
 		rootPath: path.Join(config.Global.DataPath, VecPrefix),
 	}, nil
-}
-
-func (d *diskStore) Close() error {
-	return nil
 }
 
 func (d *diskStore) ExistsFile(fileName string) (bool, error) {

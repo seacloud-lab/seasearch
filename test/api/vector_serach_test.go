@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
@@ -83,7 +85,8 @@ func TestVectorSearch(t *testing.T) {
 		config.Global.EnableWal = true
 		config.Global.StorageType = "disk"
 	}()
-
+	lru_cache.Init()
+	defer lru_cache.ShutDown()
 	core.InitVecIndexManager()
 
 	t.Run("init metaData for vectorSearch", func(t *testing.T) {
@@ -144,6 +147,10 @@ func TestVectorSearch(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		resp := request("DELETE", "/api/index/"+vecIndexName, body)
 		assert.Equal(t, http.StatusOK, resp.Code)
+		if resp.Code != http.StatusOK {
+			bd, _ := io.ReadAll(resp.Body)
+			t.Errorf(string(bd))
+		}
 		checkExists(t)
 	})
 }
