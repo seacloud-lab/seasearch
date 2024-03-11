@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"sort"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
@@ -131,15 +130,11 @@ func VectorRecall(zincIndex *Index, d int, field string, querySize int, k int64,
 	if err != nil {
 		return 0, err
 	}
+	defer vecIndex.Close(false)
 
-	xq := make([][]float32, querySize)
-	for i := 0; i < querySize; i++ {
-		q := make([]float32, d)
-		for j := 0; j < d; j++ {
-			q[j] = rand.Float32()
-		}
-		q[d-1] += float32(i) / 1000
-		xq[i] = q
+	xq, err := getQueryVectors(zincIndex, field, querySize, vecIndexMeta.Dims)
+	if err != nil {
+		return 0, err
 	}
 
 	// build a temp flat index

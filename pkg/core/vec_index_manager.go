@@ -528,6 +528,32 @@ func createTempFlatIndex(zincIndex *Index, field string, d int) (faiss.Index, er
 	return idx, nil
 }
 
+// getQueryVectors
+// get some vectors from bluge
+func getQueryVectors(zincIndex *Index, field string, n int, dim int) ([][]float32, error) {
+	// get documents
+	readers, err := zincIndex.GetReaders(0, 0)
+	defer func() {
+		for _, r := range readers {
+			_ = r.Close()
+		}
+	}()
+	if err != nil {
+		return nil, err
+	}
+	q := bluge.NewMatchAllQuery()
+	req := bluge.NewTopNSearch(n, q)
+	vectors, _, err := getVectors(field, dim, req, readers...)
+	if err != nil {
+		return nil, err
+	}
+	res := make([][]float32, 0, n)
+	for i := 0; i < n; i++ {
+		res = append(res, vectors[i*dim:(i+1)*dim])
+	}
+	return res, nil
+}
+
 func (v *VecIndex) Close(wait bool) {
 	manager.lock.Lock()
 	v.refCount--
@@ -773,21 +799,23 @@ func getVectors(field string, d int, searchReq bluge.SearchRequest, readers ...*
 			for next, err := dmi.Next(); err == nil && next != nil; next, err = dmi.Next() {
 				var id string
 				var vec []float32
+				ok := false
 				err = next.VisitStoredFields(func(f string, value []byte) bool {
 					if f == "_id" {
 						id = string(value)
 						return true
 					}
 					if f == field {
-						var v []float32
+						var v = make([]float32, d)
 						err := json.Unmarshal(value, &v)
 						if err != nil {
 							return false
 						}
 						vec = v
+						ok = true
 						return true
 					}
-					if id != "" && len(vec) > 0 {
+					if id != "" && ok {
 						return false
 					}
 					return true
