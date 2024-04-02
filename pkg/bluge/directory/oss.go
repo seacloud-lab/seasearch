@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -46,6 +47,7 @@ func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.C
 			cfg = cfg.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
+	cfg.IndexName = indexName
 	return bluge.DefaultConfigWithIndexConfig(cfg)
 }
 
@@ -186,7 +188,7 @@ func (b *OssBackend) List(kind string) ([]uint64, error) {
 	if err != nil {
 		return nil, err
 	}
-	var itemList []uint64
+	var itemList uint64Slice
 
 	for _, item := range list {
 		if filepath.Ext(item.Key) != kind {
@@ -201,6 +203,7 @@ func (b *OssBackend) List(kind string) ([]uint64, error) {
 		}
 		itemList = append(itemList, parsedID)
 	}
+	sort.Sort(sort.Reverse(itemList))
 	return itemList, nil
 }
 

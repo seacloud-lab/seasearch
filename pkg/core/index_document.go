@@ -16,6 +16,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -231,7 +232,7 @@ func (index *Index) DeleteDocuments(docIDs []string) error {
 		shard := index.GetShardByDocID(docID)
 		secondShardID, err := shard.FindShardByDocID(docID)
 		if err != nil {
-			return err
+			return fmt.Errorf("find id %s err: %w", docID, err)
 		}
 		data := map[string]interface{}{
 			meta.IDFieldName:     docID,
