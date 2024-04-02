@@ -39,6 +39,7 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 			config = config.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
+	config.IndexName = indexName
 	return bluge.DefaultConfigWithIndexConfig(config)
 }
 

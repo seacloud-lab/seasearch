@@ -200,6 +200,11 @@ func setLog() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
 	}
+	// setup stdErr
+	err = Dup(int(file.Fd()), int(os.Stderr.Fd()))
+	if err != nil {
+		log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
+	}
 
 	lv, err := zerolog.ParseLevel(config.Global.LogConfig.LogLevel)
 	if err != nil {
