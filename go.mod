@@ -136,7 +136,7 @@ require (
 )
 
 replace (
-	github.com/blugelabs/bluge => github.com/seafileltd/bluge v1.0.6
+	github.com/blugelabs/bluge => github.com/seafileltd/bluge v1.0.7
 	github.com/blugelabs/bluge_segment_api => github.com/zincsearch/bluge_segment_api v1.0.0
 	github.com/blugelabs/ice => github.com/zincsearch/ice v1.1.3
 )

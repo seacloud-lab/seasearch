@@ -19,11 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
-
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 )
@@ -42,20 +39,14 @@ func DeleteIndex(name string) error {
 			return err
 		}
 	}
-	// remove vector index folder
-	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, name))
+	// 2. Physically delete the index
+	err := delIndex(index)
 	if err != nil {
 		return err
 	}
 
-	// 2. Close and Delete from cache
+	// 3. Close and Delete from cache
 	ZINC_INDEX_LIST.Delete(name)
-
-	// 3. Physically delete the index
-	err = delIndex(index)
-	if err != nil {
-		return err
-	}
 	// 4. Delete form metadata
 	return metadata.Index.Delete(name)
 }

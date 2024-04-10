@@ -104,9 +104,6 @@ func RemoveOssIndex(indexName string) error {
 	if err != nil {
 		return err
 	}
-	if err != nil {
-		return err
-	}
 	dataPath := config.Global.DataPath
 	// remove local cache
 	for _, obj := range objs {
