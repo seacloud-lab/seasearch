@@ -398,6 +398,9 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 	dirPath := filepath.Dir(p)
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	if len(entries) != 0 {

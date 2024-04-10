@@ -90,6 +90,9 @@ func (s *s3Storage) Remove(name string) error {
 	keys := make([]string, 0)
 	// remove local file
 	for obj := range objs {
+		if obj.Err != nil {
+			return obj.Err
+		}
 		err := s.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
 			return err

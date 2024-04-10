@@ -286,12 +286,10 @@ func checkVecIndexMeta(indexName, fieldName string) (*meta.VecIndex, error) {
 
 func DeleteVecIndex(indexName string, fieldName string) error {
 	vecIndex, err := GetVectorIndex(indexName, fieldName)
-	if err != nil && !errors.Is(err, ErrVecIndexNotExists) {
-		return fmt.Errorf("failed to get vector index %s/%s: %w", indexName, fieldName, err)
-	} else if errors.Is(err, ErrVecIndexNotExists) {
-		return nil
-	} else if err == nil {
+	if err == nil {
 		vecIndex.Close(true)
+	} else if !errors.Is(err, ErrVecIndexNotExists) && !errors.Is(err, ErrVecIndexCorruption) {
+		return fmt.Errorf("failed to get vector index %s/%s: %w", indexName, fieldName, err)
 	}
 	err = manager.storage.Remove(path.Join(indexName, fieldName))
 	if err != nil {
