@@ -104,7 +104,7 @@ func backGroundGC() {
 		}
 
 		if previousFound, err = execGC(); err != nil {
-			log.Warn().Msgf("background vector index gc error: %v", err)
+			log.Error().Err(err).Msgf("background vector index GC err: ")
 		}
 
 		if previousFound {
@@ -676,17 +676,24 @@ func backGroundRebuild() {
 			manager.rebuildLock.Unlock()
 			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
+				manager.rebuildLock.Lock()
+				delete(manager.rebuildTaskMp, task.taskName)
+				manager.rebuildLock.Unlock()
 				log.Error().Err(err).Msgf("rebuild vector index %s err: get vector index err %s ", task.taskName, task.index)
 				continue
 			}
+			start := time.Now()
 			err = vecIndex.rebuild()
 			if err != nil {
+				manager.rebuildLock.Lock()
+				delete(manager.rebuildTaskMp, task.taskName)
+				manager.rebuildLock.Unlock()
 				vecIndex.Close(false)
 				log.Error().Err(err).Msgf("rebuild vector index %s error: %s", task.taskName, err)
 				continue
 			}
 			vecIndex.Close(false)
-			log.Debug().Msgf("%s rebuild finish", task.taskName)
+			log.Debug().Msgf("%s rebuild finish, took %f s", task.taskName, time.Since(start).Seconds())
 
 			manager.rebuildLock.Lock()
 			delete(manager.rebuildTaskMp, task.taskName)

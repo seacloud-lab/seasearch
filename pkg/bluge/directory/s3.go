@@ -122,10 +122,12 @@ func newS3client(accessKeyID, accessKeySecret, bucketName, endPoint, region stri
 func RemoveS3Index(indexName string) error {
 	s3, err := createS3Client()
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Remove index %s err: create s3 client err: ", indexName)
+		return fmt.Errorf("create s3 client err: %w", err)
 	}
 	objs, err := s3.listObjects(indexName)
 	if err != nil {
+		log.Error().Err(err).Msgf("Remove index %s err: ", indexName)
 		return err
 	}
 	dataPath := config.Global.DataPath
@@ -140,7 +142,8 @@ func RemoveS3Index(indexName string) error {
 	for _, obj := range objs {
 		err = s3.remove(obj.Key)
 		if err != nil {
-			return fmt.Errorf("failed to delete index: %w", err)
+			log.Error().Err(err).Msgf("Remove index %s err: remove object err: ", indexName)
+			return fmt.Errorf("failed to remove object: %w", err)
 		}
 	}
 	return nil
@@ -206,7 +209,8 @@ func (b *S3Backend) Setup(readOnly bool) error {
 func (b *S3Backend) List(kind string) ([]uint64, error) {
 	list, err := b.listObjects(b.prefix)
 	if err != nil {
-		return nil, err
+		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
+		return nil, fmt.Errorf("list objects err: %w", err)
 	}
 	var itemList uint64Slice
 
@@ -218,7 +222,7 @@ func (b *S3Backend) List(kind string) ([]uint64, error) {
 		stringID = stringID[:len(stringID)-len(kind)]
 		parsedID, err := strconv.ParseUint(stringID, 16, 64)
 		if err != nil {
-			log.Error().Err(err).Msg("List: failed to parse object id: ")
+			log.Error().Err(err).Msgf("List index %s err: failed to parse object id %s :", b.prefix, stringID)
 			continue
 		}
 		itemList = append(itemList, parsedID)
@@ -235,7 +239,8 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 
 	reader, err := b.read(path.Join(b.prefix, key))
 	if err != nil {
-		return nil, nil, err
+		log.Error().Err(err).Msgf("Load index %s file err: Read file from s3 err: ", b.prefix)
+		return nil, nil, fmt.Errorf("load file err: read file from s3 err: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
@@ -243,7 +248,7 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 
 	cf, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load file err: %w", err)
 	}
 	return cf.LoadReadOnlyData()
 }
@@ -302,12 +307,12 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 
 	err1, ok := <-errCh1
 	if ok {
-		log.Warn().Err(err1).Msg("persist to obj store failed")
+		log.Error().Err(err1).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 	}
 
 	err2, ok := <-errCh2
 	if ok {
-		log.Warn().Err(err2).Msg("persist to fs cache failed")
+		log.Error().Err(err2).Msgf("Persist index %s error: persist to fs cache err: ", b.prefix)
 	}
 
 	if err1 != nil {
@@ -324,13 +329,18 @@ func (b *S3Backend) Remove(kind string, id uint64) error {
 		return err
 	}
 
-	return b.remove(path.Join(b.prefix, key))
+	err = b.remove(path.Join(b.prefix, key))
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove index file %s from obj store err: ", path.Join(b.prefix, key))
+		return fmt.Errorf("remove object err: %w", err)
+	}
+	return nil
 }
 
 func (b *S3Backend) Stats() (numItems uint64, numBytes uint64) {
 	objs, err := b.listObjects(b.prefix)
 	if err != nil {
-		log.Warn().Err(err).Msg("could not get obj_store stats")
+		log.Error().Err(err).Msgf("Stats index %s err: list objects err: ", b.prefix)
 		return 0, 0
 	}
 	objectCount := uint64(0)

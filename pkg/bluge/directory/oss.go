@@ -98,10 +98,12 @@ func newOSSClient(endPoint, accessKeyID, accessKeySecret, bucketName string) (*o
 func RemoveOssIndex(indexName string) error {
 	o, err := createOssClient()
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Remove index %s err: create oss client err: ", indexName)
+		return fmt.Errorf("create oss client err: %w", err)
 	}
 	objs, err := o.listObjects(indexName)
 	if err != nil {
+		log.Error().Err(err).Msgf("Remove index %s err: ", indexName)
 		return err
 	}
 	dataPath := config.Global.DataPath
@@ -116,7 +118,8 @@ func RemoveOssIndex(indexName string) error {
 	for _, obj := range objs {
 		err = o.remove(obj.Key)
 		if err != nil {
-			return fmt.Errorf("failed to delete index: %w", err)
+			log.Error().Err(err).Msgf("Remove index %s err: remove object err: ", indexName)
+			return fmt.Errorf("failed to remove object: %w", err)
 		}
 	}
 	return nil
@@ -183,6 +186,7 @@ func (b *OssBackend) Setup(readOnly bool) error {
 func (b *OssBackend) List(kind string) ([]uint64, error) {
 	list, err := b.listObjects(b.prefix)
 	if err != nil {
+		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, err
 	}
 	var itemList uint64Slice
@@ -195,7 +199,7 @@ func (b *OssBackend) List(kind string) ([]uint64, error) {
 		stringID = stringID[:len(stringID)-len(kind)]
 		parsedID, err := strconv.ParseUint(stringID, 16, 64)
 		if err != nil {
-			log.Error().Err(err).Msg("List: failed to parse object id: ")
+			log.Error().Err(err).Msgf("List index %s err: failed to parse object id %s :", b.prefix, stringID)
 			continue
 		}
 		itemList = append(itemList, parsedID)
@@ -212,7 +216,8 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 
 	reader, err := b.read(path.Join(b.prefix, key))
 	if err != nil {
-		return nil, nil, err
+		log.Error().Err(err).Msgf("Load index %s file err: Read file from oss err: ", b.prefix)
+		return nil, nil, fmt.Errorf("load file err: read file from oss err: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
@@ -220,7 +225,7 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 
 	f, err := b.cache.CacheFile(path.Join(b.path, key), reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load file err: %w", err)
 	}
 	return f.LoadReadOnlyData()
 }
@@ -279,12 +284,12 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 
 	err1, ok := <-errCh1
 	if ok {
-		log.Warn().Err(err1).Msg("persist to obj store failed")
+		log.Error().Err(err1).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 	}
 
 	err2, ok := <-errCh2
 	if ok {
-		log.Warn().Err(err2).Msg("persist to fs cache failed")
+		log.Error().Err(err2).Msgf("Persist index %s error: persist to fs cache err: ", b.prefix)
 	}
 
 	if err1 != nil {
@@ -302,13 +307,18 @@ func (b *OssBackend) Remove(kind string, id uint64) error {
 		return err
 	}
 
-	return b.remove(path.Join(b.prefix, key))
+	err = b.remove(path.Join(b.prefix, key))
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove index file %s from obj store err: ", path.Join(b.prefix, key))
+		return fmt.Errorf("remove object err: %w", err)
+	}
+	return nil
 }
 
 func (b *OssBackend) Stats() (numItems uint64, numBytes uint64) {
 	objs, err := b.listObjects(b.prefix)
 	if err != nil {
-		log.Warn().Err(err).Msg("could not get obj_store stats")
+		log.Error().Err(err).Msgf("Stats index %s err: ", b.prefix)
 		return 0, 0
 	}
 	objectCount := uint64(0)

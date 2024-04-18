@@ -7,6 +7,7 @@ import (
 	"path"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
@@ -21,7 +22,12 @@ type OssStorage struct {
 
 func (o *OssStorage) ExistsFile(name string) (bool, error) {
 	key := path.Join(o.prefix, name)
-	return o.bucket.IsObjectExist(key)
+	exists, err := o.bucket.IsObjectExist(key)
+	if err != nil {
+		log.Err(err).Msgf("Exists vec index %s err: ", name)
+		return exists, fmt.Errorf("get exeists err: %w", err)
+	}
+	return exists, nil
 }
 
 func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
@@ -33,14 +39,15 @@ func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
 	key := path.Join(o.prefix, fileName)
 	reader, err := o.bucket.GetObject(key)
 	if err != nil {
-		return "", nil, err
+		log.Error().Err(err).Msgf("Load vec index object %s err: ", fileName)
+		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
 	}()
 	cf, err := o.cache.CacheFile(localPath, reader)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("load file err: %w", err)
 	}
 	return cf.GetPath(), cf, nil
 }
@@ -48,7 +55,8 @@ func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
 func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
 	f, err := os.OpenFile(inputFile, os.O_RDONLY, os.ModePerm)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Save vec index %s file err: open temp file err: ", fileName)
+		return fmt.Errorf("save vec index err: open temp file err: %w", err)
 	}
 	defer func() {
 		_ = f.Close()
@@ -56,7 +64,8 @@ func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
 	key := path.Join(o.prefix, fileName)
 	err = o.bucket.PutObject(key, f)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", fileName)
+		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
 	}
 	localPath := path.Join(o.cachePath, fileName)
 	_, err = o.cache.UpdateCacheFile(inputFile, localPath)
@@ -68,7 +77,8 @@ func (o *OssStorage) Remove(name string) error {
 	prefix := path.Join(o.prefix, name)
 	objs, err := o.listObjects(prefix)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Remove vec index file %s err: ", name)
+		return fmt.Errorf("remove vec index file err: %w", err)
 	}
 	// remove local file
 	for _, obj := range objs {
@@ -81,7 +91,8 @@ func (o *OssStorage) Remove(name string) error {
 	for _, obj := range objs {
 		err = o.bucket.DeleteObject(obj.Key)
 		if err != nil {
-			return err
+			log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
+			return fmt.Errorf("remove vec index file err: delete object err: %w", err)
 		}
 	}
 	return nil
