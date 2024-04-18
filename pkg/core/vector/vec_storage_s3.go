@@ -2,12 +2,14 @@ package vector
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
@@ -29,7 +31,8 @@ func (s *s3Storage) ExistsFile(name string) (bool, error) {
 				return false, nil
 			}
 		}
-		return false, err
+		log.Err(err).Msgf("Exists vec index %s err: ", name)
+		return false, fmt.Errorf("get exists err: %w", err)
 	}
 	return true, nil
 }
@@ -43,14 +46,15 @@ func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
 	key := path.Join(s.prefix, fileName)
 	reader, err := s.cli.GetObject(context.Background(), s.bucketName, key, minio.GetObjectOptions{})
 	if err != nil {
-		return "", nil, err
+		log.Error().Err(err).Msgf("Load vec index object %s err: ", fileName)
+		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
 	}()
 	cf, err := s.cache.CacheFile(localPath, reader)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("load file err: %w", err)
 	}
 	return cf.GetPath(), cf, nil
 }
@@ -58,7 +62,8 @@ func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
 func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	f, err := os.OpenFile(inputFile, os.O_RDONLY, os.ModePerm)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Save vec index file %s err: open temp file err: ", name)
+		return fmt.Errorf("save vec index err: open temp file err: %w", err)
 	}
 	defer func() {
 		_ = f.Close()
@@ -70,7 +75,8 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	key := path.Join(s.prefix, name)
 	_, err = s.cli.PutObject(context.Background(), s.bucketName, key, f, info.Size(), minio.PutObjectOptions{})
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
+		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
 	}
 
 	// cache file
@@ -91,7 +97,8 @@ func (s *s3Storage) Remove(name string) error {
 	// remove local file
 	for obj := range objs {
 		if obj.Err != nil {
-			return obj.Err
+			log.Error().Err(obj.Err).Msgf("Remove vec index file %s err: list objects err: ", name)
+			return fmt.Errorf("remove vec index file err: list objects err: %w", obj.Err)
 		}
 		err := s.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
@@ -103,7 +110,8 @@ func (s *s3Storage) Remove(name string) error {
 	for _, key := range keys {
 		err := s.cli.RemoveObject(context.Background(), s.bucketName, key, minio.RemoveObjectOptions{})
 		if err != nil {
-			return err
+			log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
+			return fmt.Errorf("remove vec index file err: delete object err: %w", err)
 		}
 	}
 	return nil

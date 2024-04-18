@@ -217,7 +217,7 @@ func (t *IndexList) StartGC() {
 		}
 		err := t.GC()
 		if err != nil {
-			log.Error().Msgf("Index GC error %s", err)
+			log.Error().Err(err).Msg("Index GC err: ")
 		}
 	}
 }
@@ -309,7 +309,7 @@ func updateIndexList(removeMap map[string]struct{}) error {
 	// and the index list is automatically updated.
 	fullIndexes, err := metadata.Index.List(0, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("list full index err: %w", err)
 	}
 
 	for _, index := range fullIndexes {

@@ -128,7 +128,7 @@ func (c *LruCache) cleanup() {
 		case <-tick.C:
 			err := c.doCleanup()
 			if err != nil {
-				log.Error().Err(err).Msgf("cleanup error: %s", err)
+				log.Error().Err(err).Msg("cache cleanup err: ")
 			}
 		case <-c.closer.HasBeenClosed():
 			return
@@ -179,7 +179,7 @@ func (c *LruCache) doCleanup() error {
 	})
 
 	if err != nil {
-		return err
+		return fmt.Errorf("filepath walk err: %w", err)
 	}
 
 	if len(tempFiles) == 0 {
@@ -208,10 +208,10 @@ func (c *LruCache) doCleanup() error {
 		delete(c.caches, f.path)
 		err := os.Remove(f.path)
 		if err != nil {
-			return err
+			log.Warn().Err(err).Msgf("clean up local cache file err: ")
+			continue
 		}
 		curSize -= f.size
-
 		if float64(curSize) <= targetSize {
 			break
 		}
@@ -248,44 +248,41 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 
 		tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", c.tempExt))
 		cleanup := func() {
+			_ = tempfile.Close()
+			_ = c.Remove(tempfile.Name())
 			c.lock.Lock()
 			close(ready)
 			delete(c.readyMap, filePath)
 			c.lock.Unlock()
 		}
 		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
+			log.Error().Err(err).Msgf("Cache %s err: create temp cache file error", filePath)
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("cache file err: create temp file err: %w", err)
 		}
 		_, err = io.Copy(tempfile, reader)
 		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
+			log.Error().Err(err).Msgf("Cache %s err: copy temp cache file error", filePath)
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("cache file err: copy temp file err: %w", err)
 		}
 		err = os.Rename(tempfile.Name(), filePath)
 		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(tempfile.Name())
+			log.Error().Err(err).Msgf("Cache %s err: rename temp cache file error", filePath)
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("cache file err: rename temp file err: %w", err)
 		}
 		err = tempfile.Sync()
 		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(filePath)
+			log.Error().Err(err).Msgf("Cache %s err: sync temp cache file error", filePath)
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("cache file err: sync temp file err: %w", err)
 		}
 		err = tempfile.Close()
 		if err != nil {
-			_ = tempfile.Close()
-			_ = c.Remove(filePath)
+			log.Error().Err(err).Msgf("Cache %s err: close temp cache file error", filePath)
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("cache file err: close temp file err: %w", err)
 		}
 
 		c.lock.Lock()
@@ -312,7 +309,8 @@ func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFil
 	}
 	err = os.Rename(inputFile, filePath)
 	if err != nil {
-		return nil, err
+		log.Error().Err(err).Msgf("Rename file %s to %s err: ", inputFile, filePath)
+		return nil, fmt.Errorf("update cache file err: rename temp file err : %w", err)
 	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -339,7 +337,7 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 	f.refCount++
 
 	_, err := os.Stat(filePath)
-	if os.IsNotExist(err) {
+	if err != nil {
 		delete(c.caches, filePath)
 		return nil, false
 	}
@@ -349,15 +347,18 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 func (c *LruCache) Setup(path string, readOnly bool) error {
 	dirExists, err := dirExists(path)
 	if err != nil {
-		return fmt.Errorf("error checking if directory exists '%s': %w", path, err)
+		log.Error().Err(err).Msgf("Setup %s err: check dir exists err: ", path)
+		return fmt.Errorf("setup err: error checking if directory exists '%s': %w", path, err)
 	}
 	if !dirExists {
 		if readOnly {
-			return fmt.Errorf("readOnly, directory does not exist")
+			log.Error().Err(err).Msgf("Setup %s err: read only but dir not exists: ", path)
+			return fmt.Errorf("setup err: readOnly, directory does not exist")
 		}
 		err = os.MkdirAll(path, 0777)
 		if err != nil {
-			return fmt.Errorf("error creating directory '%s': %w", path, err)
+			log.Error().Err(err).Msgf("Setup %s err: create dir err: ", path)
+			return fmt.Errorf("setup err: error creating directory '%s': %w", path, err)
 		}
 	}
 	return nil
@@ -384,11 +385,16 @@ func (c *LruCache) Remove(filepath string) error {
 	delete(c.caches, filepath)
 	err := os.RemoveAll(filepath)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("Remove %s err: ", filepath)
+		return fmt.Errorf("remove file %s err: %w", filepath, err)
 	}
 
 	// if parent dir is empty, remove parent folder
-	return c.removeParentIfEmpty(filepath)
+	err = c.removeParentIfEmpty(filepath)
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove %s err: ", filepath)
+	}
+	return err
 }
 
 func (c *LruCache) removeParentIfEmpty(p string) error {
@@ -401,14 +407,14 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("remove parent err: read parent dir err: %w", err)
 	}
 	if len(entries) != 0 {
 		return nil
 	}
 	err = os.RemoveAll(dirPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("remove parent dir err: %w", err)
 	}
 	return c.removeParentIfEmpty(dirPath)
 }
@@ -417,7 +423,7 @@ func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	dir, _ := filepath.Split(filePath)
 	err := c.Setup(dir, false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open cache writer err: %w", err)
 	}
 	c.lock.Lock()
 	var cf *CacheFile
@@ -436,8 +442,9 @@ func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	}
 	tempfile, err := os.CreateTemp(c.rootPath, fmt.Sprintf("*%s", c.tempExt))
 	if err != nil {
+		log.Error().Err(err).Msgf("Open writer %s err: create temp file err", filePath)
 		_ = tempfile.Close()
-		return nil, err
+		return nil, fmt.Errorf("open cache writer err: crate temp file err: %w", err)
 	}
 	wc := &tempWriteFile{
 		tempPath: tempfile.Name(),
@@ -451,15 +458,18 @@ func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 func (c *LruCache) Sync(path string) error {
 	dir, err := os.Open(path)
 	if err != nil {
+		log.Error().Err(err).Msgf("Sync err: open dir %s err:", path)
 		return fmt.Errorf("error opening directory for sync: %w", err)
 	}
 	err = dir.Sync()
 	if err != nil {
 		_ = dir.Close()
+		log.Error().Err(err).Msgf("Sync err: sync dir %s err:", path)
 		return fmt.Errorf("error syncing directory: %w", err)
 	}
 	err = dir.Close()
 	if err != nil {
+		log.Error().Err(err).Msgf("Sync err: close dir %s err:", path)
 		return fmt.Errorf("error closing directing after sync: %w", err)
 	}
 	return nil
@@ -519,11 +529,13 @@ func (t *tempWriteFile) Close() error {
 	t.cf.Close()
 	err := os.Rename(t.tempPath, t.realPath)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("close temp write file %s err: rename err: ", t.realPath)
+		return fmt.Errorf("close temp write file err: rename err: %w", err)
 	}
 	err = t.f.Sync()
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
+		return fmt.Errorf("close temp write file err: sync err: %w", err)
 	}
 	return t.f.Close()
 }
@@ -575,19 +587,22 @@ func (c *CacheFile) getMmCloser(mm mmap.MMap, f *os.File) closerFunc {
 func (c *CacheFile) LoadReadOnlyData() (*segment.Data, io.Closer, error) {
 	f, err := os.OpenFile(c.path, os.O_RDONLY, 0)
 	if err != nil {
-		return nil, nil, err
+		log.Error().Err(err).Msgf("Load readonly data %s err: open file err: ", c.path)
+		return nil, nil, fmt.Errorf("load readonly data err: open file err: %w", err)
 	}
 	err = unix.Flock(int(f.Fd()), unix.LOCK_SH|unix.LOCK_NB)
 	if err != nil {
+		log.Error().Err(err).Msgf("load readonly data %s err: Flock err: ", c.path)
 		_ = f.Close()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load readonly data err: flock err: %w", err)
 	}
 
 	mm, err := mmap.Map(f, mmap.RDONLY, 0)
 	if err != nil {
+		log.Error().Err(err).Msgf("load readonly data %s err: MMap err: ", c.path)
 		// mmap failed, try to close the file
 		_ = f.Close()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load readonly data err: mmap err: %w", err)
 	}
 
 	return segment.NewDataBytes(mm), c.getMmCloser(mm, f), nil
