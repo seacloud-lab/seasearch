@@ -24,3 +24,4 @@ cmake -B build -DFAISS_ENABLE_GPU=OFF \
 make -C build
 sudo make -C build install
 sudo cp /tmp/faiss/build/c_api/libfaiss_c.so /usr/lib
+sudo cp /tmp/faiss/build/faiss/libfaiss.so /usr/lib

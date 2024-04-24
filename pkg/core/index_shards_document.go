@@ -79,9 +79,6 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 			vecMap[key] = vector
 			bts := zutils.VectorToBytes(vector)
 			field := bluge.NewStoredOnlyField(key, bts)
-			if prop.Store {
-				field.StoreValue()
-			}
 			bdoc.AddField(field)
 			continue
 		}
@@ -237,6 +234,8 @@ func (s *IndexShard) CheckDocumentOperation(docID string, doc map[string]interfa
 					sub[i] = num
 					flatDoc[key] = sub
 				}
+				// we don't need to store vectors in source
+				delete(doc, key)
 			}
 			continue
 		}
