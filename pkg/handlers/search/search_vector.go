@@ -2,17 +2,18 @@ package search
 
 import (
 	"fmt"
+	"math"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
-	"math"
-	"net/http"
-	"sort"
-	"strings"
-	"sync"
 )
 
 func SearchVector(c *gin.Context) {
@@ -32,7 +33,7 @@ func SearchVector(c *gin.Context) {
 	eg := &errgroup.Group{}
 	mutex := sync.Mutex{}
 
-	var result = &meta.SearchResponse{}
+	var result = &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}
 	for _, index := range indexNameList {
 		name := index
 		eg.Go(func() error {
@@ -138,7 +139,7 @@ func VectorRecall(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: field %s is not vector field", fieldName).Error()})
 		return
 	}
-	recall, err := core.VectorRecall(zincIndex, prop.Dims, fieldName, request.QueryCount, int64(request.K),
+	recall, err := core.VectorRecall(zincIndex, fieldName, request.QueryCount, int64(request.K),
 		request.Nprobe)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})

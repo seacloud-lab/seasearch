@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 
+	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
@@ -14,12 +15,12 @@ import (
 // fileName format: $zincIndexName/$vectorIndexName/index.index
 type ObjStore interface {
 	// ExistsFile check the file exists
-	ExistsFile(fileName string) (bool, error)
+	ExistsFile(name string) (bool, error)
 	// LoadFile get file from obj storage
 	// the file will be cached into disk. It will return cached file fullPath
-	LoadFile(fileName string) (string, io.Closer, error)
+	LoadFile(name string) (string, io.Closer, error)
 	// SaveFile save a disk file into obj storage, and cache it.
-	SaveFile(inputFile string, fileName string) error
+	SaveFile(inputFile string, name string) error
 	Remove(name string) error
 }
 
@@ -36,6 +37,10 @@ func GetVectorStorage() (ObjStore, error) {
 	return nil, fmt.Errorf("unsupport storage type")
 }
 
+func getFileName() string {
+	return fmt.Sprintf("index%s", IndexExt)
+}
+
 type diskStore struct {
 	rootPath string
 }
@@ -47,7 +52,7 @@ func createDiskStore() (ObjStore, error) {
 }
 
 func (d *diskStore) ExistsFile(fileName string) (bool, error) {
-	_, err := os.Stat(path.Join(d.rootPath, fileName))
+	_, err := os.Stat(path.Join(d.rootPath, fileName, getFileName()))
 	if err != nil {
 		return false, nil
 	}
@@ -61,22 +66,29 @@ func (e emptyCloser) Close() error {
 	return nil
 }
 
-func (d *diskStore) LoadFile(fileName string) (string, io.Closer, error) {
-	localPath := path.Join(d.rootPath, fileName)
+func (d *diskStore) LoadFile(name string) (string, io.Closer, error) {
+	localPath := path.Join(d.rootPath, name, getFileName())
 	_, err := os.Stat(localPath)
 	if err != nil {
-		return "", nil, err
+		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
+		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	return localPath, emptyCloser{}, nil
 }
 
-func (d *diskStore) SaveFile(inputFile string, fileName string) error {
-	localPath := path.Join(d.rootPath, fileName)
+func (d *diskStore) SaveFile(inputFile string, name string) error {
+	localPath := path.Join(d.rootPath, name, getFileName())
 	err := checkPath(localPath)
 	if err != nil {
+		log.Error().Err(err).Msgf("Save vec index %s file err: check path err: ", name)
+		return fmt.Errorf("save vec index err: check path err: %w", err)
+	}
+	err = os.Rename(inputFile, localPath)
+	if err != nil {
+		log.Error().Err(err).Msgf("Save vec index %s file err: rename file err: ", name)
 		return err
 	}
-	return os.Rename(inputFile, localPath)
+	return nil
 }
 
 func checkPath(localPath string) error {
@@ -97,5 +109,10 @@ func checkPath(localPath string) error {
 
 func (d *diskStore) Remove(name string) error {
 	localPath := path.Join(d.rootPath, name)
-	return os.RemoveAll(localPath)
+	err := os.RemoveAll(localPath)
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove vec index file %s err: ", name)
+		return err
+	}
+	return nil
 }

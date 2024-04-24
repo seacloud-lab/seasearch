@@ -77,9 +77,8 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 				log.Fatal().Msgf("invalid vector field: %s, invalid value: %v", key, value)
 			}
 			vecMap[key] = vector
-
-			val, _ := json.Marshal(value)
-			field := bluge.NewStoredOnlyField(key, val)
+			bts := zutils.VectorToBytes(vector)
+			field := bluge.NewStoredOnlyField(key, bts)
 			if prop.Store {
 				field.StoreValue()
 			}

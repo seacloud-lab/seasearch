@@ -562,9 +562,6 @@ func BatchVectors(actions []*vector.VecAction) error {
 		}
 		index, err := GetVectorIndex(acts[0].Index, acts[0].Field)
 		if err != nil {
-			if errors.Is(err, ErrVecIndexCorruption) && config.Global.EnableWal {
-				log.Fatal().Err(err).Msgf("zinc index %s field %s", acts[0].Index, acts[0].Field)
-			}
 			return err
 		}
 
@@ -586,25 +583,31 @@ func BatchVectors(actions []*vector.VecAction) error {
 				deleteIdList = append(deleteIdList, base62.Decode(act.DocId))
 			}
 		}
+		index.Lock()
 		// process delete first
 		if len(deleteIdList) > 0 {
 			_, err := index.RemoveIDs(deleteIdList)
 			if err != nil {
+				index.Unlock()
+				CloseVectorIndex(index, false)
 				return err
 			}
 		}
 		if len(insertList) > 0 {
 			err := index.AddVectors(insertList, insertIdList)
 			if err != nil {
+				index.Unlock()
+				CloseVectorIndex(index, false)
 				return err
 			}
 		}
+
 		err = index.Save()
+		index.Unlock()
+		CloseVectorIndex(index, false)
 		if err != nil {
-			index.Close(false)
 			return fmt.Errorf("save vector index error: %w", err)
 		}
-		index.Close(false)
 	}
 
 	return nil
