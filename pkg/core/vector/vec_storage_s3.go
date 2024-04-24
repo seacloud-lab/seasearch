@@ -23,7 +23,7 @@ type s3Storage struct {
 }
 
 func (s *s3Storage) ExistsFile(name string) (bool, error) {
-	key := path.Join(s.prefix, name)
+	key := path.Join(s.prefix, name, getFileName())
 	_, err := s.cli.StatObject(context.Background(), s.bucketName, key, minio.StatObjectOptions{})
 	if err != nil {
 		if rsp, ok := err.(minio.ErrorResponse); ok {
@@ -37,16 +37,16 @@ func (s *s3Storage) ExistsFile(name string) (bool, error) {
 	return true, nil
 }
 
-func (s *s3Storage) LoadFile(fileName string) (string, io.Closer, error) {
+func (s *s3Storage) LoadFile(name string) (string, io.Closer, error) {
 	// check local
-	localPath := path.Join(s.cachePath, fileName)
+	localPath := path.Join(s.cachePath, name, getFileName())
 	if cf, ok := s.cache.GetCacheFile(localPath); ok {
 		return cf.GetPath(), cf, nil
 	}
-	key := path.Join(s.prefix, fileName)
+	key := path.Join(s.prefix, name, getFileName())
 	reader, err := s.cli.GetObject(context.Background(), s.bucketName, key, minio.GetObjectOptions{})
 	if err != nil {
-		log.Error().Err(err).Msgf("Load vec index object %s err: ", fileName)
+		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
 		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	defer func() {
@@ -72,7 +72,7 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	if err != nil {
 		return err
 	}
-	key := path.Join(s.prefix, name)
+	key := path.Join(s.prefix, name, getFileName())
 	_, err = s.cli.PutObject(context.Background(), s.bucketName, key, f, info.Size(), minio.PutObjectOptions{})
 	if err != nil {
 		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
@@ -80,7 +80,7 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	}
 
 	// cache file
-	localPath := path.Join(s.cachePath, name)
+	localPath := path.Join(s.cachePath, name, getFileName())
 	_, err = s.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }

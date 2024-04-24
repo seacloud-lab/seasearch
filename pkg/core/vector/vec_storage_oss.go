@@ -21,7 +21,7 @@ type OssStorage struct {
 }
 
 func (o *OssStorage) ExistsFile(name string) (bool, error) {
-	key := path.Join(o.prefix, name)
+	key := path.Join(o.prefix, name, getFileName())
 	exists, err := o.bucket.IsObjectExist(key)
 	if err != nil {
 		log.Err(err).Msgf("Exists vec index %s err: ", name)
@@ -30,16 +30,16 @@ func (o *OssStorage) ExistsFile(name string) (bool, error) {
 	return exists, nil
 }
 
-func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
+func (o *OssStorage) LoadFile(name string) (string, io.Closer, error) {
 	// check local
-	localPath := path.Join(o.cachePath, fileName)
+	localPath := path.Join(o.cachePath, name, getFileName())
 	if cf, ok := o.cache.GetCacheFile(localPath); ok {
 		return cf.GetPath(), cf, nil
 	}
-	key := path.Join(o.prefix, fileName)
+	key := path.Join(o.prefix, name, getFileName())
 	reader, err := o.bucket.GetObject(key)
 	if err != nil {
-		log.Error().Err(err).Msgf("Load vec index object %s err: ", fileName)
+		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
 		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	defer func() {
@@ -52,22 +52,22 @@ func (o *OssStorage) LoadFile(fileName string) (string, io.Closer, error) {
 	return cf.GetPath(), cf, nil
 }
 
-func (o *OssStorage) SaveFile(inputFile string, fileName string) error {
+func (o *OssStorage) SaveFile(inputFile string, name string) error {
 	f, err := os.OpenFile(inputFile, os.O_RDONLY, os.ModePerm)
 	if err != nil {
-		log.Error().Err(err).Msgf("Save vec index %s file err: open temp file err: ", fileName)
+		log.Error().Err(err).Msgf("Save vec index %s file err: open temp file err: ", name)
 		return fmt.Errorf("save vec index err: open temp file err: %w", err)
 	}
 	defer func() {
 		_ = f.Close()
 	}()
-	key := path.Join(o.prefix, fileName)
+	key := path.Join(o.prefix, name, getFileName())
 	err = o.bucket.PutObject(key, f)
 	if err != nil {
-		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", fileName)
+		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
 		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
 	}
-	localPath := path.Join(o.cachePath, fileName)
+	localPath := path.Join(o.cachePath, name, getFileName())
 	_, err = o.cache.UpdateCacheFile(inputFile, localPath)
 	return err
 }
