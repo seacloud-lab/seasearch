@@ -38,7 +38,8 @@ RUN sed -i 's#http://deb.debian.org/#http://mirrors.tuna.tsinghua.edu.cn/#g' /et
     . \
     && make -C build \
     && make -C build install \
-    && cp /tmp/faiss/build/c_api/libfaiss_c.so /usr/lib
+    && cp /tmp/faiss/build/c_api/libfaiss_c.so /usr/lib \
+    && cp /tmp/faiss/build/faiss/libfaiss.so /usr/lib
 
 RUN update-ca-certificates
 # RUN apk update && apk add --no-cache git
@@ -71,8 +72,11 @@ COPY --from=webBuilder /web/dist web/dist
 # Using go get.
 RUN go mod tidy
 
-RUN go build -o SeaSearch cmd/zincsearch/main.go
+RUN go build -o seasearch ./cmd/zincsearch/main.go
+
+# clean up go packages
+RUN rm -rf /go/pkg/*
 
 EXPOSE 4080
 # Run the zincsearch binary.
-ENTRYPOINT ["/go/src/github.com/zincsearch/zincsearch/SeaSearch"]
+ENTRYPOINT ["/go/src/github.com/zincsearch/zincsearch/seasearch"]
