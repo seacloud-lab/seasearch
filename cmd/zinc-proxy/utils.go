@@ -33,11 +33,11 @@ func setLog() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
 	}
-	file, err := os.OpenFile(path.Join(conf.General.LogDir, "zinc-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	file, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
 	}
-	accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
 	}
@@ -68,6 +68,9 @@ func setLog() {
 	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
 
 	accessWriter := writer
+	accessWriter.FormatLevel = func(i interface{}) string {
+		return ""
+	}
 	accessWriter.Out = accessLogFile
 	accessLog = zerolog.New(accessWriter).With().Timestamp().Logger()
 }

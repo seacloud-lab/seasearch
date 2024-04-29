@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -175,7 +176,7 @@ func main() {
 	}()
 
 	if err != nil {
-		if err == http.ErrServerClosed {
+		if errors.Is(err, http.ErrServerClosed) {
 			log.Info().Msg("Server closed")
 		} else {
 			log.Fatal().Err(err).Msg("Server closed unexpect")

@@ -2,15 +2,21 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"os"
+	"strconv"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"net/http"
-	"strconv"
 )
 
 func SetupHttp(r *gin.Engine) {
+	// set release as default gin mode.
+	if mode := os.Getenv(gin.EnvGinMode); mode == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r.Use(gin.Recovery())
 
 	r.Use(cors.New(cors.Config{
