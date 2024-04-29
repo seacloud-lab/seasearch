@@ -2,6 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/handlers/auth"
@@ -9,12 +14,13 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/routes"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"net/http"
-	"net/url"
-	"time"
 )
 
 func SetupHttp(r *gin.Engine) {
+	// set release as default gin mode.
+	if mode := os.Getenv(gin.EnvGinMode); mode == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r.Use(gin.Recovery())
 
 	r.Use(cors.New(cors.Config{
@@ -28,14 +34,8 @@ func SetupHttp(r *gin.Engine) {
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		duration := time.Since(start).Milliseconds()
-		msg := fmt.Sprintf("%s - %q - %d - %.3f",
-			c.Request.Method,
-			c.Request.URL.Path,
-			c.Writer.Status(),
-			float64(duration)/1000.0,
-		)
-		accessLog.Print(msg)
+		duration := time.Since(start).Seconds()
+		accessLog.Print(fmt.Sprintf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), duration))
 	})
 
 	// cluster manager

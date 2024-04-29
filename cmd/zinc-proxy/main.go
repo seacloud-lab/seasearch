@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/metadata"
 )
 
 var (
@@ -25,7 +27,7 @@ func main() {
 	app := gin.New()
 	SetupHttp(app)
 
-	log.Info().Msg("Server start")
+	log.Info().Msg("SeaSearch Proxy Start")
 	server := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", conf.Proxy.Host, conf.Proxy.Port),
 		Handler: app,
@@ -42,25 +44,25 @@ func main() {
 			server.Close()
 		}
 		ShutDownProxy()
+		log.Info().Msg("SeaSearch Proxy Closed")
+
 		// close metadata
 		err := metadata.Close()
-		log.Info().Err(err).Msgf("Metadata closed")
-
-		log.Info().Msg("Zinc-proxy Closed")
+		log.Info().Err(err).Msgf("SeaSearch Proxy Metadata closed")
 
 		done <- struct{}{}
 	})
 
 	err := server.ListenAndServe()
 	if err != nil {
-		if err == http.ErrServerClosed {
-			log.Info().Msg("Server closed")
+		if errors.Is(err, http.ErrServerClosed) {
+			log.Info().Msg("SeaSearch Proxy Http Server closed")
 		} else {
-			log.Fatal().Msg("Server closed unexpect")
+			log.Fatal().Msg("SeaSearch Proxy Http Server closed unexpect")
 		}
 	}
 	<-done
-	log.Info().Msg("Server Shutdown OK")
+	log.Info().Msg("SeaSearch Proxy Shutdown OK")
 }
 
 // shutdown support twice signal must exit
