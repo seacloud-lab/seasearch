@@ -15,16 +15,21 @@
 
 package routes
 
-import "github.com/gin-gonic/gin"
+import (
+	"os"
+
+	"github.com/gin-gonic/gin"
+)
 
 func Setup(app *gin.Engine) {
 	// Recovery middleware recovers from any panics and writes a 500 if there was one.
 	app.Use(gin.Recovery())
-	// Debug for gin
-	if gin.Mode() == gin.DebugMode {
-		AccessLog(app)
-		SetPProf(app)
+	// set release as default gin mode.
+	if mode := os.Getenv(gin.EnvGinMode); mode == "" {
+		gin.SetMode(gin.ReleaseMode)
 	}
+	AccessLog(app)
+	SetPProf(app)
 	SetPrometheus(app) // Set up Prometheus.
 	SetRoutes(app)     // Set up all API routes.
 }
