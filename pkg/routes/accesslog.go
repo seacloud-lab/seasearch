@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,7 +38,7 @@ func AccessLog(app *gin.Engine) {
 		}
 		writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
 		writer.FormatLevel = func(i interface{}) string {
-			return strings.ToUpper(fmt.Sprintf("[%s]", i))
+			return ""
 		}
 		writer.FormatMessage = func(i interface{}) string {
 			return fmt.Sprintf("%s", i)
@@ -70,11 +69,9 @@ func AccessLog(app *gin.Engine) {
 
 		c.Next()
 
-		took := time.Since(timeStart) / time.Millisecond
+		took := time.Since(timeStart).Seconds()
+		// TODO: we should keep field name if we don't output to file
 		accessLogger.Info().
-			Str("method", c.Request.Method).
-			Int("code", c.Writer.Status()).
-			Int("took", int(took)).
-			Msg(c.Request.RequestURI)
+			Msg(fmt.Sprintf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took))
 	})
 }
