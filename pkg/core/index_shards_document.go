@@ -77,9 +77,7 @@ func (s *IndexShard) BuildBlugeDocumentFromJSON(docID string, doc map[string]int
 				log.Fatal().Msgf("invalid vector field: %s, invalid value: %v", key, value)
 			}
 			vecMap[key] = vector
-			bts := zutils.VectorToBytes(vector)
-			field := bluge.NewStoredOnlyField(key, bts)
-			bdoc.AddField(field)
+			// all vectors are stored in vec_index, so we don't add vector field to bluge doc
 			continue
 		}
 		switch v := value.(type) {

@@ -232,7 +232,12 @@ func (index *Index) DeleteDocuments(docIDs []string) error {
 		shard := index.GetShardByDocID(docID)
 		secondShardID, err := shard.FindShardByDocID(docID)
 		if err != nil {
-			return fmt.Errorf("find id %s err: %w", docID, err)
+			if errors.Is(err, errors.ErrorIDNotFound) {
+				log.Debug().Msgf("index %s, shard: %s try to del doc id: %s, but not found specified second shard", index.GetName(), shard.name, docID)
+				secondShardID = ShardIDNeedUpdate
+			} else {
+				return fmt.Errorf("index %s find id %s err: %w", index.GetName(), docID, err)
+			}
 		}
 		data := map[string]interface{}{
 			meta.IDFieldName:     docID,

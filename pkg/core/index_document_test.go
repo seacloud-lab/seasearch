@@ -130,6 +130,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		assert.NoError(t, index.Close())
 		err = DeleteIndex(indexName)
 		assert.NoError(t, err)
 	})
@@ -205,6 +206,8 @@ func TestIndex_UpdateDocument(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		err = index.Close()
+		assert.NoError(t, err)
 		err = DeleteIndex("TestIndex_UpdateDocument.index_1")
 		assert.NoError(t, err)
 	})
@@ -265,6 +268,7 @@ func TestIndex_GetDocument(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		assert.NoError(t, index.Close())
 		err = DeleteIndex(indexName)
 		assert.NoError(t, err)
 	})
@@ -325,6 +329,7 @@ func TestIndex_DeleteDocument(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		assert.NoError(t, index.Close())
 		err = DeleteIndex(indexName)
 		assert.NoError(t, err)
 	})

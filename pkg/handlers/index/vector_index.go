@@ -1,11 +1,12 @@
 package index
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"net/http"
 )
 
 func RebuildVectorIndex(c *gin.Context) {
@@ -24,7 +25,7 @@ func RebuildVectorIndex(c *gin.Context) {
 		return
 	}
 
-	err := core.RebuildIndex(index.GetName(), fieldName)
+	err := core.SealedIndex(index.GetName(), fieldName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

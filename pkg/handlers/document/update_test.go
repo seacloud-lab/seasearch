@@ -120,6 +120,9 @@ func TestUpdate(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		idx, exists := core.GetIndex("TestDocumentUpdate.index_1")
+		assert.True(t, exists)
+		assert.NoError(t, idx.Close())
 		err := core.DeleteIndex("TestDocumentUpdate.index_1")
 		assert.NoError(t, err)
 	})

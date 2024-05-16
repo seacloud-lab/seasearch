@@ -583,31 +583,12 @@ func BatchVectors(actions []*vector.VecAction) error {
 				deleteIdList = append(deleteIdList, base62.Decode(act.DocId))
 			}
 		}
-		index.Lock()
-		// process delete first
-		if len(deleteIdList) > 0 {
-			_, err := index.RemoveIDs(deleteIdList)
-			if err != nil {
-				index.Unlock()
-				CloseVectorIndex(index, false)
-				return err
-			}
-		}
-		if len(insertList) > 0 {
-			err := index.AddVectors(insertList, insertIdList)
-			if err != nil {
-				index.Unlock()
-				CloseVectorIndex(index, false)
-				return err
-			}
-		}
-
-		err = index.Save()
-		index.Unlock()
-		CloseVectorIndex(index, false)
+		err = index.Batch(insertList, insertIdList, deleteIdList)
 		if err != nil {
-			return fmt.Errorf("save vector index error: %w", err)
+			CloseVectorIndex(index, false)
+			return err
 		}
+		CloseVectorIndex(index, false)
 	}
 
 	return nil

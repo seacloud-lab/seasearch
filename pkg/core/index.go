@@ -19,10 +19,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
-
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -238,11 +237,12 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 				index.ref.VecIndexes = make(map[string]*meta.VecIndex)
 			}
 			index.ref.VecIndexes[field] = &meta.VecIndex{
-				Type:       vector.Flat,
-				TargetType: prop.VecIndexType,
-				Dims:       prop.Dims,
-				NBits:      prop.NBits,
-				M:          prop.M,
+				TargetType:       prop.VecIndexType,
+				Dims:             prop.Dims,
+				NBits:            prop.NBits,
+				M:                prop.M,
+				CurrentSegmentId: 0,
+				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
 			}
 		}
 	}
