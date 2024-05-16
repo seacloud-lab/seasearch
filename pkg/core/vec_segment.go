@@ -475,6 +475,9 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 	defer func() {
 		_ = reader.Close()
 	}()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	vectors := make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
 	ids := make([]int64, 0, count)
