@@ -11,13 +11,13 @@ import (
 func TestGC(t *testing.T) {
 	tmpDir := t.TempDir()
 	vecIdxManager = &VecIndexManager{
-		cache:        make(map[string]VectorIndex),
-		ready:        make(map[string]chan struct{}),
-		sealedTaskMp: make(map[string]struct{}),
-		sealedCh:     make(chan *rebuildTask, 10),
-		storage:      nil,
-		closer:       z.NewCloser(3),
-		tmpDir:       tmpDir,
+		cache:      make(map[string]VectorIndex),
+		ready:      make(map[string]chan struct{}),
+		sealTaskMp: make(map[string]struct{}),
+		sealCh:     make(chan *rebuildTask, 10),
+		storage:    nil,
+		closer:     z.NewCloser(3),
+		tmpDir:     tmpDir,
 	}
 	vecIdxManager.cache["A"] = &IvfPqIndex{
 		baseIndex: baseIndex{

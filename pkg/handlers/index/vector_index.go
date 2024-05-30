@@ -25,7 +25,7 @@ func RebuildVectorIndex(c *gin.Context) {
 		return
 	}
 
-	err := core.SealedIndex(index.GetName(), fieldName)
+	err := core.SealIndex(index.GetName(), fieldName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

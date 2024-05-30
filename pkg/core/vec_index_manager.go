@@ -30,13 +30,13 @@ type rebuildTask struct {
 }
 
 type VecIndexManager struct {
-	cache        map[string]VectorIndex
-	ready        map[string]chan struct{}
-	sealedTaskMp map[string]struct{}
-	sealedCh     chan *rebuildTask
-	sealedLock   sync.RWMutex
-	lock         sync.Mutex
-	storage      vector.ObjStore
+	cache      map[string]VectorIndex
+	ready      map[string]chan struct{}
+	sealTaskMp map[string]struct{}
+	sealCh     chan *rebuildTask
+	sealedLock sync.RWMutex
+	lock       sync.Mutex
+	storage    vector.ObjStore
 	// path for saving temp file
 	tmpDir string
 	closer *z.Closer
@@ -61,28 +61,28 @@ func InitVecIndexManager() {
 		}
 	}
 	vecIdxManager = &VecIndexManager{
-		cache:        make(map[string]VectorIndex),
-		ready:        make(map[string]chan struct{}),
-		sealedTaskMp: make(map[string]struct{}),
-		sealedCh:     make(chan *rebuildTask, 10),
-		storage:      storage,
-		closer:       z.NewCloser(3),
-		tmpDir:       tmpDir,
+		cache:      make(map[string]VectorIndex),
+		ready:      make(map[string]chan struct{}),
+		sealTaskMp: make(map[string]struct{}),
+		sealCh:     make(chan *rebuildTask, 10),
+		storage:    storage,
+		closer:     z.NewCloser(3),
+		tmpDir:     tmpDir,
 	}
 
-	go backGroundGC()
+	go backgroundGC()
 
-	go backGroundSealedCheck()
+	go backgroundSealCheck()
 
-	go backGroundSealed()
+	go backgroundSeal()
 }
 
 func CloseVecIndexManager() {
 	vecIdxManager.closer.SignalAndWait()
 }
 
-// backGroundGC for free memory
-func backGroundGC() {
+// backgroundGC for free memory
+func backgroundGC() {
 	defer vecIdxManager.closer.Done()
 	var err error
 	var previousFound bool
@@ -260,9 +260,9 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 	return nil
 }
 
-// SealedIndex
-// submit a sealed vector index segments task
-func SealedIndex(zincIndexName string, field string) error {
+// SealIndex
+// submits a task to seal the growing segment of the index.
+func SealIndex(zincIndexName string, field string) error {
 	index, ok := GetIndex(zincIndexName)
 	if !ok {
 		return fmt.Errorf("zinc index not exists")
@@ -272,30 +272,30 @@ func SealedIndex(zincIndexName string, field string) error {
 		return ErrVecIndexNotExists
 	}
 	if vecIndex.TargetType != vector.IvfPQ {
-		return fmt.Errorf("the vector index doesn't need to rebuild")
+		return fmt.Errorf("the vector index doesn't need to be seal")
 	}
 
-	find := false
+	found := false
 	for _, segMeta := range vecIndex.Segments {
 		if segMeta.Status == vector.StatusGrowing &&
 			atomic.LoadInt64(&segMeta.Count) >= config.Global.VectorConfig.IvfPqThreshold {
-			find = true
+			found = true
 			break
 		}
 	}
-	if !find {
-		return fmt.Errorf("the vector index doesn't need to rebuild")
+	if !found {
+		return fmt.Errorf("the vector index doesn't need to seal")
 	}
 
 	taskName := path.Join(zincIndexName, field)
 	vecIdxManager.sealedLock.RLock()
-	if _, ok := vecIdxManager.sealedTaskMp[taskName]; ok {
+	if _, ok := vecIdxManager.sealTaskMp[taskName]; ok {
 		vecIdxManager.sealedLock.RUnlock()
-		return fmt.Errorf("the vector index is already rebuilding")
+		return fmt.Errorf("the vector index is already sealing")
 	}
 	vecIdxManager.sealedLock.RUnlock()
 
-	vecIdxManager.sealedCh <- &rebuildTask{
+	vecIdxManager.sealCh <- &rebuildTask{
 		taskName: taskName,
 		index:    zincIndexName,
 		field:    field,
@@ -303,9 +303,9 @@ func SealedIndex(zincIndexName string, field string) error {
 	return nil
 }
 
-// backGroundSealedCheck
+// backgroundSealCheck
 // Traverse to check vector indexes and process vectors that need to be converted to ivf_pq.
-func backGroundSealedCheck() {
+func backgroundSealCheck() {
 	defer vecIdxManager.closer.Done()
 	timer := time.NewTimer(time.Hour)
 	for {
@@ -339,13 +339,13 @@ func backGroundSealedCheck() {
 
 				taskName := path.Join(index.GetName(), field)
 				vecIdxManager.sealedLock.RLock()
-				if _, ok := vecIdxManager.sealedTaskMp[taskName]; ok {
+				if _, ok := vecIdxManager.sealTaskMp[taskName]; ok {
 					vecIdxManager.sealedLock.RUnlock()
 					continue
 				}
 				vecIdxManager.sealedLock.RUnlock()
 
-				vecIdxManager.sealedCh <- &rebuildTask{
+				vecIdxManager.sealCh <- &rebuildTask{
 					taskName: taskName,
 					index:    index.GetName(),
 					field:    field,
@@ -356,21 +356,21 @@ func backGroundSealedCheck() {
 	}
 }
 
-// backGroundSealed process sealed task
-func backGroundSealed() {
+// backgroundSeal process sealed task
+func backgroundSeal() {
 	defer vecIdxManager.closer.Done()
 	for {
 		select {
 		case <-vecIdxManager.closer.HasBeenClosed():
 			return
-		case task := <-vecIdxManager.sealedCh:
+		case task := <-vecIdxManager.sealCh:
 			vecIdxManager.sealedLock.Lock()
-			vecIdxManager.sealedTaskMp[task.taskName] = struct{}{}
+			vecIdxManager.sealTaskMp[task.taskName] = struct{}{}
 			vecIdxManager.sealedLock.Unlock()
 			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
 				vecIdxManager.sealedLock.Lock()
-				delete(vecIdxManager.sealedTaskMp, task.taskName)
+				delete(vecIdxManager.sealTaskMp, task.taskName)
 				vecIdxManager.sealedLock.Unlock()
 				log.Error().Err(err).Msgf("process vector index %s segment sealed  err: get vector index err %s ", task.taskName, task.index)
 				continue
@@ -378,22 +378,22 @@ func backGroundSealed() {
 			start := time.Now()
 
 			// we don't lock the whole vecIndex,
-			// vecIndex will synchronous segments internally
-			err = vecIndex.SealedSeg()
+			// vecIndex will synchronize segment operations internally
+			err = vecIndex.SealSeg()
 
 			if err != nil {
 				vecIdxManager.sealedLock.Lock()
-				delete(vecIdxManager.sealedTaskMp, task.taskName)
+				delete(vecIdxManager.sealTaskMp, task.taskName)
 				vecIdxManager.sealedLock.Unlock()
 				CloseVectorIndex(vecIndex, false)
-				log.Error().Err(err).Msgf("process vector index %s segment sealed error: %s", task.taskName, err)
+				log.Error().Err(err).Msgf("failed to seal segment for vector index %s error: %s", task.taskName, err)
 				continue
 			}
 			CloseVectorIndex(vecIndex, false)
-			log.Debug().Msgf("process vector index %s segment sealed finish, took %.2fs", task.taskName, time.Since(start).Seconds())
+			log.Debug().Msgf("seal segment for vector index %s finished. took %.2fs", task.taskName, time.Since(start).Seconds())
 
 			vecIdxManager.sealedLock.Lock()
-			delete(vecIdxManager.sealedTaskMp, task.taskName)
+			delete(vecIdxManager.sealTaskMp, task.taskName)
 			vecIdxManager.sealedLock.Unlock()
 		}
 	}

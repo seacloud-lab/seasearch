@@ -32,11 +32,10 @@ type VecSegment struct {
 	// cache for search
 	cachedVectorsCache []float32
 	// vector idx -> docId
-	ids       []int64
-	cacheLock sync.Mutex // internal lock, only used for sync vectors caches.
+	ids []int64
 
-	// used for sync segment write operations like: AddVectors, RemoveIDs, Sealed, Search;
-	// Only caller controls the accessibility.
+	// for growing segment, the lock is used for synchronizing cache.
+	// for sealed segment, the lock is used for avoiding concurrent read and write for faiss index.
 	sync.RWMutex
 }
 
@@ -95,12 +94,12 @@ func (s *VecSegment) loadFaissIndexFile() error {
 }
 
 func (s *VecSegment) getFaissVecStorePath() string {
-	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%012x", s.ref.Id), "faiss")
+	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
 }
 
 func (s *VecSegment) loadVectorStore() error {
 	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%012x", s.ref.Id), "stored_vec")
+	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
 	switch config.Global.StorageType {
 	case "disk":
@@ -117,9 +116,27 @@ func (s *VecSegment) loadVectorStore() error {
 	return err
 }
 
-// AddVectors
+func (s *VecSegment) Batch(batch *segBatch) error {
+	s.Lock()
+	defer s.Unlock()
+	if len(batch.deleteIds) > 0 {
+		err := s.removeIDs(batch.deleteIds)
+		if err != nil {
+			return err
+		}
+	}
+	if len(batch.addVectors) > 0 {
+		err := s.addVectors(batch.addVectors, batch.addIds)
+		if err != nil {
+			return err
+		}
+	}
+	return s.save()
+}
+
+// addVectors
 // require Lock.
-func (s *VecSegment) AddVectors(vectors [][]float32, ids []int64) error {
+func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 	// this should never have happened
 	if s.ref.Status != vector.StatusGrowing {
 		return fmt.Errorf("cannot add vectors to a non-Growing segment")
@@ -137,9 +154,9 @@ func (s *VecSegment) AddVectors(vectors [][]float32, ids []int64) error {
 	return nil
 }
 
-// RemoveIDs
+// removeIDs
 // require Lock.
-func (s *VecSegment) RemoveIDs(ids []int64) error {
+func (s *VecSegment) removeIDs(ids []int64) error {
 	if s.ref.Status == vector.StatusSealed {
 		selector, err := faiss.NewIDSelectorBatch(ids)
 		if err != nil {
@@ -162,7 +179,9 @@ func (s *VecSegment) RemoveIDs(ids []int64) error {
 	return nil
 }
 
-func (s *VecSegment) getExistsIds(ids []int64) ([]int64, error) {
+// GetExistsIds
+// Filter out the id that exists in this segment. It‘s lock free.
+func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
 	r, err := s.vecStoreWriter.Reader()
 	defer func() {
 		_ = r.Close()
@@ -198,9 +217,9 @@ func (s *VecSegment) getExistsIds(ids []int64) ([]int64, error) {
 	return result, nil
 }
 
-// Save
+// save
 // require Lock.
-func (s *VecSegment) Save() error {
+func (s *VecSegment) save() error {
 	if s.ref.Status != vector.StatusSealed {
 		// the vectors have been updated, we clear the cache
 		s.freeCache()
@@ -229,19 +248,20 @@ func (s *VecSegment) Free() {
 	if s.index != nil {
 		s.index.Delete()
 	}
-
+	s.Lock()
 	s.freeCache()
+	s.Unlock()
 }
 
+// freeCache
+// require Lock
 func (s *VecSegment) freeCache() {
-	s.cacheLock.Lock()
 	s.ids = nil
 	s.cachedVectorsCache = nil
-	s.cacheLock.Unlock()
 }
 
 // Search
-// query vectors, require RLock.
+// query vectors
 func (s *VecSegment) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
 	if s.ref.Status == vector.StatusGrowing {
 		return s.searchFlat(vec, k)
@@ -250,7 +270,10 @@ func (s *VecSegment) Search(vec []float32, k int64, nprobe int) (map[string]floa
 }
 
 func (s *VecSegment) searchFlat(vec []float32, k int64) (map[string]float32, error) {
+	s.Lock()
 	ids, xb, err := s.getVecCaches()
+	s.Unlock()
+
 	if err != nil {
 		return nil, err
 	}
@@ -261,19 +284,18 @@ func (s *VecSegment) searchFlat(vec []float32, k int64) (map[string]float32, err
 	return flatSearch(ids, xb, vec, int(k), s.baseIndex.Meta().Dims), nil
 }
 
+// getVecCaches
+// require Lock
 func (s *VecSegment) getVecCaches() ([]int64, []float32, error) {
 	var cacheVectors []float32
 	var cacheIds []int64
 
-	s.cacheLock.Lock()
 	if s.cachedVectorsCache != nil && s.ids != nil {
 		cacheVectors = s.cachedVectorsCache
 		cacheIds = s.ids
-		s.cacheLock.Unlock()
 	} else {
 		var err error
 		s.cachedVectorsCache, s.ids, err = s.getAllVectors()
-		s.cacheLock.Unlock()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -297,6 +319,9 @@ func flatSearch(baseIds []int64, base []float32, query []float32, k, dim int) ma
 }
 
 func (s *VecSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string]float32, error) {
+	s.RLock()
+	defer s.RUnlock()
+
 	var ids []int64
 	var err error
 	ps, err := faiss.NewParameterSpace()
@@ -362,16 +387,19 @@ func L2Distance(slice1, slice2 []float32) (float32, error) {
 	return sum, nil
 }
 
-// Sealed
+// Seal
 // build an ivf_pq index, require Lock.
-func (s *VecSegment) Sealed() error {
+func (s *VecSegment) Seal() error {
+	s.Lock()
+	defer s.Unlock()
+
 	ids, vectors, err := s.getVecCaches()
 	if err != nil {
 		return err
 	}
 	if len(vectors) == 0 || len(ids) == 0 {
 		// do nothing
-		log.Warn().Msgf("try to rebuild ivf_pq index %s segment %d but there are no vectors", s.baseIndex.Name(), s.ref.Id)
+		log.Warn().Msgf("try to seal ivf_pq index %s segment %d but there are no vectors", s.baseIndex.Name(), s.ref.Id)
 		return nil
 	}
 
@@ -408,6 +436,9 @@ func (s *VecSegment) Sealed() error {
 // Recall
 // calculate recall for whole segment, require RLock.
 func (s *VecSegment) Recall(count int, k int64, nprobe int) (float32, error) {
+	s.RLock()
+	defer s.RUnlock()
+
 	if s.ref.Status == vector.StatusGrowing {
 		return 1, nil
 	}
@@ -425,7 +456,7 @@ func (s *VecSegment) Recall(count int, k int64, nprobe int) (float32, error) {
 	correct := 0
 	total := 0
 	for _, q := range xq {
-		results, err := s.Search(q, k, nprobe)
+		results, err := s.searchIvfPq(q, k, nprobe)
 		if err != nil {
 			return 0, err
 		}

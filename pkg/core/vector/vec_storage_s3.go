@@ -118,9 +118,41 @@ func (s *s3Storage) Remove(name string) error {
 }
 
 func createS3Storage() (ObjStore, error) {
+	s3 := &s3Storage{
+		cache:      lru_cache.Instance,
+		bucketName: config.Global.S3.Bucket,
+		prefix:     VecPrefix,
+		cachePath:  path.Join(config.Global.DataPath, VecPrefix),
+	}
+	var err error
+	s3.cli, err = createS3Client()
+	if err != nil {
+		return nil, err
+	}
+	return s3, nil
+}
+
+func listS3VecStoreSegments(prefix string) ([]string, error) {
+	s3, err := createS3Client()
+	if err != nil {
+		log.Error().Err(err).Msgf("list vec store segments %s err: create s3 client err: ", prefix)
+		return nil, fmt.Errorf("create s3 client err: %w", err)
+	}
+	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
+	objs := s3.ListObjects(context.Background(), config.Global.S3.Bucket, opts)
+	res := make([]string, 0)
+	for obj := range objs {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("failed to list folder: %w", obj.Err)
+		}
+		res = append(res, obj.Key)
+	}
+	return res, nil
+}
+
+func createS3Client() (*minio.Client, error) {
 	accessKeyID := config.Global.S3.AccessId
 	accessKeySecret := config.Global.S3.AccessSecret
-	bucketName := config.Global.S3.Bucket
 	endPoint := config.Global.S3.Endpoint
 	useV4Sig := config.Global.S3.UseV4Signature
 	useHTTPS := config.Global.S3.UseHttps
@@ -138,31 +170,21 @@ func createS3Storage() (ObjStore, error) {
 			endPoint = "s3.amazonaws.com"
 		}
 	}
-
-	s3 := &s3Storage{
-		cache:      lru_cache.Instance,
-		bucketName: bucketName,
-		prefix:     VecPrefix,
-		cachePath:  path.Join(config.Global.DataPath, VecPrefix),
-	}
+	var res *minio.Client
 	var err error
 	if useV4Sig {
-		s3.cli, err = minio.New(endPoint, &minio.Options{
+		res, err = minio.New(endPoint, &minio.Options{
 			Creds:        credentials.NewStaticV4(accessKeyID, accessKeySecret, ""),
 			Secure:       useHTTPS,
 			Region:       awsRegion,
 			BucketLookup: bucketLookup,
 		})
 	} else {
-		s3.cli, err = minio.New(endPoint, &minio.Options{
+		res, err = minio.New(endPoint, &minio.Options{
 			Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
 			Secure:       useHTTPS,
 			BucketLookup: bucketLookup,
 		})
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	return s3, nil
+	return res, err
 }

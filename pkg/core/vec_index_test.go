@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
@@ -65,29 +66,64 @@ func makeFlatForTest(t *testing.T) *FlatIndex {
 const testIdxName = "testIdx"
 const testFieldName = "vec"
 
-func TestBrandNewFlat(t *testing.T) {
+func clean() {
+	// clear
+	_ = os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix))
+	_ = metadata.Index.Delete(testIdxName)
+	store, _ := vector.GetVectorStorage()
+	_ = store.Remove(path.Join(testIdxName, testFieldName))
+}
+
+func TestVecIndex(t *testing.T) {
+	// config.Global.StorageType = "s3"
+	// config.Global.S3.Bucket = "zincsearch"
+	// config.Global.S3.AccessId = "admin"
+	// config.Global.S3.AccessSecret = "12345678"
+	// config.Global.S3.Endpoint = "127.0.0.1:9000"
+	// config.Global.StorageType = "oss"
+	// config.Global.Oss.AccessId = ""
+	// config.Global.Oss.AccessSecret = ""
+	// config.Global.Oss.Bucket = ""
+	// config.Global.Oss.Endpoint = ""
+	lru_cache.Init()
+	defer func() {
+		config.Global.StorageType = "disk"
+		lru_cache.ShutDown()
+
+	}()
+	t.Run("TestBrandNewFlat", testBrandNewFlat)
+	t.Run("TestAddFlatVectors", testAddFlatVectors)
+	t.Run("TestAddAndRemoveFlatVectors", testAddAndRemoveFlatVectors)
+	t.Run("TestSearchFlatVectors", testSearchFlatVectors)
+	t.Run("TestFreeFlat", testFreeFlat)
+	t.Run("TestBandNewIvfPq", testBandNewIvfPq)
+	t.Run("TestIvfPqAddAndRemove", testIvfPqAddAndRemove)
+	t.Run("TestSealIvfPq", testSealIvfPq)
+	t.Run("TestAddAndRemoveWithSealedIvfPq", testAddAndRemoveWithSealedIvfPq)
+	t.Run("TestSearchIvfPq", testSearchIvfPq)
+	t.Run("TestFreeIvfPq", testFreeIvfPq)
+	t.Run("TestReOpenIvfPq", testReOpenIvfPq)
+	t.Run("TestRecall", testRecall)
+	t.Run("TestSearchHeap", testSearchHeap)
+}
+
+func testBrandNewFlat(t *testing.T) {
 	defer clean()
 	idx := makeFlatForTest(t)
 
 	err := idx.loadSegment()
 	assert.Nil(t, err)
 	assert.NotNil(t, idx.seg)
-	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.name, fmt.Sprintf("%012x", 0), "stored_vec"))
+	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.name, fmt.Sprintf("%04x", 0), "stored_vec"))
 	assert.Nil(t, err)
 	assert.True(t, info.IsDir())
 
 }
 
-func clean() {
-	// clear
-	_ = os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix))
-	_ = metadata.Index.Delete(testIdxName)
-}
-
-func TestAddFlatVectors(t *testing.T) {
+func testAddFlatVectors(t *testing.T) {
 	defer clean()
 	idx := makeFlatForTest(t)
-
+	defer idx.Free()
 	ids, xq := createTestVecs(4, 10)
 	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
@@ -110,10 +146,11 @@ func createTestVecs(d, count int) ([]int64, [][]float32) {
 	return ids, xb
 }
 
-func TestAddAndRemoveFlatVectors(t *testing.T) {
+func testAddAndRemoveFlatVectors(t *testing.T) {
 	defer clean()
 
 	idx := makeFlatForTest(t)
+	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 10)
 	err := idx.Batch(xq, ids, nil)
@@ -134,9 +171,10 @@ func TestAddAndRemoveFlatVectors(t *testing.T) {
 
 }
 
-func TestSearchFlatVectors(t *testing.T) {
+func testSearchFlatVectors(t *testing.T) {
 	defer clean()
 	idx := makeFlatForTest(t)
+	defer idx.Free()
 
 	xq := make([][]float32, 4)
 	xq[0] = []float32{0.1, 0.2, 0.3, 0.4}
@@ -163,9 +201,10 @@ func TestSearchFlatVectors(t *testing.T) {
 
 }
 
-func TestFreeFlat(t *testing.T) {
+func testFreeFlat(t *testing.T) {
 	defer clean()
 	idx := makeFlatForTest(t)
+	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 10)
 	err := idx.Batch(xq, ids, nil)
@@ -184,24 +223,25 @@ func TestFreeFlat(t *testing.T) {
 	assert.Nil(t, idx.seg.cachedVectorsCache)
 }
 
-func TestBandNewIvfPq(t *testing.T) {
+func testBandNewIvfPq(t *testing.T) {
 	defer clean()
 
 	idx := makeIvfPqForTest(t)
 	err := idx.loadAllSegments()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(idx.segments))
-	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.name, fmt.Sprintf("%012x", 0), "stored_vec"))
+	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.name, fmt.Sprintf("%04x", 0), "stored_vec"))
 	assert.Nil(t, err)
 	assert.True(t, info.IsDir())
 
 }
 
-func TestIvfPqAddAndRemove(t *testing.T) {
+func testIvfPqAddAndRemove(t *testing.T) {
 	defer func() {
 		clean()
 	}()
 	idx := makeIvfPqForTest(t)
+	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 10)
 	err := idx.Batch(xq, ids, nil)
@@ -228,7 +268,7 @@ func TestIvfPqAddAndRemove(t *testing.T) {
 
 }
 
-func TestSealedIvfPq(t *testing.T) {
+func testSealIvfPq(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -246,6 +286,7 @@ func TestSealedIvfPq(t *testing.T) {
 	}()
 
 	idx := makeIvfPqForTest(t)
+	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
 	err = idx.Batch(xq, ids, nil)
@@ -259,7 +300,7 @@ func TestSealedIvfPq(t *testing.T) {
 	assert.EqualValues(t, 0, idx.ref.Segments[1].Count)
 	assert.EqualValues(t, vector.StatusGrowing, idx.ref.Segments[0].Status)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
 	assert.Nil(t, err)
 
 	assert.EqualValues(t, vector.StatusSealed, idx.ref.Segments[0].Status)
@@ -279,7 +320,7 @@ func TestSealedIvfPq(t *testing.T) {
 	assert.Nil(t, idx.segments[0].cachedVectorsCache)
 }
 
-func TestAddAndRemoveWithSealedIvfPq(t *testing.T) {
+func testAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -301,7 +342,9 @@ func TestAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
+	defer idx.Free()
+
 	assert.Nil(t, err)
 
 	ids, xq = createTestVecs(4, 100)
@@ -348,7 +391,7 @@ func TestAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	assert.EqualValues(t, 5195, idx.ref.Count)
 }
 
-func TestSearchIvfPq(t *testing.T) {
+func testSearchIvfPq(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -366,12 +409,13 @@ func TestSearchIvfPq(t *testing.T) {
 	}()
 
 	idx := makeIvfPqForTest(t)
+	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
 	assert.Nil(t, err)
 
 	ids, xq = createTestVecs(4, 100)
@@ -393,7 +437,7 @@ func TestSearchIvfPq(t *testing.T) {
 	}
 }
 
-func TestFreeIvfPq(t *testing.T) {
+func testFreeIvfPq(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -416,7 +460,7 @@ func TestFreeIvfPq(t *testing.T) {
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
 	assert.Nil(t, err)
 
 	ids, xq = createTestVecs(4, 100)
@@ -444,7 +488,7 @@ func TestFreeIvfPq(t *testing.T) {
 
 }
 
-func TestReOpenIvfPq(t *testing.T) {
+func testReOpenIvfPq(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -467,7 +511,7 @@ func TestReOpenIvfPq(t *testing.T) {
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
 	assert.Nil(t, err)
 
 	ids, xq = createTestVecs(4, 100)
@@ -479,12 +523,14 @@ func TestReOpenIvfPq(t *testing.T) {
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	ref := idx.ref
 	// close idx
 	idx.Free()
 	// reopen
 	idx = makeIvfPqForTest(t)
-	idx.ref = ref
+	defer idx.Free()
+
+	assert.EqualValues(t, 2, len(idx.ref.Segments))
+	assert.EqualValues(t, vector.StatusGrowing, idx.ref.Segments[0].Status)
 
 	result, err := idx.Search([]float32{0.9, 0.2, 0.5, 0.6}, 10, 10)
 	assert.Nil(t, err)
@@ -496,7 +542,7 @@ func TestReOpenIvfPq(t *testing.T) {
 	}
 }
 
-func TestRecall(t *testing.T) {
+func testRecall(t *testing.T) {
 	defer clean()
 	// we just use a test value
 	config.Global.VectorConfig.IvfPqThreshold = 5000
@@ -514,11 +560,13 @@ func TestRecall(t *testing.T) {
 	}()
 
 	idx := makeIvfPqForTest(t)
+	defer idx.Free()
+
 	ids, xq := createTestVecs(4, 5100)
 	err = idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
-	err = idx.SealedSeg()
+	err = idx.SealSeg()
 	assert.Nil(t, err)
 
 	ids, xq = createTestVecs(4, 100)
@@ -544,7 +592,7 @@ func TestRecall(t *testing.T) {
 	assert.True(t, seg0Recall < recall && seg0Recall < 1)
 }
 
-func TestSearchHeap(t *testing.T) {
+func testSearchHeap(t *testing.T) {
 	list := &vecSearchHeap{}
 	heap.Init(list)
 
