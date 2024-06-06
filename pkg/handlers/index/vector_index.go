@@ -9,7 +9,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
-func RebuildVectorIndex(c *gin.Context) {
+func SealVectorIndex(c *gin.Context) {
 	indexName := c.Param("target")
 	fieldName := c.Param("field")
 

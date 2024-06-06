@@ -23,7 +23,7 @@ var (
 	ErrInvalidArguments   = errors.New("invalid arguments")
 )
 
-type rebuildTask struct {
+type sealTask struct {
 	index    string
 	field    string
 	taskName string
@@ -33,7 +33,7 @@ type VecIndexManager struct {
 	cache      map[string]VectorIndex
 	ready      map[string]chan struct{}
 	sealTaskMp map[string]struct{}
-	sealCh     chan *rebuildTask
+	sealCh     chan *sealTask
 	sealedLock sync.RWMutex
 	lock       sync.Mutex
 	storage    vector.ObjStore
@@ -64,7 +64,7 @@ func InitVecIndexManager() {
 		cache:      make(map[string]VectorIndex),
 		ready:      make(map[string]chan struct{}),
 		sealTaskMp: make(map[string]struct{}),
-		sealCh:     make(chan *rebuildTask, 10),
+		sealCh:     make(chan *sealTask, 10),
 		storage:    storage,
 		closer:     z.NewCloser(3),
 		tmpDir:     tmpDir,
@@ -272,7 +272,7 @@ func SealIndex(zincIndexName string, field string) error {
 		return ErrVecIndexNotExists
 	}
 	if vecIndex.TargetType != vector.IvfPQ {
-		return fmt.Errorf("the vector index doesn't need to be seal")
+		return fmt.Errorf("the vector index doesn't need to seal")
 	}
 
 	found := false
@@ -295,7 +295,7 @@ func SealIndex(zincIndexName string, field string) error {
 	}
 	vecIdxManager.sealedLock.RUnlock()
 
-	vecIdxManager.sealCh <- &rebuildTask{
+	vecIdxManager.sealCh <- &sealTask{
 		taskName: taskName,
 		index:    zincIndexName,
 		field:    field,
@@ -345,7 +345,7 @@ func backgroundSealCheck() {
 				}
 				vecIdxManager.sealedLock.RUnlock()
 
-				vecIdxManager.sealCh <- &rebuildTask{
+				vecIdxManager.sealCh <- &sealTask{
 					taskName: taskName,
 					index:    index.GetName(),
 					field:    field,

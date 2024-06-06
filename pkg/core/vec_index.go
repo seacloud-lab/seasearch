@@ -252,25 +252,42 @@ func (v *IvfPqIndex) loadAllSegments() error {
 	for i := range v.ref.Segments {
 		ids[i] = i
 	}
-	return v.loadSegments(ids)
+	_, err := v.loadSegments(ids)
+	return err
 }
 
-func (v *IvfPqIndex) loadSegments(ids []int) error {
+func (v *IvfPqIndex) copySegments() ([]*VecSegment, error) {
+	err := v.loadAllSegments()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]*VecSegment, len(v.segments))
+	copy(res, v.segments)
+	return res, nil
+}
+
+func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
+	res := make([]*VecSegment, 0, len(ids))
 	for _, id := range ids {
 		// already loaded
 		seg := v.segments[id]
 		if seg != nil {
+			res = append(res, seg)
 			continue
 		}
 		seg, err := openSegment(v, id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		v.segments[id] = seg
+		res = append(res, seg)
 	}
-	return nil
+	return res, nil
 }
 
+// getCurSegment
+// should be used with lock,
+// otherwise other goroutine may has updated current seg id.
 func (v *IvfPqIndex) getCurSegment() (*VecSegment, error) {
 	err := v.loadCurrentSegment()
 	if err != nil {
@@ -298,75 +315,98 @@ type segBatch struct {
 }
 
 func (v *IvfPqIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) error {
-	v.lock.Lock()
-	defer v.lock.Unlock()
-
-	batches, err := v.getSegBatches(addVectors, addIds, deleteIds)
+	err := v.processDel(deleteIds)
 	if err != nil {
 		return err
 	}
-	for _, batch := range batches {
-		seg := v.segments[batch.id]
-		err = seg.Batch(batch)
+	err = v.processAdd(addVectors, addIds)
+	if err != nil {
+		return err
+	}
+
+	// other goroutine may be creating a new segment, so we get RLock.
+	v.lock.RLock()
+	var total int64
+	for _, segMeta := range v.ref.Segments {
+		total += segMeta.Count
+	}
+	v.lock.RUnlock()
+
+	v.ref.Count = total
+	return nil
+}
+
+func (v *IvfPqIndex) processDel(deleteIds []int64) error {
+	if len(deleteIds) == 0 {
+		return nil
+	}
+	// lock and copy v.segments.
+	// a new segment may be being added into v.segments by other goroutine,
+	// but there will never be deletion happened in new segment for the current request,
+	// so it's ok to use the replica of v.segments
+	v.lock.Lock()
+	segs, err := v.copySegments()
+	v.lock.Unlock()
+	if err != nil {
+		return err
+	}
+	var delBatches map[int]*segBatch
+	delBatches, err = getDelBatches(segs, deleteIds)
+	if err != nil {
+		return err
+	}
+	for _, batch := range delBatches {
+		seg := segs[batch.id]
+		err := seg.Batch(batch)
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func getDelBatches(segs []*VecSegment, delIds []int64) (delBatch map[int]*segBatch, err error) {
+	delBatch = make(map[int]*segBatch)
+	for segId, seg := range segs {
+		var ids []int64
+		ids, err = seg.GetExistsIds(delIds)
+		if err != nil {
+			return
+		}
+		if len(ids) > 0 {
+			delBatch[segId] = &segBatch{
+				deleteIds: ids,
+				id:        segId,
+			}
+		}
+	}
+	return
+}
+
+func (v *IvfPqIndex) processAdd(addVectors [][]float32, addIds []int64) error {
+	// process add vectors with lock to avoid the current segment being updated concurrently.
+	v.lock.Lock()
+	defer v.lock.Unlock()
+
+	curSeg, err := v.getCurSegment()
+	if err != nil {
+		return err
+	}
+	err = curSeg.Batch(&segBatch{
+		addIds:     addIds,
+		addVectors: addVectors,
+	})
+	if err != nil {
+		return err
 	}
 	err = v.checkNewSeg()
 	if err != nil {
 		return err
 	}
-
-	var total int64
-	for _, segMeta := range v.ref.Segments {
-		total += segMeta.Count
-	}
-	v.ref.Count = total
 	return nil
 }
 
-func (v *IvfPqIndex) getSegBatches(addVectors [][]float32, addIds, delIds []int64) (map[int]*segBatch, error) {
-	batches := make(map[int]*segBatch)
-	if len(delIds) > 0 {
-		err := v.loadAllSegments()
-		if err != nil {
-			return nil, err
-		}
-		for segId, seg := range v.segments {
-			ids, err := seg.GetExistsIds(delIds)
-			if err != nil {
-				return nil, err
-			}
-			if len(ids) > 0 {
-				batches[segId] = &segBatch{
-					deleteIds: ids,
-					id:        segId,
-				}
-			}
-		}
-	} else {
-		// we load current seg
-		err := v.loadCurrentSegment()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if len(addVectors) > 0 && len(addIds) > 0 {
-		if seg, ok := batches[v.ref.CurrentSegmentId]; ok {
-			seg.addVectors = addVectors
-			seg.addIds = addIds
-		} else {
-			batches[v.ref.CurrentSegmentId] = &segBatch{
-				addIds:     addIds,
-				addVectors: addVectors,
-				id:         v.ref.CurrentSegmentId,
-			}
-		}
-	}
-	return batches, nil
-}
-
+// checkNewSeg must be called with Lock
 func (v *IvfPqIndex) checkNewSeg() error {
 	seg, err := v.getCurSegment()
 	if err != nil {
@@ -390,9 +430,8 @@ func (v *IvfPqIndex) checkNewSeg() error {
 // should reorder by distance
 func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
 	v.lock.Lock()
-	err := v.loadAllSegments()
+	segs, err := v.copySegments()
 	v.lock.Unlock()
-
 	if err != nil {
 		return nil, err
 	}
@@ -410,11 +449,9 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 		}
 	}()
 
-	v.lock.RLock()
-	defer v.lock.RUnlock()
 	searchEg := errgroup.Group{}
 	searchEg.SetLimit(config.Global.Shard.GoroutineNum)
-	for _, seg := range v.segments {
+	for _, seg := range segs {
 		seg := seg
 		searchEg.Go(func() error {
 			mp, err := seg.Search(vec, k, nprobe)
@@ -442,7 +479,7 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 		size = int64(searchHeap.Len())
 	}
 	for i := int64(0); i < size; i++ {
-		res := searchHeap.Pop().(vecSearchRes)
+		res := heap.Pop(searchHeap).(vecSearchRes)
 		result[res.id] = res.dis
 	}
 	return result, nil
@@ -497,20 +534,19 @@ func (v *IvfPqIndex) SealSeg() error {
 		return nil
 	}
 	v.lock.Lock()
-	err := v.loadSegments(needSealSegIds)
+	segs, err := v.loadSegments(needSealSegIds)
 	v.lock.Unlock()
 	if err != nil {
 		return err
 	}
-	for _, id := range needSealSegIds {
-		seg := v.segments[id]
+	for _, seg := range segs {
 		err = seg.Seal()
 		if err != nil {
-			return fmt.Errorf("seal segemnt %d error: %w", id, err)
+			return fmt.Errorf("seal segemnt %d error: %w", seg.ref.Id, err)
 		}
 		err = v.zincIndex.SaveVecIndexMeta(v.field, v.ref)
 		if err != nil {
-			return fmt.Errorf("seal segemnt %d error: %w", id, err)
+			return fmt.Errorf("seal segemnt %d error: %w", seg.ref.Id, err)
 		}
 	}
 	return nil
@@ -518,22 +554,18 @@ func (v *IvfPqIndex) SealSeg() error {
 
 func (v *IvfPqIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	v.lock.Lock()
-	err := v.loadAllSegments()
+	segs, err := v.copySegments()
 	v.lock.Unlock()
 	if err != nil {
 		return 0, err
 	}
-	v.lock.RLock()
-	defer v.lock.RUnlock()
-
 	total := float32(0)
-
-	for _, seg := range v.segments {
+	for _, seg := range segs {
 		val, err := seg.Recall(count, k, nprobe)
 		if err != nil {
 			return 0, fmt.Errorf("recall segemnt %d error: %w", seg.ref.Id, err)
 		}
 		total += val
 	}
-	return total / float32(len(v.ref.Segments)), nil
+	return total / float32(len(segs)), nil
 }

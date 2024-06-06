@@ -14,7 +14,7 @@ func TestGC(t *testing.T) {
 		cache:      make(map[string]VectorIndex),
 		ready:      make(map[string]chan struct{}),
 		sealTaskMp: make(map[string]struct{}),
-		sealCh:     make(chan *rebuildTask, 10),
+		sealCh:     make(chan *sealTask, 10),
 		storage:    nil,
 		closer:     z.NewCloser(3),
 		tmpDir:     tmpDir,

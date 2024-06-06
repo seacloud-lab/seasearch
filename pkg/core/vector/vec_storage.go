@@ -130,7 +130,7 @@ func ListVecSegments(vecIndexName string) (map[int64]struct{}, error) {
 	case "s3":
 		files, err = listS3VecStoreSegments(prefix)
 	default:
-		files, err = listDisVecStoreSegments(prefix)
+		files, err = listDiskVecStoreSegments(prefix)
 	}
 	if err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func ListVecSegments(vecIndexName string) (map[int64]struct{}, error) {
 	return ids, nil
 }
 
-func listDisVecStoreSegments(prefix string) ([]string, error) {
+func listDiskVecStoreSegments(prefix string) ([]string, error) {
 	walkPath := path.Join(config.Global.DataPath, prefix)
 	_, err := os.Stat(walkPath)
 	if err != nil {
