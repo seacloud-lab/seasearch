@@ -136,8 +136,7 @@ func (f *FlatIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) err
 	if err != nil {
 		return err
 	}
-
-	f.ref.Count = f.seg.ref.Count
+	atomic.StoreInt64(&f.ref.Count, f.seg.ref.Count)
 	return nil
 }
 
@@ -330,9 +329,8 @@ func (v *IvfPqIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) er
 	for _, segMeta := range v.ref.Segments {
 		total += segMeta.Count
 	}
+	atomic.StoreInt64(&v.ref.Count, total)
 	v.lock.RUnlock()
-
-	v.ref.Count = total
 	return nil
 }
 
@@ -399,7 +397,7 @@ func (v *IvfPqIndex) processAdd(addVectors [][]float32, addIds []int64) error {
 	if err != nil {
 		return err
 	}
-	err = v.checkNewSeg()
+	err = v.checkNewSeg(curSeg)
 	if err != nil {
 		return err
 	}
@@ -407,20 +405,12 @@ func (v *IvfPqIndex) processAdd(addVectors [][]float32, addIds []int64) error {
 }
 
 // checkNewSeg must be called with Lock
-func (v *IvfPqIndex) checkNewSeg() error {
-	seg, err := v.getCurSegment()
-	if err != nil {
-		return err
-	}
-	if atomic.LoadInt64(&seg.ref.Count) >= config.Global.VectorConfig.IvfPqThreshold {
+func (v *IvfPqIndex) checkNewSeg(curSeg *VecSegment) error {
+	if atomic.LoadInt64(&curSeg.ref.Count) >= config.Global.VectorConfig.IvfPqThreshold {
 		// make new segment as current segment
 		v.segments = append(v.segments, nil)
 		v.ref.CurrentSegmentId++
 		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{Id: v.ref.CurrentSegmentId, Status: vector.StatusGrowing, Count: 0})
-		err := v.zincIndex.SaveVecIndexMeta(v.field, v.ref)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
