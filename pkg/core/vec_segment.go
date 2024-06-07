@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"sync/atomic"
 
 	"github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/blugelabs/bluge"
@@ -236,10 +237,10 @@ func (s *VecSegment) save() error {
 		if err != nil {
 			return err
 		}
-		s.ref.Count = int64(c)
+		atomic.StoreInt64(&s.ref.Count, int64(c))
 		return nil
 	}
-	s.ref.Count = s.index.Ntotal()
+	atomic.StoreInt64(&s.ref.Count, s.index.Ntotal())
 	return s.saveFaissIndex()
 }
 
@@ -358,7 +359,7 @@ func (s *VecSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string
 		return nil, err
 	}
 	req := bluge.NewAllMatches(q)
-	vectors, ids, err := s.getVectors(s.ref.Count, req)
+	vectors, ids, err := s.getVectors(atomic.LoadInt64(&s.ref.Count), req)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +429,6 @@ func (s *VecSegment) Seal() error {
 		return err
 	}
 	s.ref.Status = vector.StatusSealed
-	s.ref.Count = idx.Ntotal()
 	s.freeCache()
 	return nil
 }
@@ -498,7 +498,7 @@ func (s *VecSegment) getQueryVectors(n int) ([][]float32, error) {
 func (s *VecSegment) getAllVectors() ([]float32, []int64, error) {
 	q := bluge.NewMatchAllQuery()
 	req := bluge.NewAllMatches(q)
-	return s.getVectors(s.ref.Count, req)
+	return s.getVectors(atomic.LoadInt64(&s.ref.Count), req)
 }
 
 func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {

@@ -136,7 +136,7 @@ func (f *FlatIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) err
 	if err != nil {
 		return err
 	}
-	atomic.StoreInt64(&f.ref.Count, f.seg.ref.Count)
+	atomic.StoreInt64(&f.ref.Count, atomic.LoadInt64(&f.seg.ref.Count))
 	return nil
 }
 
@@ -327,7 +327,7 @@ func (v *IvfPqIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) er
 	v.lock.RLock()
 	var total int64
 	for _, segMeta := range v.ref.Segments {
-		total += segMeta.Count
+		total += atomic.LoadInt64(&segMeta.Count)
 	}
 	atomic.StoreInt64(&v.ref.Count, total)
 	v.lock.RUnlock()
@@ -513,7 +513,7 @@ func (v *IvfPqIndex) SealSeg() error {
 	for _, segMeta := range v.ref.Segments {
 		if segMeta.Status == vector.StatusGrowing &&
 			segMeta.Id != v.ref.CurrentSegmentId &&
-			segMeta.Count >= config.Global.VectorConfig.IvfPqThreshold {
+			atomic.LoadInt64(&segMeta.Count) >= config.Global.VectorConfig.IvfPqThreshold {
 			needSealSegIds = append(needSealSegIds, segMeta.Id)
 		}
 	}
