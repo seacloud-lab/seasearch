@@ -242,7 +242,8 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 				NBits:            prop.NBits,
 				M:                prop.M,
 				CurrentSegmentId: 0,
-				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
+				Version:          vector.CurIndexVersion,
+				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing, Version: vector.CurSegmentVersion}},
 			}
 		}
 	}
