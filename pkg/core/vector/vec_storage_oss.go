@@ -13,7 +13,6 @@ import (
 )
 
 type OssStorage struct {
-	client    *oss.Client
 	bucket    *oss.Bucket
 	prefix    string
 	cache     *lru_cache.LruCache
@@ -121,6 +120,50 @@ func (o *OssStorage) listObjects(prefix string) ([]oss.ObjectProperties, error) 
 }
 
 func createOssStorage() (ObjStore, error) {
+	o := &OssStorage{
+		cache:     lru_cache.Instance,
+		prefix:    VecPrefix,
+		cachePath: path.Join(config.Global.DataPath, VecPrefix),
+	}
+	var err error
+	o.bucket, err = createOssClient()
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func listOssVecStoreSegments(prefix string) ([]string, error) {
+	o, err := createOssClient()
+	if err != nil {
+		log.Error().Err(err).Msgf("list vec store segments %s err: create oss client err: ", prefix)
+		return nil, fmt.Errorf("create oss client err: %w", err)
+	}
+
+	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
+	var objs []oss.ObjectProperties
+	for i := 0; ; i++ {
+		result, err := o.ListObjectsV2(opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list objects: %w", err)
+		}
+		objs = append(objs, result.Objects...)
+		if !result.IsTruncated {
+			break
+		} else if i == 0 {
+			opts = append(opts, oss.ContinuationToken(result.NextContinuationToken))
+		} else {
+			opts[len(opts)-1] = oss.ContinuationToken(result.NextContinuationToken)
+		}
+	}
+	res := make([]string, 0, len(objs))
+	for _, obj := range objs {
+		res = append(res, obj.Key)
+	}
+	return res, nil
+}
+
+func createOssClient() (*oss.Bucket, error) {
 	accessKeyID := config.Global.Oss.AccessId
 	accessKeySecret := config.Global.Oss.AccessSecret
 	bucketName := config.Global.Oss.Bucket
@@ -130,16 +173,10 @@ func createOssStorage() (ObjStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	o := &OssStorage{
-		cache:     lru_cache.Instance,
-		client:    client,
-		prefix:    VecPrefix,
-		cachePath: path.Join(config.Global.DataPath, VecPrefix),
-	}
-	o.bucket, err = client.Bucket(bucketName)
+	bucket, err := client.Bucket(bucketName)
 	if err != nil {
 		return nil, err
 	}
 
-	return o, nil
+	return bucket, nil
 }

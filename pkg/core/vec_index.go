@@ -1,53 +1,34 @@
 package core
 
 import (
+	"container/heap"
 	"fmt"
-	"math"
-	"os"
 	"path"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/blugelabs/bluge"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/faiss_wrapper"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/uquery/query"
-	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+	"golang.org/x/sync/errgroup"
 )
 
 type VectorIndex interface {
-	Lock()
-	Unlock()
-	RLock()
-	RUnlock()
-	// AddVectors
-	// Caller needs to get Lock before call it.
-	AddVectors(vectors [][]float32, ids []int64) error
-	// RemoveIDs
-	// Caller needs to get Lock before call it.
-	RemoveIDs(ids []int64) (int, error)
-	// Save
-	// Caller needs to get Lock before call it.
-	Save() error
-	// Search
-	// Caller needs to get RLock before call it.
+	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
 	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
 	Name() string
 	Meta() *meta.VecIndex
-	// Rebuild
-	// Caller needs to get Lock before call it.
-	Rebuild() error
+	SealSeg() error
 	AddRef()
 	ReduceRef()
 	RefCount() int
 	ATime() time.Time
-	// Free
-	// External caller needs to get Lock before call it.
 	Free()
+	Recall(count int, k int64, nprobe int) (float32, error)
 }
 
 type baseIndex struct {
@@ -86,22 +67,6 @@ func (b *baseIndex) ATime() time.Time {
 	return b.aTime
 }
 
-func (b *baseIndex) getVectors() ([]float32, []int64, error) {
-	readers, err := b.zincIndex.GetReaders(0, 0)
-	defer func() {
-		for _, r := range readers {
-			_ = r.Close()
-		}
-	}()
-	if err != nil {
-		return nil, nil, err
-	}
-	d := b.ref.Dims
-	q := bluge.NewMatchAllQuery()
-	req := bluge.NewAllMatches(q)
-	return getVectors(b.field, d, b.ref.Count, req, readers...)
-}
-
 func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {
 	if vecIndexMeta.TargetType == vector.Flat {
 		return &FlatIndex{
@@ -126,385 +91,471 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			aTime:     time.Now(),
 		},
 	}
-	// current type is ivf_pq, we need to load faiss index file
-	if vecIndexMeta.Type == vector.IvfPQ {
-		err := ivfPqIndex.loadIndexFile()
-		if err != nil {
-			return nil, err
-		}
+	err := ivfPqIndex.checkStoredSegments()
+	if err != nil {
+		return nil, err
 	}
+	ivfPqIndex.segments = make([]*VecSegment, len(vecIndexMeta.Segments))
 	return ivfPqIndex, nil
 }
 
-// FlatIndex
-// the vectors should have been saved into bluge and
-// flat index doesn't save anything
+// FlatIndex stores vectors without building faiss index.
+// Flat index has only one segment containing all vectors.
+// Usually if you expect to have more than 100K vectors you should use IvfPQ index instead.
 type FlatIndex struct {
 	baseIndex
-	// vectors cache
-	cachedVectorsCache []float32
-	// vector idx -> docId
-	ids []int64
+	seg *VecSegment
 }
 
-func (f *FlatIndex) AddVectors(vectors [][]float32, ids []int64) error {
-	if len(vectors) != len(ids) {
-		return ErrInvalidVec
+func (f *FlatIndex) loadSegment() error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if f.seg != nil {
+		return nil
 	}
-	atomic.AddInt64(&f.ref.Count, int64(len(ids)))
+	var err error
+	// only one segment with id 0
+	f.seg, err = openSegment(f, 0)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (f *FlatIndex) RemoveIDs(ids []int64) (int, error) {
-	atomic.AddInt64(&f.ref.Count, -int64(len(ids)))
-	return len(ids), nil
-}
-
-// Save
-// when vectors changed, we clear cache
-func (f *FlatIndex) Save() error {
-	f.Free()
-	return f.zincIndex.SaveVecIndexMeta(f.field, f.ref)
+func (f *FlatIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) error {
+	err := f.loadSegment()
+	if err != nil {
+		return err
+	}
+	err = f.seg.Batch(&segBatch{
+		addIds:     addIds,
+		deleteIds:  deleteIds,
+		addVectors: addVectors,
+	})
+	if err != nil {
+		return err
+	}
+	atomic.StoreInt64(&f.ref.Count, atomic.LoadInt64(&f.seg.ref.Count))
+	return nil
 }
 
 func (f *FlatIndex) Free() {
-	f.cachedVectorsCache = nil
-	f.ids = nil
+	if f.seg != nil {
+		f.seg.Free()
+	}
 }
 
-func (f *FlatIndex) Rebuild() error {
-	// Flat index should never be called rebuild
-	log.Warn().Msgf("Rebuild should not be called on flat index %s.", f.name)
+func (f *FlatIndex) SealSeg() error {
+	// Flat index should never be called SealedSeg
+	log.Warn().Msgf("SealSeg should not be called on flat index %s.", f.name)
 	return nil
 }
 
 // Search
-// flat index get all vectors from bluge, and use faiss to get top k
+// flat index get all vectors from vec_store, and use the function provided by faiss to get top k
 func (f *FlatIndex) Search(vec []float32, k int64, _ int) (map[string]float32, error) {
-	if f.cachedVectorsCache == nil || f.ids == nil {
-		var err error
-		f.cachedVectorsCache, f.ids, err = f.getVectors()
-		if err != nil {
-			return nil, err
-		}
+	err := f.loadSegment()
+	if err != nil {
+		return nil, err
 	}
-	cacheVectors := f.cachedVectorsCache
-	cacheIds := f.ids
 
-	if len(cacheVectors) == 0 || len(cacheIds) == 0 {
-		return make(map[string]float32), nil
-	}
-	return flatSearch(cacheIds, cacheVectors, vec, int(k), f.ref.Dims), nil
+	return f.seg.Search(vec, k, 0)
 }
 
-func (f *FlatIndex) Lock() {
-	f.lock.Lock()
+func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
+	log.Warn().Msgf("Recall should not be called on flat index %s.", f.name)
+	return 1, nil
 }
 
-func (f *FlatIndex) Unlock() {
-	f.lock.Unlock()
-}
-
-func (f *FlatIndex) RLock() {
-	f.lock.RLock()
-}
-
-func (f *FlatIndex) RUnlock() {
-	f.lock.RUnlock()
-}
-
-// IvfPqIndex
-// wrap of faiss ivf_pq
+// IvfPqIndex has multiple segments, each contains at most 100K vectors.
+// The growing segment (a.k.a. current segment) has no faiss index, while all sealed segments have faiss indexes built.
 type IvfPqIndex struct {
 	baseIndex
-	index faiss.Index
-
-	cachedVectorsCache []float32
-	// vector idx -> docId
-	ids []int64
+	segments []*VecSegment
 }
 
-func (v *IvfPqIndex) Free() {
-	if v.index != nil {
-		v.index.Delete()
+// checkStoredSegments
+// check all stored segments and update metadata if there is any unrecorded segment.
+func (v *IvfPqIndex) checkStoredSegments() error {
+	ids, err := vector.ListVecSegments(v.name)
+	if err != nil {
+		return err
 	}
-	v.cachedVectorsCache = nil
-	v.ids = nil
-}
 
-func (v *IvfPqIndex) AddVectors(vectors [][]float32, ids []int64) error {
-	if v.ref.Type == vector.Flat {
-		atomic.AddInt64(&v.ref.Count, int64(len(ids)))
+	for _, segRef := range v.ref.Segments {
+		if _, ok := ids[int64(segRef.Id)]; ok {
+			continue
+		} else {
+			// current segment may haven't written anything, so it's ok.
+			if segRef.Id == v.ref.CurrentSegmentId {
+				continue
+			}
+			// segment exist in metadata but not in storage
+			return ErrVecIndexCorruption
+		}
+	}
+
+	// segment count matched
+	if len(ids) == len(v.ref.Segments) {
 		return nil
 	}
-	d := v.index.D()
-	finalVector := make([]float32, len(vectors)*d)
-	if len(vectors) != len(ids) {
-		log.Fatal().Err(ErrInvalidArguments).Msgf("len vectors is not equal to len ids")
-		return ErrInvalidArguments
-	}
-	for k, vec := range vectors {
-		if len(vec) != d {
-			log.Fatal().Err(ErrInvalidVec).Msgf("vector dims is not equal to index setting")
-			return ErrInvalidVec
-		}
-		for i, val := range vec {
-			finalVector[k*d+i] = val
-		}
-	}
-	err := v.index.AddWithIDs(finalVector, ids)
-	return err
-}
 
-func (v *IvfPqIndex) RemoveIDs(ids []int64) (int, error) {
-	if v.ref.Type == vector.Flat {
-		atomic.AddInt64(&v.ref.Count, -int64(len(ids)))
-		return len(ids), nil
-	}
-	selector, err := faiss.NewIDSelectorBatch(ids)
-	if err != nil {
-		return 0, err
-	}
-	return v.index.RemoveIDs(selector)
-}
-
-func (v *IvfPqIndex) Save() error {
-	if v.ref.Type == vector.IvfPQ {
-		v.ref.Count = v.index.Ntotal()
-		v.ref.Stored = true
-		err := save(v.index, v.zincIndex.GetName(), v.field)
+	for id := v.ref.CurrentSegmentId + 1; id < len(ids); id++ {
+		dataPath := config.Global.DataPath
+		name := path.Join(vector.VecPrefix, v.name, fmt.Sprintf("%04x", id), "stored_vec")
+		var cfg bluge.Config
+		switch config.Global.StorageType {
+		case "disk":
+			cfg = directory.GetDiskConfig(dataPath, name)
+		case "s3":
+			cfg = directory.GetS3Config(dataPath, name)
+		case "oss":
+			cfg = directory.GetOssConfig(dataPath, name)
+		default:
+			return fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
+		}
+		r, err := bluge.OpenReader(cfg)
 		if err != nil {
-			return err
+			return fmt.Errorf("open vector index %s err: %w", name, err)
 		}
-	} else {
-		// for flat, we clear cache
-		v.Free()
+		count, err := r.Count()
+		_ = r.Close()
+		if err != nil {
+			return fmt.Errorf("get vec segment %s count err: %w", name, err)
+		}
+		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{
+			Id:     id,
+			Status: vector.StatusGrowing,
+			Count:  int64(count),
+		})
 	}
-	// update metaData
+
 	return v.zincIndex.SaveVecIndexMeta(v.field, v.ref)
 }
 
-func save(idx faiss.Index, zincIndexName string, field string) error {
-	f, err := os.CreateTemp(vecIdxManager.tmpDir, "temp_index")
+func (v *IvfPqIndex) loadCurrentSegment() error {
+	if seg := v.segments[v.ref.CurrentSegmentId]; seg != nil {
+		return nil
+	}
+	seg, err := openSegment(v, v.ref.CurrentSegmentId)
 	if err != nil {
 		return err
 	}
-	_ = f.Close()
-	defer func() {
-		_ = os.Remove(f.Name())
-	}()
+	v.segments[v.ref.CurrentSegmentId] = seg
+	return nil
+}
 
-	err = faiss.WriteIndex(idx, f.Name())
-	if err != nil {
-		return err
+func (v *IvfPqIndex) loadAllSegments() error {
+	ids := make([]int, len(v.ref.Segments))
+	for i := range v.ref.Segments {
+		ids[i] = i
 	}
-	name := path.Join(zincIndexName, field)
-	err = vecIdxManager.storage.SaveFile(f.Name(), name)
-	if err != nil {
-		return err
-	}
+	_, err := v.loadSegments(ids)
 	return err
+}
+
+func (v *IvfPqIndex) copySegments() ([]*VecSegment, error) {
+	err := v.loadAllSegments()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]*VecSegment, len(v.segments))
+	copy(res, v.segments)
+	return res, nil
+}
+
+func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
+	res := make([]*VecSegment, 0, len(ids))
+	for _, id := range ids {
+		// already loaded
+		seg := v.segments[id]
+		if seg != nil {
+			res = append(res, seg)
+			continue
+		}
+		seg, err := openSegment(v, id)
+		if err != nil {
+			return nil, err
+		}
+		v.segments[id] = seg
+		res = append(res, seg)
+	}
+	return res, nil
+}
+
+// getCurSegment
+// should be used with lock,
+// otherwise other goroutine may has updated current seg id.
+func (v *IvfPqIndex) getCurSegment() (*VecSegment, error) {
+	err := v.loadCurrentSegment()
+	if err != nil {
+		return nil, err
+	}
+	return v.segments[v.ref.CurrentSegmentId], nil
+}
+
+func (v *IvfPqIndex) Free() {
+	v.lock.Lock()
+	defer v.lock.Unlock()
+
+	for _, seg := range v.segments {
+		if seg != nil {
+			seg.Free()
+		}
+	}
+}
+
+type segBatch struct {
+	id         int
+	addIds     []int64
+	addVectors [][]float32
+	deleteIds  []int64
+}
+
+func (v *IvfPqIndex) Batch(addVectors [][]float32, addIds, deleteIds []int64) error {
+	err := v.processDel(deleteIds)
+	if err != nil {
+		return err
+	}
+	err = v.processAdd(addVectors, addIds)
+	if err != nil {
+		return err
+	}
+
+	// other goroutine may be creating a new segment, so we get RLock.
+	v.lock.RLock()
+	var total int64
+	for _, segMeta := range v.ref.Segments {
+		total += atomic.LoadInt64(&segMeta.Count)
+	}
+	atomic.StoreInt64(&v.ref.Count, total)
+	v.lock.RUnlock()
+	return nil
+}
+
+func (v *IvfPqIndex) processDel(deleteIds []int64) error {
+	if len(deleteIds) == 0 {
+		return nil
+	}
+	// lock and copy v.segments.
+	// a new segment may be being added into v.segments by other goroutine,
+	// but there will never be deletion happened in new segment for the current request,
+	// so it's ok to use the replica of v.segments
+	v.lock.Lock()
+	segs, err := v.copySegments()
+	v.lock.Unlock()
+	if err != nil {
+		return err
+	}
+	var delBatches map[int]*segBatch
+	delBatches, err = getDelBatches(segs, deleteIds)
+	if err != nil {
+		return err
+	}
+	for _, batch := range delBatches {
+		seg := segs[batch.id]
+		err := seg.Batch(batch)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getDelBatches(segs []*VecSegment, delIds []int64) (delBatch map[int]*segBatch, err error) {
+	delBatch = make(map[int]*segBatch)
+	for segId, seg := range segs {
+		var ids []int64
+		ids, err = seg.GetExistsIds(delIds)
+		if err != nil {
+			return
+		}
+		if len(ids) > 0 {
+			delBatch[segId] = &segBatch{
+				deleteIds: ids,
+				id:        segId,
+			}
+		}
+	}
+	return
+}
+
+func (v *IvfPqIndex) processAdd(addVectors [][]float32, addIds []int64) error {
+	// process add vectors with lock to avoid the current segment being updated concurrently.
+	v.lock.Lock()
+	defer v.lock.Unlock()
+
+	curSeg, err := v.getCurSegment()
+	if err != nil {
+		return err
+	}
+	err = curSeg.Batch(&segBatch{
+		addIds:     addIds,
+		addVectors: addVectors,
+	})
+	if err != nil {
+		return err
+	}
+	err = v.checkNewSeg(curSeg)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkNewSeg must be called with Lock
+func (v *IvfPqIndex) checkNewSeg(curSeg *VecSegment) error {
+	if atomic.LoadInt64(&curSeg.ref.Count) >= config.Global.VectorConfig.IvfPqThreshold {
+		// make new segment as current segment
+		v.segments = append(v.segments, nil)
+		v.ref.CurrentSegmentId++
+		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{Id: v.ref.CurrentSegmentId, Status: vector.StatusGrowing, Count: 0})
+	}
+	return nil
 }
 
 // Search query vector index,
 // return a map docId->distance
 // should reorder by distance
 func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
-	if v.ref.Type == vector.Flat {
-		return v.searchFlat(vec, k)
-	}
-	return v.searchIvfPq(vec, k, nprobe)
-}
-
-func (v *IvfPqIndex) searchFlat(vec []float32, k int64) (map[string]float32, error) {
-	if v.cachedVectorsCache == nil || v.ids == nil {
-		var err error
-		v.cachedVectorsCache, v.ids, err = v.getVectors()
-		if err != nil {
-			return nil, err
-		}
-	}
-	cacheVectors := v.cachedVectorsCache
-	cacheIds := v.ids
-
-	if len(cacheVectors) == 0 || len(cacheIds) == 0 {
-		return make(map[string]float32), nil
-	}
-	return flatSearch(cacheIds, cacheVectors, vec, int(k), v.ref.Dims), nil
-}
-
-func flatSearch(baseIds []int64, base []float32, query []float32, k, dim int) map[string]float32 {
-	distances, ids := faiss_wrapper.Knn(query, base, 1, len(baseIds), k, dim)
-	result := make(map[string]float32)
-	for i, id := range ids {
-		// it means there isn't enough K vectors.
-		if id == -1 {
-			break
-		}
-		result[base62.Encode(baseIds[id])] = distances[i]
-	}
-	return result
-}
-
-func (v *IvfPqIndex) searchIvfPq(vec []float32, k int64, nprobe int) (map[string]float32, error) {
-	var ids []int64
-	var err error
-	ps, err := faiss.NewParameterSpace()
-	if err != nil {
-		return nil, err
-	}
-	defer ps.Delete()
-
-	if err := ps.SetIndexParameter(v.index, "nprobe", float64(nprobe)); err != nil {
-		return nil, err
-	}
-
-	var result = make(map[string]float32)
-	_, ids, err = v.index.Search(vec, k)
+	v.lock.Lock()
+	segs, err := v.copySegments()
+	v.lock.Unlock()
 	if err != nil {
 		return nil, err
 	}
 
-	docIds := make([]string, 0)
-	for i := range ids {
-		if ids[i] == -1 {
-			continue
-		}
-		docIds = append(docIds, base62.Encode(ids[i]))
-	}
-	if len(docIds) == 0 {
-		return result, nil
-	}
-	// for ivf_pq, we need to get vector and calculate the real distance
-	q, err := query.TermsQuery(map[string]interface{}{
-		"_id": docIds,
-	}, nil)
-	if err != nil {
-		return nil, err
-	}
-	readers, err := v.zincIndex.GetReaders(0, 0)
-	defer func() {
-		for _, r := range readers {
-			_ = r.Close()
+	searchHeap := &vecSearchHeap{}
+	heap.Init(searchHeap)
+
+	heapWait := sync.WaitGroup{}
+	heapWait.Add(1)
+	docCh := make(chan vecSearchRes, 10)
+	go func() {
+		defer heapWait.Done()
+		for doc := range docCh {
+			heap.Push(searchHeap, doc)
 		}
 	}()
-	if err != nil {
-		return nil, err
-	}
-	req := bluge.NewAllMatches(q)
 
-	vectors, ids, err := getVectors(v.field, v.ref.Dims, v.ref.Count, req, readers...)
+	searchEg := errgroup.Group{}
+	searchEg.SetLimit(config.Global.Shard.GoroutineNum)
+	for _, seg := range segs {
+		seg := seg
+		searchEg.Go(func() error {
+			mp, err := seg.Search(vec, k, nprobe)
+
+			if err != nil {
+				return err
+			}
+			for id, dis := range mp {
+				docCh <- vecSearchRes{id: id, dis: dis}
+			}
+			return nil
+		})
+	}
+
+	err = searchEg.Wait()
+	close(docCh)
+	heapWait.Wait()
 	if err != nil {
 		return nil, err
 	}
-	for i := range ids {
-		realVector := vectors[i*v.ref.Dims : (i+1)*v.ref.Dims]
-		dis, err := L2Distance(vec, realVector)
-		if err != nil {
-			return nil, err
-		}
-		result[base62.Encode(ids[i])] = dis
+
+	result := make(map[string]float32)
+	size := k
+	if searchHeap.Len() <= int(k) {
+		size = int64(searchHeap.Len())
+	}
+	for i := int64(0); i < size; i++ {
+		res := heap.Pop(searchHeap).(vecSearchRes)
+		result[res.id] = res.dis
 	}
 	return result, nil
 }
 
-// Rebuild
-// TODO: make sure no new vectors are being written when rebuilding
-func (v *IvfPqIndex) Rebuild() error {
-	var vectors []float32
-	var ids []int64
-	// if cached, we just use it
-	if v.cachedVectorsCache != nil && v.ids != nil {
-		vectors = v.cachedVectorsCache
-		ids = v.ids
-	} else {
-		var err error
-		vectors, ids, err = v.getVectors()
-		if err != nil {
-			return err
+type vecSearchHeap struct {
+	docs []vecSearchRes
+}
+
+type vecSearchRes struct {
+	id  string
+	dis float32
+}
+
+func (v *vecSearchHeap) Len() int {
+	return len(v.docs)
+}
+
+func (v *vecSearchHeap) Less(i, j int) bool {
+	return v.docs[i].dis < v.docs[j].dis
+}
+
+func (v *vecSearchHeap) Swap(i, j int) {
+	v.docs[i], v.docs[j] = v.docs[j], v.docs[i]
+}
+
+func (v *vecSearchHeap) Push(x any) {
+	v.docs = append(v.docs, x.(vecSearchRes))
+}
+
+func (v *vecSearchHeap) Pop() any {
+	n := len(v.docs)
+	doc := v.docs[n-1]
+	v.docs = v.docs[:n-1]
+	return doc
+}
+
+func (v *IvfPqIndex) SealSeg() error {
+	var needSealSegIds []int
+	v.lock.RLock()
+	for _, segMeta := range v.ref.Segments {
+		if segMeta.Status == vector.StatusGrowing &&
+			segMeta.Id != v.ref.CurrentSegmentId &&
+			atomic.LoadInt64(&segMeta.Count) >= config.Global.VectorConfig.IvfPqThreshold {
+			needSealSegIds = append(needSealSegIds, segMeta.Id)
 		}
 	}
+	v.lock.RUnlock()
 
-	if len(vectors) == 0 || len(ids) == 0 {
-		// do nothing
-		log.Warn().Msgf("try to rebuild ivf_pq index %s but there are no vectors", v.name)
+	// nothing to process
+	if len(needSealSegIds) == 0 {
 		return nil
 	}
-
-	nlist := int(4 * math.Sqrt(float64(len(ids))))
-	idx, err := faiss.IndexFactory(v.ref.Dims, fmt.Sprintf("IVF%d,PQ%dx%d", nlist, v.ref.M, v.ref.NBits), faiss.MetricL2)
-	if err != nil {
-		return err
-	}
-	err = idx.Train(vectors)
-	if err != nil {
-		idx.Delete()
-		return err
-	}
-
-	err = idx.AddWithIDs(vectors, ids)
-	if err != nil {
-		idx.Delete()
-		return err
-	}
-
-	err = save(idx, v.zincIndex.GetName(), v.field)
-	if err != nil {
-		return err
-	}
-	v.ref.Type = vector.IvfPQ
-	v.ref.NList = nlist
-	v.ref.Count = idx.Ntotal()
-	v.ref.Stored = true
-	// free old index
-	v.Free()
-	v.index = idx
-
-	return v.zincIndex.SaveVecIndexMeta(v.field, v.ref)
-}
-
-func L2Distance(slice1, slice2 []float32) (float32, error) {
-	if len(slice1) != len(slice2) {
-		return 0, fmt.Errorf("invliad vectors")
-	}
-
-	var sum float32
-	for i := 0; i < len(slice1); i++ {
-		diff := slice1[i] - slice2[i]
-		sum += diff * diff
-	}
-
-	return sum, nil
-}
-
-// loadIndexFile load faiss into memory
-func (v *IvfPqIndex) loadIndexFile() error {
-	vecIndexName := path.Join(v.zincIndex.GetName(), v.field)
-	localFile, closer, err := vecIdxManager.storage.LoadFile(vecIndexName)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = closer.Close()
-	}()
-	if v.index == nil {
-		v.index, err = faiss.ReadIndex(localFile, faiss.IOFlagReadOnly)
-	}
-	return err
-}
-
-func (v *IvfPqIndex) Lock() {
 	v.lock.Lock()
-}
-
-func (v *IvfPqIndex) Unlock() {
+	segs, err := v.loadSegments(needSealSegIds)
 	v.lock.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, seg := range segs {
+		err = seg.Seal()
+		if err != nil {
+			return fmt.Errorf("seal segemnt %d error: %w", seg.ref.Id, err)
+		}
+		err = v.zincIndex.SaveVecIndexMeta(v.field, v.ref)
+		if err != nil {
+			return fmt.Errorf("seal segemnt %d error: %w", seg.ref.Id, err)
+		}
+	}
+	return nil
 }
 
-func (v *IvfPqIndex) RLock() {
-	v.lock.RLock()
-}
-
-func (v *IvfPqIndex) RUnlock() {
-	v.lock.RUnlock()
+func (v *IvfPqIndex) Recall(count int, k int64, nprobe int) (float32, error) {
+	v.lock.Lock()
+	segs, err := v.copySegments()
+	v.lock.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	total := float32(0)
+	for _, seg := range segs {
+		val, err := seg.Recall(count, k, nprobe)
+		if err != nil {
+			return 0, fmt.Errorf("recall segemnt %d error: %w", seg.ref.Id, err)
+		}
+		total += val
+	}
+	return total / float32(len(segs)), nil
 }

@@ -123,7 +123,7 @@ func SetRoutes(r *gin.Engine) {
 
 	r.POST("/api/:target/_search/vector", AuthMiddleware("search.SearchVector"), ClusterMiddleware, search.SearchVector)
 
-	r.POST("/api/:target/:field/_rebuild", AuthMiddleware("search.Rebuild"), ClusterMiddleware, index.RebuildVectorIndex)
+	r.POST("/api/:target/:field/_seal", AuthMiddleware("search.Seal"), ClusterMiddleware, index.SealVectorIndex)
 
 	// vector recall
 	r.POST("/api/:target/_recall", AuthMiddleware("search.vectorRecall"), ClusterMiddleware, search.VectorRecall)

@@ -28,16 +28,21 @@ type Index struct {
 }
 
 type VecIndex struct {
-	Type string `json:"type"`
 	// the final vec index type
-	TargetType string `json:"target_type"`
-	Dims       int    `json:"dims"`
-	NBits      int    `json:"nbits"`
-	NList      int    `json:"nlist"`
-	M          int    `json:"m"`
-	Count      int64  `json:"count"`
-	// Stored whether the index has been persisted
-	Stored bool `json:"stored"`
+	TargetType       string           `json:"target_type"`
+	Dims             int              `json:"dims"`
+	NBits            int              `json:"nbits"`
+	NList            int              `json:"nlist"`
+	M                int              `json:"m"`
+	Count            int64            `json:"count"`
+	CurrentSegmentId int              `json:"current_segment_id"`
+	Segments         []*VectorSegment `json:"segments"`
+}
+
+type VectorSegment struct {
+	Id     int    `json:"id"`
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
 }
 
 type IndexShard struct {

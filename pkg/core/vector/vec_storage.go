@@ -3,9 +3,12 @@ package vector
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -115,4 +118,65 @@ func (d *diskStore) Remove(name string) error {
 		return err
 	}
 	return nil
+}
+
+func ListVecSegments(vecIndexName string) (map[int64]struct{}, error) {
+	var files []string
+	var err error
+	prefix := path.Join(VecPrefix, vecIndexName)
+	switch config.Global.StorageType {
+	case "oss":
+		files, err = listOssVecStoreSegments(prefix)
+	case "s3":
+		files, err = listS3VecStoreSegments(prefix)
+	default:
+		files, err = listDiskVecStoreSegments(prefix)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// .../.../vec_index/$index_name/$vector_field/$segment_id/stored_vec/000000000.seg
+	ids := make(map[int64]struct{})
+	for _, f := range files {
+		// we ignore faiss index file
+		if strings.HasSuffix(f, "index.index") {
+			continue
+		}
+		idStr := filepath.Base(filepath.Dir(filepath.Dir(f)))
+		id, err := strconv.ParseInt(idStr, 16, 64)
+		if err != nil {
+			return nil, fmt.Errorf("got invalid dir name %s, parse seg id err: %w", idStr, err)
+		}
+		ids[id] = struct{}{}
+	}
+
+	return ids, nil
+}
+
+func listDiskVecStoreSegments(prefix string) ([]string, error) {
+	walkPath := path.Join(config.Global.DataPath, prefix)
+	_, err := os.Stat(walkPath)
+	if err != nil {
+		// band new ivf_pq index without any segments
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	result := make([]string, 0)
+	err = filepath.Walk(walkPath, func(p string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return err
+		}
+		result = append(result, p)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

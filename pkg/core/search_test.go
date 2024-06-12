@@ -282,6 +282,7 @@ func TestIndex_Search(t *testing.T) {
 	}
 
 	t.Run("Cleanup", func(t *testing.T) {
+		assert.NoError(t, index.Close())
 		err = DeleteIndex(indexName)
 		assert.NoError(t, err)
 	})

@@ -23,20 +23,20 @@ var (
 	ErrInvalidArguments   = errors.New("invalid arguments")
 )
 
-type rebuildTask struct {
+type sealTask struct {
 	index    string
 	field    string
 	taskName string
 }
 
 type VecIndexManager struct {
-	cache         map[string]VectorIndex
-	ready         map[string]chan struct{}
-	rebuildTaskMp map[string]struct{}
-	rebuildTaskCh chan *rebuildTask
-	rebuildLock   sync.RWMutex
-	lock          sync.Mutex
-	storage       vector.ObjStore
+	cache      map[string]VectorIndex
+	ready      map[string]chan struct{}
+	sealTaskMp map[string]struct{}
+	sealCh     chan *sealTask
+	sealedLock sync.RWMutex
+	lock       sync.Mutex
+	storage    vector.ObjStore
 	// path for saving temp file
 	tmpDir string
 	closer *z.Closer
@@ -61,28 +61,28 @@ func InitVecIndexManager() {
 		}
 	}
 	vecIdxManager = &VecIndexManager{
-		cache:         make(map[string]VectorIndex),
-		ready:         make(map[string]chan struct{}),
-		rebuildTaskMp: make(map[string]struct{}),
-		rebuildTaskCh: make(chan *rebuildTask, 10),
-		storage:       storage,
-		closer:        z.NewCloser(3),
-		tmpDir:        tmpDir,
+		cache:      make(map[string]VectorIndex),
+		ready:      make(map[string]chan struct{}),
+		sealTaskMp: make(map[string]struct{}),
+		sealCh:     make(chan *sealTask, 10),
+		storage:    storage,
+		closer:     z.NewCloser(3),
+		tmpDir:     tmpDir,
 	}
 
-	go backGroundGC()
+	go backgroundGC()
 
-	go backGroundRebuildCheck()
+	go backgroundSealCheck()
 
-	go backGroundRebuild()
+	go backgroundSeal()
 }
 
 func CloseVecIndexManager() {
 	vecIdxManager.closer.SignalAndWait()
 }
 
-// backGroundGC for free memory
-func backGroundGC() {
+// backgroundGC for free memory
+func backgroundGC() {
 	defer vecIdxManager.closer.Done()
 	var err error
 	var previousFound bool
@@ -137,9 +137,7 @@ func execGC() (bool, error) {
 	vecIdxManager.lock.Unlock()
 
 	log.Debug().Msgf("free vector index memory %v", expired.Name())
-	expired.Lock()
 	expired.Free()
-	expired.Unlock()
 
 	vecIdxManager.lock.Lock()
 	close(ready) // wakes all goroutines waiting on the channel
@@ -245,26 +243,7 @@ func getVectorIndex(field, zincIndexName string) (VectorIndex, error) {
 		return nil, ErrVecIndexNotExists
 	}
 
-	// ivf_pq, check stored
-	if vecIndexMeta.TargetType == vector.IvfPQ {
-		exists, err := statIndex(zincIndexName, field)
-		if err != nil {
-			return nil, err
-		}
-		// index file corruption
-		if !exists && vecIndexMeta.Stored {
-			return nil, ErrVecIndexCorruption
-		}
-	}
 	return MakeVecIndex(zincIndex, field, vecIndexMeta)
-}
-
-// statIndex check index is exists in obj storage
-// if there is a larger epoch exists, we should update metaData,
-// this may be due to the successful writing of the index file, but the epoch was not updated successfully
-func statIndex(indexName string, fieldName string) (bool, error) {
-	exists, err := vecIdxManager.storage.ExistsFile(path.Join(indexName, fieldName))
-	return exists, err
 }
 
 func DeleteVecIndex(indexName string, fieldName string) error {
@@ -281,9 +260,9 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 	return nil
 }
 
-// RebuildIndex
-// submit a rebuild vector index task
-func RebuildIndex(zincIndexName string, field string) error {
+// SealIndex
+// submits a task to seal the growing segment of the index.
+func SealIndex(zincIndexName string, field string) error {
 	index, ok := GetIndex(zincIndexName)
 	if !ok {
 		return fmt.Errorf("zinc index not exists")
@@ -292,19 +271,31 @@ func RebuildIndex(zincIndexName string, field string) error {
 	if !ok {
 		return ErrVecIndexNotExists
 	}
-	if vecIndex.TargetType != vector.IvfPQ || (vecIndex.Type == vector.Flat && vecIndex.Count < config.Global.VectorConfig.IvfPqThreshold) {
-		return fmt.Errorf("the vector index doesn't need to rebuild")
+	if vecIndex.TargetType != vector.IvfPQ {
+		return fmt.Errorf("the vector index doesn't need to seal")
+	}
+
+	found := false
+	for _, segMeta := range vecIndex.Segments {
+		if segMeta.Status == vector.StatusGrowing &&
+			atomic.LoadInt64(&segMeta.Count) >= config.Global.VectorConfig.IvfPqThreshold {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("the vector index doesn't need to seal")
 	}
 
 	taskName := path.Join(zincIndexName, field)
-	vecIdxManager.rebuildLock.RLock()
-	if _, ok := vecIdxManager.rebuildTaskMp[taskName]; ok {
-		vecIdxManager.rebuildLock.RUnlock()
-		return fmt.Errorf("the vector index is already rebuilding")
+	vecIdxManager.sealedLock.RLock()
+	if _, ok := vecIdxManager.sealTaskMp[taskName]; ok {
+		vecIdxManager.sealedLock.RUnlock()
+		return fmt.Errorf("the vector index is already sealing")
 	}
-	vecIdxManager.rebuildLock.RUnlock()
+	vecIdxManager.sealedLock.RUnlock()
 
-	vecIdxManager.rebuildTaskCh <- &rebuildTask{
+	vecIdxManager.sealCh <- &sealTask{
 		taskName: taskName,
 		index:    zincIndexName,
 		field:    field,
@@ -312,9 +303,9 @@ func RebuildIndex(zincIndexName string, field string) error {
 	return nil
 }
 
-// backGroundRebuildCheck
+// backgroundSealCheck
 // Traverse to check vector indexes and process vectors that need to be converted to ivf_pq.
-func backGroundRebuildCheck() {
+func backgroundSealCheck() {
 	defer vecIdxManager.closer.Done()
 	timer := time.NewTimer(time.Hour)
 	for {
@@ -330,65 +321,80 @@ func backGroundRebuildCheck() {
 				continue
 			}
 			for field, vecIndex := range vecIndexes {
-				if vecIndex.TargetType == vector.IvfPQ && vecIndex.Type == vector.Flat && atomic.LoadInt64(&vecIndex.Count) >= config.Global.VectorConfig.IvfPqThreshold {
-					taskName := path.Join(index.GetName(), field)
-					vecIdxManager.rebuildLock.RLock()
-					if _, ok := vecIdxManager.rebuildTaskMp[taskName]; ok {
-						vecIdxManager.rebuildLock.RUnlock()
-						continue
-					}
-					vecIdxManager.rebuildLock.RUnlock()
+				if vecIndex.TargetType != vector.IvfPQ {
+					continue
+				}
 
-					vecIdxManager.rebuildTaskCh <- &rebuildTask{
-						taskName: taskName,
-						index:    index.GetName(),
-						field:    field,
+				find := false
+				for _, segMeta := range vecIndex.Segments {
+					if segMeta.Status == vector.StatusGrowing &&
+						atomic.LoadInt64(&segMeta.Count) >= config.Global.VectorConfig.IvfPqThreshold {
+						find = true
+						break
 					}
 				}
+				if !find {
+					continue
+				}
+
+				taskName := path.Join(index.GetName(), field)
+				vecIdxManager.sealedLock.RLock()
+				if _, ok := vecIdxManager.sealTaskMp[taskName]; ok {
+					vecIdxManager.sealedLock.RUnlock()
+					continue
+				}
+				vecIdxManager.sealedLock.RUnlock()
+
+				vecIdxManager.sealCh <- &sealTask{
+					taskName: taskName,
+					index:    index.GetName(),
+					field:    field,
+				}
 			}
+
 		}
 	}
 }
 
-// backGroundRebuild process rebuild task
-func backGroundRebuild() {
+// backgroundSeal process sealed task
+func backgroundSeal() {
 	defer vecIdxManager.closer.Done()
 	for {
 		select {
 		case <-vecIdxManager.closer.HasBeenClosed():
 			return
-		case task := <-vecIdxManager.rebuildTaskCh:
-			vecIdxManager.rebuildLock.Lock()
-			vecIdxManager.rebuildTaskMp[task.taskName] = struct{}{}
-			vecIdxManager.rebuildLock.Unlock()
+		case task := <-vecIdxManager.sealCh:
+			vecIdxManager.sealedLock.Lock()
+			vecIdxManager.sealTaskMp[task.taskName] = struct{}{}
+			vecIdxManager.sealedLock.Unlock()
 			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
-				vecIdxManager.rebuildLock.Lock()
-				delete(vecIdxManager.rebuildTaskMp, task.taskName)
-				vecIdxManager.rebuildLock.Unlock()
-				log.Error().Err(err).Msgf("rebuild vector index %s err: get vector index err %s ", task.taskName, task.index)
+				vecIdxManager.sealedLock.Lock()
+				delete(vecIdxManager.sealTaskMp, task.taskName)
+				vecIdxManager.sealedLock.Unlock()
+				log.Error().Err(err).Msgf("process vector index %s segment sealed  err: get vector index err %s ", task.taskName, task.index)
 				continue
 			}
 			start := time.Now()
 
-			vecIndex.Lock()
-			err = vecIndex.Rebuild()
-			vecIndex.Unlock()
+			// we don't lock the whole vecIndex,
+			// vecIndex will synchronize segment operations internally
+			err = vecIndex.SealSeg()
 
 			if err != nil {
-				vecIdxManager.rebuildLock.Lock()
-				delete(vecIdxManager.rebuildTaskMp, task.taskName)
-				vecIdxManager.rebuildLock.Unlock()
+				vecIdxManager.sealedLock.Lock()
+				delete(vecIdxManager.sealTaskMp, task.taskName)
+				vecIdxManager.sealedLock.Unlock()
 				CloseVectorIndex(vecIndex, false)
-				log.Error().Err(err).Msgf("rebuild vector index %s error: %s", task.taskName, err)
+				log.Error().Err(err).Msgf("failed to seal segment for vector index %s error: %s", task.taskName, err)
 				continue
 			}
 			CloseVectorIndex(vecIndex, false)
-			log.Debug().Msgf("rebuild %s finish, took %.2fs", task.taskName, time.Since(start).Seconds())
+			log.Debug().Msgf("seal segment for vector index %s finished. took %.2fs", task.taskName, time.Since(start).Seconds())
 
-			vecIdxManager.rebuildLock.Lock()
-			delete(vecIdxManager.rebuildTaskMp, task.taskName)
-			vecIdxManager.rebuildLock.Unlock()
+			vecIdxManager.sealedLock.Lock()
+			delete(vecIdxManager.sealTaskMp, task.taskName)
+			vecIdxManager.sealedLock.Unlock()
 		}
 	}
 }

@@ -14,6 +14,9 @@ const (
 const IvfPQ = "ivf_pq"
 const Flat = "flat"
 
+const StatusGrowing = "growing"
+const StatusSealed = "sealed"
+
 type Action int
 
 // VecAction used for write vector index

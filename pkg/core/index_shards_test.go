@@ -87,6 +87,7 @@ func TestIndex_Shards(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
+		assert.NoError(t, index.Close())
 		err := DeleteIndex(indexName)
 		assert.NoError(t, err)
 	})
