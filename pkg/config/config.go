@@ -160,7 +160,7 @@ type walConfig struct {
 }
 
 type vectorConfig struct {
-	IvfPqThreshold int64 `env:"ZINC_VECTOR_IVFPQ_THRESHOLD,default=50000"`
+	IvfPqThreshold int64 `env:"ZINC_VECTOR_IVFPQ_THRESHOLD,default=100000"`
 }
 
 var Global = new(config)
