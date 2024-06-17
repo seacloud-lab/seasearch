@@ -37,6 +37,7 @@ type VecIndex struct {
 	Count            int64            `json:"count"`
 	CurrentSegmentId int              `json:"current_segment_id"`
 	Segments         []*VectorSegment `json:"segments"`
+	LayoutVersion    float64          `json:"version"`
 }
 
 type VectorSegment struct {

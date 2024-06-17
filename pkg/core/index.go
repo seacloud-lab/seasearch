@@ -236,12 +236,18 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 			if index.ref.VecIndexes == nil {
 				index.ref.VecIndexes = make(map[string]*meta.VecIndex)
 			}
+			// SetMappings update full mappings,
+			// the exists vector index settings should not be updated.
+			if _, ok := index.ref.VecIndexes[field]; ok {
+				continue
+			}
 			index.ref.VecIndexes[field] = &meta.VecIndex{
 				TargetType:       prop.VecIndexType,
 				Dims:             prop.Dims,
 				NBits:            prop.NBits,
 				M:                prop.M,
 				CurrentSegmentId: 0,
+				LayoutVersion:    vector.CurLayoutVersion,
 				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
 			}
 		}
