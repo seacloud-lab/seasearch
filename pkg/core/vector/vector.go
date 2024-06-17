@@ -1,12 +1,11 @@
 package vector
 
-// CurIndexVersion
+// CurLayoutVersion
 // In the future, the organization format of the data may change,
 // and there may be incompatibility with the existing format.
 // We identify the current version in the code.
 // If the version of the vector data is lower than the current version, it will be processed in compatibility mode.
-const CurIndexVersion = 1.0
-const CurSegmentVersion = 1.0
+const CurLayoutVersion = 1.0
 
 const IndexExt = ".index"
 

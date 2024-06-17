@@ -225,10 +225,9 @@ func (v *IvfPqIndex) checkStoredSegments() error {
 			return fmt.Errorf("get vec segment %s count err: %w", name, err)
 		}
 		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{
-			Id:      id,
-			Status:  vector.StatusGrowing,
-			Version: vector.CurSegmentVersion,
-			Count:   int64(count),
+			Id:     id,
+			Status: vector.StatusGrowing,
+			Count:  int64(count),
 		})
 	}
 
@@ -411,7 +410,7 @@ func (v *IvfPqIndex) checkNewSeg(curSeg *VecSegment) error {
 		// make new segment as current segment
 		v.segments = append(v.segments, nil)
 		v.ref.CurrentSegmentId++
-		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{Id: v.ref.CurrentSegmentId, Status: vector.StatusGrowing, Count: 0, Version: vector.CurSegmentVersion})
+		v.ref.Segments = append(v.ref.Segments, &meta.VectorSegment{Id: v.ref.CurrentSegmentId, Status: vector.StatusGrowing, Count: 0})
 	}
 	return nil
 }
