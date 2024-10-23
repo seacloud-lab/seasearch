@@ -14,6 +14,7 @@ sudo apt install -y swig
 cd /tmp
 git clone https://github.com/facebookresearch/faiss.git
 cd faiss
+git checkout v1.8.0
 cmake -B build -DFAISS_ENABLE_GPU=OFF \
     -DFAISS_ENABLE_C_API=ON \
     -DFAISS_ENABLE_PYTHON=OFF \
