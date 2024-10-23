@@ -101,6 +101,7 @@ type s3 struct {
 	UseHttps         bool   `env:"ZINC_S3_USE_HTTPS"`
 	PathStyleRequest bool   `env:"ZINC_S3_PATH_STYLE_REQUEST"`
 	AwsRegion        string `env:"ZINC_S3_AWS_REGION"`
+	SseCKey          string `env:"ZINC_S3_SSE-C_KEY"`
 }
 
 type oss struct {
@@ -245,6 +246,16 @@ func checkS3() {
 		log.Fatal().Msg("require s3 endpoint")
 	}
 
+	sseCKey := Global.S3.SseCKey
+	if sseCKey != "" && !Global.S3.UseHttps {
+		log.Fatal().Msg("amazon S3 SSE-C must use https")
+	}
+	if sseCKey != "" && !Global.S3.UseV4Signature {
+		log.Fatal().Msg("amazon S3 SSE-C require AWS Signature Version 4")
+	}
+	if sseCKey != "" && len(sseCKey) != 32 {
+		log.Fatal().Msg("amazon S3 SSE-C key must be 32 byte")
+	}
 }
 
 func loadConfig(rv reflect.Value) {

@@ -16,9 +16,11 @@ import (
 	segment "github.com/blugelabs/bluge_segment_api"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/encrypt"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func GetS3Config(rootPath string, indexName string, timeRange ...int64) bluge.Config {
@@ -51,6 +53,7 @@ type S3Backend struct {
 type s3Client struct {
 	client     *minio.Client
 	bucketName string
+	sseCKey    string
 }
 
 func CreateS3Backend(dataPath string, indexName string) (*S3Backend, error) {
@@ -80,25 +83,26 @@ func createS3Client() (*s3Client, error) {
 		useHTTPS := config.Global.S3.UseHttps
 		pathStyleRequest := config.Global.S3.PathStyleRequest
 		awsRegion := config.Global.S3.AwsRegion
+		sseCKey := config.Global.S3.SseCKey
+
 		s3cli, err = newS3client(
 			accessKeyID, accessKeySecret, bucketName,
-			endPoint, awsRegion, useHTTPS, pathStyleRequest, useV4Sig)
+			endPoint, awsRegion, useHTTPS, pathStyleRequest, useV4Sig, sseCKey)
 	})
 
 	return s3cli, err
 }
 
-func newS3client(accessKeyID, accessKeySecret, bucketName, endPoint, region string, useHTTPS, pathStyleRequest, useV4Sig bool) (*s3Client, error) {
+func newS3client(accessKeyID, accessKeySecret, bucketName, endPoint, region string, useHTTPS, pathStyleRequest, useV4Sig bool, sseCKey string) (*s3Client, error) {
 	var bucketLookup minio.BucketLookupType
 	if pathStyleRequest {
 		bucketLookup = minio.BucketLookupPath
 	}
 	if endPoint == "" {
-		if region != "" {
-			endPoint = "s3." + region + ".amazonaws.com"
-		} else {
-			endPoint = "s3.amazonaws.com"
+		if region == "" {
+			region = "us-east-1"
 		}
+		endPoint = "s3." + region + ".amazonaws.com"
 	}
 	if useV4Sig {
 		cli, err := minio.New(endPoint, &minio.Options{
@@ -107,14 +111,14 @@ func newS3client(accessKeyID, accessKeySecret, bucketName, endPoint, region stri
 			Region:       region,
 			BucketLookup: bucketLookup,
 		})
-		return &s3Client{client: cli, bucketName: bucketName}, err
+		return &s3Client{client: cli, bucketName: bucketName, sseCKey: sseCKey}, err
 	}
 	cli, err := minio.New(endPoint, &minio.Options{
 		Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
 		Secure:       useHTTPS,
 		BucketLookup: bucketLookup,
 	})
-	return &s3Client{client: cli, bucketName: bucketName}, err
+	return &s3Client{client: cli, bucketName: bucketName, sseCKey: sseCKey}, err
 }
 
 // RemoveS3Index
@@ -164,7 +168,25 @@ func S3Exists(indexName string) (bool, error) {
 }
 
 func (b *s3Client) read(key string) (io.ReadCloser, error) {
-	return b.client.GetObject(context.Background(), b.bucketName, key, minio.GetObjectOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := minio.GetObjectOptions{}
+	if b.sseCKey != "" {
+		sse, err := encrypt.NewSSEC([]byte(b.sseCKey))
+		if err != nil {
+			return nil, err
+		}
+		opts.ServerSideEncryption = sse
+	}
+	obj, err := b.client.GetObject(ctx, b.bucketName, key, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+
+	reader := zutils.NewTimeoutReader(obj, cancel)
+	return reader, nil
 }
 
 func (b *s3Client) write(key string, r io.Reader, l int) error {
@@ -173,8 +195,21 @@ func (b *s3Client) write(key string, r io.Reader, l int) error {
 }
 
 func (b *s3Client) writeWithMeta(key string, opts minio.PutObjectOptions, r io.Reader, l int64) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reader := zutils.NewTimeoutReader(io.NopCloser(r), cancel)
+	defer reader.Close()
+
+	if b.sseCKey != "" {
+		sse, err := encrypt.NewSSEC([]byte(b.sseCKey))
+		if err != nil {
+			return err
+		}
+		opts.ServerSideEncryption = sse
+	}
 	// we should always set objectSize instead of -1 to reduce memory overhead
-	_, err := b.client.PutObject(context.Background(), b.bucketName, key, r, l, opts)
+	_, err := b.client.PutObject(ctx, b.bucketName, key, reader, l, opts)
 	if err != nil {
 		return err
 	}

@@ -9,13 +9,15 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/encrypt"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 type s3Storage struct {
-	cli        *minio.Client
+	cli        *s3client
 	prefix     string
 	cachePath  string
 	bucketName string
@@ -24,7 +26,15 @@ type s3Storage struct {
 
 func (s *s3Storage) ExistsFile(name string) (bool, error) {
 	key := path.Join(s.prefix, name, getFileName())
-	_, err := s.cli.StatObject(context.Background(), s.bucketName, key, minio.StatObjectOptions{})
+	opts := minio.StatObjectOptions{}
+	if s.cli.sseCKey != "" {
+		sse, err := encrypt.NewSSEC([]byte(s.cli.sseCKey))
+		if err != nil {
+			return false, err
+		}
+		opts.ServerSideEncryption = sse
+	}
+	_, err := s.cli.StatObject(context.Background(), s.bucketName, key, opts)
 	if err != nil {
 		if rsp, ok := err.(minio.ErrorResponse); ok {
 			if rsp.StatusCode == 404 {
@@ -43,15 +53,27 @@ func (s *s3Storage) LoadFile(name string) (string, io.Closer, error) {
 	if cf, ok := s.cache.GetCacheFile(localPath); ok {
 		return cf.GetPath(), cf, nil
 	}
+	opts := minio.GetObjectOptions{}
+	if s.cli.sseCKey != "" {
+		sse, err := encrypt.NewSSEC([]byte(s.cli.sseCKey))
+		if err != nil {
+			return "", nil, err
+		}
+		opts.ServerSideEncryption = sse
+	}
 	key := path.Join(s.prefix, name, getFileName())
-	reader, err := s.cli.GetObject(context.Background(), s.bucketName, key, minio.GetObjectOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	obj, err := s.cli.GetObject(ctx, s.bucketName, key, opts)
 	if err != nil {
 		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
 		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
 	}
 	defer func() {
-		_ = reader.Close()
+		_ = obj.Close()
 	}()
+	reader := zutils.NewTimeoutReader(obj, cancel)
+	defer reader.Close()
 	cf, err := s.cache.CacheFile(localPath, reader)
 	if err != nil {
 		return "", nil, fmt.Errorf("load file err: %w", err)
@@ -73,7 +95,19 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 		return err
 	}
 	key := path.Join(s.prefix, name, getFileName())
-	_, err = s.cli.PutObject(context.Background(), s.bucketName, key, f, info.Size(), minio.PutObjectOptions{})
+	opts := minio.PutObjectOptions{}
+	if s.cli.sseCKey != "" {
+		sse, err := encrypt.NewSSEC([]byte(s.cli.sseCKey))
+		if err != nil {
+			return err
+		}
+		opts.ServerSideEncryption = sse
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := zutils.NewTimeoutReader(f, cancel)
+	defer reader.Close()
+	_, err = s.cli.PutObject(ctx, s.bucketName, key, reader, info.Size(), opts)
 	if err != nil {
 		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
 		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
@@ -150,7 +184,12 @@ func listS3VecStoreSegments(prefix string) ([]string, error) {
 	return res, nil
 }
 
-func createS3Client() (*minio.Client, error) {
+type s3client struct {
+	*minio.Client
+	sseCKey string
+}
+
+func createS3Client() (*s3client, error) {
 	accessKeyID := config.Global.S3.AccessId
 	accessKeySecret := config.Global.S3.AccessSecret
 	endPoint := config.Global.S3.Endpoint
@@ -158,33 +197,36 @@ func createS3Client() (*minio.Client, error) {
 	useHTTPS := config.Global.S3.UseHttps
 	pathStyleRequest := config.Global.S3.PathStyleRequest
 	awsRegion := config.Global.S3.AwsRegion
+	ssecKey := config.Global.S3.SseCKey
 
 	var bucketLookup minio.BucketLookupType
 	if pathStyleRequest {
 		bucketLookup = minio.BucketLookupPath
 	}
 	if endPoint == "" {
-		if awsRegion != "" {
-			endPoint = "s3." + awsRegion + ".amazonaws.com"
-		} else {
-			endPoint = "s3.amazonaws.com"
+		if awsRegion == "" {
+			awsRegion = "us-east-1"
 		}
+		endPoint = "s3." + awsRegion + ".amazonaws.com"
 	}
-	var res *minio.Client
+	var cli *minio.Client
 	var err error
 	if useV4Sig {
-		res, err = minio.New(endPoint, &minio.Options{
+		cli, err = minio.New(endPoint, &minio.Options{
 			Creds:        credentials.NewStaticV4(accessKeyID, accessKeySecret, ""),
 			Secure:       useHTTPS,
 			Region:       awsRegion,
 			BucketLookup: bucketLookup,
 		})
 	} else {
-		res, err = minio.New(endPoint, &minio.Options{
+		cli, err = minio.New(endPoint, &minio.Options{
 			Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
 			Secure:       useHTTPS,
 			BucketLookup: bucketLookup,
 		})
 	}
-	return res, err
+	return &s3client{
+		Client:  cli,
+		sseCKey: ssecKey,
+	}, err
 }
