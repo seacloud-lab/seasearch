@@ -237,7 +237,7 @@ func TestVectorSearch(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.Code)
 		if resp.Code != http.StatusOK {
 			bd, _ := io.ReadAll(resp.Body)
-			t.Errorf(string(bd))
+			t.Error(string(bd))
 		}
 		checkExists(t)
 	})
