@@ -3,19 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func main() {
 	initConfig()
 
-	setLog()
+	log.Logger = zutils.SetupMainLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "zinc-cluster-manager.log", conf.General.LogDir)
 
 	app := gin.New()
 	SetupHttp(app)

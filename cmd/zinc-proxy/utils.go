@@ -8,15 +8,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
-	"path"
-	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 var proxyPool *ProxyPool
@@ -26,67 +21,6 @@ func init() {
 	proxyPool = &ProxyPool{
 		pool: make(map[string]*httputil.ReverseProxy),
 	}
-}
-
-func setLog() {
-	var out *zutils.LogOuter
-	var accessOuter *zutils.LogOuter
-	if conf.General.SeafileLogToStd || conf.General.SeatableLogToStd {
-		out = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
-		accessOuter = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
-	} else {
-		err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-		}
-		file, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-		}
-		// setup stdErr
-		err = zutils.Dup(int(file.Fd()), int(os.Stderr.Fd()))
-		if err != nil {
-			log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
-		}
-		out = &zutils.LogOuter{Out: file, LogToStdout: false}
-		accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-		}
-		accessOuter = &zutils.LogOuter{Out: accessLogFile, LogToStdout: false}
-	}
-
-	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
-	writer.FormatLevel = func(i interface{}) string {
-		return strings.ToUpper(fmt.Sprintf("[%s]", i))
-	}
-	writer.FormatMessage = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatFieldName = func(i interface{}) string {
-		return ""
-	}
-	writer.FormatFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatCaller = func(i interface{}) string {
-		return ""
-	}
-	writer.FormatErrFieldName = func(_ interface{}) string {
-		return "err:"
-	}
-	writer.FormatErrFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-
-	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
-
-	accessWriter := writer
-	accessWriter.Out = accessOuter
-	accessWriter.FormatLevel = func(i interface{}) string {
-		return ""
-	}
-	accessLog = zerolog.New(accessWriter).With().Timestamp().Logger()
 }
 
 func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{}, auth string, returnBody bool) error {
