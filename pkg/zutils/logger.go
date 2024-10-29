@@ -3,7 +3,6 @@ package zutils
 import (
 	"fmt"
 	"io"
-
 	"os"
 	"path"
 	"strings"
@@ -48,7 +47,7 @@ func SetupAccessLog(logToStdout bool, name, logDir string) zerolog.Logger {
 
 	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
 	writer.FormatLevel = func(i interface{}) string {
-		return strings.ToUpper(fmt.Sprintf("[%s]", i))
+		return ""
 	}
 	writer.FormatMessage = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
