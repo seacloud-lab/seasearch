@@ -8,5 +8,12 @@
         "vue"
     ],
     "eslint.format.enable": true,
-    "eslint.workingDirectories": [ "./web" ]
+    "eslint.workingDirectories": [
+        "./web"
+    ],
+    "cSpell.words": [
+        "Seafile",
+        "Seatable",
+        "zutils"
+    ]
 }

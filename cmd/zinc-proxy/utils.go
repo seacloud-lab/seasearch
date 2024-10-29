@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 var proxyPool *ProxyPool
@@ -28,21 +29,34 @@ func init() {
 }
 
 func setLog() {
+	var out *zutils.LogOuter
+	var accessOuter *zutils.LogOuter
+	if conf.General.SeafileLogToStd || conf.General.SeatableLogToStd {
+		out = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
+		accessOuter = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
+	} else {
+		err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
+		}
+		file, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
+		}
+		// setup stdErr
+		err = zutils.Dup(int(file.Fd()), int(os.Stderr.Fd()))
+		if err != nil {
+			log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
+		}
+		out = &zutils.LogOuter{Out: file, LogToStdout: false}
+		accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
+		}
+		accessOuter = &zutils.LogOuter{Out: accessLogFile, LogToStdout: false}
+	}
 
-	err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-	}
-	file, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-	accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-
-	writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
+	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
 	writer.FormatLevel = func(i interface{}) string {
 		return strings.ToUpper(fmt.Sprintf("[%s]", i))
 	}
@@ -50,7 +64,7 @@ func setLog() {
 		return fmt.Sprintf("%s", i)
 	}
 	writer.FormatFieldName = func(i interface{}) string {
-		return fmt.Sprintf("%s:", i)
+		return ""
 	}
 	writer.FormatFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
@@ -68,10 +82,10 @@ func setLog() {
 	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
 
 	accessWriter := writer
+	accessWriter.Out = accessOuter
 	accessWriter.FormatLevel = func(i interface{}) string {
 		return ""
 	}
-	accessWriter.Out = accessLogFile
 	accessLog = zerolog.New(accessWriter).With().Timestamp().Logger()
 }
 

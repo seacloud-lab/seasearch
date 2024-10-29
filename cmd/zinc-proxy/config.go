@@ -1,15 +1,16 @@
 package main
 
 import (
-	"github.com/docker/go-units"
-	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
-	"github.com/rs/zerolog/log"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/docker/go-units"
+	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"github.com/rs/zerolog/log"
 )
 
 type ProxyConfig struct {
@@ -18,7 +19,9 @@ type ProxyConfig struct {
 }
 
 type GeneralConfig struct {
-	LogDir string `env:"ZINC_CLUSTER_PROXY_LOG_DIR"`
+	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
+	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
+	LogDir           string `env:"ZINC_CLUSTER_PROXY_LOG_DIR"`
 }
 
 type ClusterProxyConfig struct {

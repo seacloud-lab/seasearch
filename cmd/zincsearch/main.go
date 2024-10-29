@@ -32,6 +32,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/wal"
@@ -189,22 +190,24 @@ func main() {
 }
 
 func setLog() {
-	if !config.Global.LogConfig.OutputToFile {
-		return
-	}
-
-	err := os.MkdirAll(config.Global.LogConfig.LogDir, os.ModePerm)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-	}
-	file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "seasearch.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-	// setup stdErr
-	err = Dup(int(file.Fd()), int(os.Stderr.Fd()))
-	if err != nil {
-		log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
+	var out *zutils.LogOuter
+	if config.Global.LogConfig.SeafileLogToStd || config.Global.LogConfig.SeatableLogToStd {
+		out = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
+	} else {
+		err := os.MkdirAll(config.Global.LogConfig.LogDir, os.ModePerm)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
+		}
+		file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "seasearch.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
+		}
+		// setup stdErr
+		err = zutils.Dup(int(file.Fd()), int(os.Stderr.Fd()))
+		if err != nil {
+			log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
+		}
+		out = &zutils.LogOuter{Out: file, LogToStdout: false}
 	}
 
 	lv, err := zerolog.ParseLevel(config.Global.LogConfig.LogLevel)
@@ -213,7 +216,7 @@ func setLog() {
 	}
 
 	zerolog.SetGlobalLevel(lv)
-	writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
+	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
 	writer.FormatLevel = func(i interface{}) string {
 		return strings.ToUpper(fmt.Sprintf("[%s]", i))
 	}
@@ -221,7 +224,7 @@ func setLog() {
 		return fmt.Sprintf("%s", i)
 	}
 	writer.FormatFieldName = func(i interface{}) string {
-		return fmt.Sprintf("%s:", i)
+		return ""
 	}
 	writer.FormatFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)

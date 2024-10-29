@@ -8,20 +8,26 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func setLog() {
-
-	err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
+	var out *zutils.LogOuter
+	if conf.General.SeafileLogToStd || conf.General.SeatableLogToStd {
+		out = &zutils.LogOuter{Out: os.Stdout, LogToStdout: true}
+	} else {
+		err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
+		}
+		file, err := os.OpenFile(path.Join(conf.General.LogDir, "zinc-cluster-manager.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
+		}
+		out = &zutils.LogOuter{Out: file, LogToStdout: false}
 	}
-	file, err := os.OpenFile(path.Join(conf.General.LogDir, "zinc-cluster-manager.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
 
-	writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
+	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
 	writer.FormatLevel = func(i interface{}) string {
 		return strings.ToUpper(fmt.Sprintf("[%s]", i))
 	}
@@ -29,7 +35,7 @@ func setLog() {
 		return fmt.Sprintf("%s", i)
 	}
 	writer.FormatFieldName = func(i interface{}) string {
-		return fmt.Sprintf("%s:", i)
+		return ""
 	}
 	writer.FormatFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)

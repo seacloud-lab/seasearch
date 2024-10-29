@@ -83,9 +83,10 @@ type config struct {
 }
 
 type logConfig struct {
-	OutputToFile bool   `env:"ZINC_LOG_OUTPUT,default=true"`
-	LogDir       string `env:"ZINC_LOG_DIR,default=./log"`
-	LogLevel     string `env:"ZINC_LOG_LEVEL,default=debug"`
+	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
+	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
+	LogDir           string `env:"ZINC_LOG_DIR,default=./log"`
+	LogLevel         string `env:"ZINC_LOG_LEVEL,default=debug"`
 }
 
 type objCache struct {
