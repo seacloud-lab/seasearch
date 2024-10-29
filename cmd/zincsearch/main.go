@@ -23,15 +23,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/grafana/pyroscope-go"
-	"github.com/rs/zerolog"
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/wal"
@@ -67,8 +66,9 @@ func main() {
 		fmt.Printf("zinc version %s\n", meta.Version)
 		os.Exit(0)
 	}
-	// Output to file
-	setLog()
+	// setup main logger
+	log.Logger = zutils.SetupMainLog(config.Global.LogConfig.SeafileLogToStd || config.Global.LogConfig.SeatableLogToStd, "seasearch.log", config.Global.LogConfig.LogDir)
+
 	log.Info().Msgf("Starting Zinc %s", meta.Version)
 	// Initialize telemetry
 	telemetry()
@@ -186,57 +186,6 @@ func main() {
 	<-done
 
 	log.Info().Msg("Server shutdown ok")
-}
-
-func setLog() {
-	if !config.Global.LogConfig.OutputToFile {
-		return
-	}
-
-	err := os.MkdirAll(config.Global.LogConfig.LogDir, os.ModePerm)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-	}
-	file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "seasearch.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-	// setup stdErr
-	err = Dup(int(file.Fd()), int(os.Stderr.Fd()))
-	if err != nil {
-		log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
-	}
-
-	lv, err := zerolog.ParseLevel(config.Global.LogConfig.LogLevel)
-	if err != nil {
-		log.Fatal().Err(err).Msg("invalid log level")
-	}
-
-	zerolog.SetGlobalLevel(lv)
-	writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
-	writer.FormatLevel = func(i interface{}) string {
-		return strings.ToUpper(fmt.Sprintf("[%s]", i))
-	}
-	writer.FormatMessage = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatFieldName = func(i interface{}) string {
-		return fmt.Sprintf("%s:", i)
-	}
-	writer.FormatFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatCaller = func(i interface{}) string {
-		return ""
-	}
-	writer.FormatErrFieldName = func(_ interface{}) string {
-		return "err:"
-	}
-	writer.FormatErrFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-
-	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
 }
 
 func telemetry() {

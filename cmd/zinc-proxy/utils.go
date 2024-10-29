@@ -8,13 +8,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
-	"path"
-	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
@@ -25,54 +21,6 @@ func init() {
 	proxyPool = &ProxyPool{
 		pool: make(map[string]*httputil.ReverseProxy),
 	}
-}
-
-func setLog() {
-
-	err := os.MkdirAll(conf.General.LogDir, os.ModePerm)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-	}
-	file, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-	accessLogFile, err := os.OpenFile(path.Join(conf.General.LogDir, "seasearch-proxy-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-	}
-
-	writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
-	writer.FormatLevel = func(i interface{}) string {
-		return strings.ToUpper(fmt.Sprintf("[%s]", i))
-	}
-	writer.FormatMessage = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatFieldName = func(i interface{}) string {
-		return fmt.Sprintf("%s:", i)
-	}
-	writer.FormatFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-	writer.FormatCaller = func(i interface{}) string {
-		return ""
-	}
-	writer.FormatErrFieldName = func(_ interface{}) string {
-		return "err:"
-	}
-	writer.FormatErrFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
-	}
-
-	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
-
-	accessWriter := writer
-	accessWriter.FormatLevel = func(i interface{}) string {
-		return ""
-	}
-	accessWriter.Out = accessLogFile
-	accessLog = zerolog.New(accessWriter).With().Timestamp().Logger()
 }
 
 func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{}, auth string, returnBody bool) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 var (
@@ -21,7 +22,8 @@ var (
 
 func main() {
 	initConfig()
-	setLog()
+	log.Logger = zutils.SetupMainLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "seasearch-proxy.log", conf.General.LogDir)
+	accessLog = zutils.SetupAccessLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
 	StartProxy()
 
 	app := gin.New()

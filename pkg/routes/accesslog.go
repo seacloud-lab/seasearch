@@ -16,53 +16,17 @@
 package routes
 
 import (
-	"fmt"
-	"os"
-	"path"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
 func AccessLog(app *gin.Engine) {
-	var accessLogger zerolog.Logger
-	if config.Global.LogConfig.OutputToFile {
-		file, err := os.OpenFile(path.Join(config.Global.LogConfig.LogDir, "seasearch-access.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-		}
-		writer := zerolog.ConsoleWriter{Out: file, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
-		writer.FormatLevel = func(i interface{}) string {
-			return ""
-		}
-		writer.FormatMessage = func(i interface{}) string {
-			return fmt.Sprintf("%s", i)
-		}
-		writer.FormatFieldName = func(i interface{}) string {
-			return fmt.Sprintf("%s:", i)
-		}
-		writer.FormatFieldValue = func(i interface{}) string {
-			return fmt.Sprintf("%s", i)
-		}
-		writer.FormatCaller = func(i interface{}) string {
-			return ""
-		}
-		writer.FormatErrFieldName = func(_ interface{}) string {
-			return "err:"
-		}
-		writer.FormatErrFieldValue = func(i interface{}) string {
-			return fmt.Sprintf("%s", i)
-		}
-		accessLogger = zerolog.New(writer).With().Timestamp().Logger()
-	} else {
-		accessLogger = log.Logger
-	}
-
+	var accessLogger = zutils.SetupAccessLog(config.Global.LogConfig.SeafileLogToStd || config.Global.LogConfig.SeatableLogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
 	app.Use(func(c *gin.Context) {
 		timeStart := time.Now()
 		c.Writer.Header().Set("Zinc", meta.Version)
@@ -70,8 +34,6 @@ func AccessLog(app *gin.Engine) {
 		c.Next()
 
 		took := time.Since(timeStart).Seconds()
-		// TODO: we should keep field name if we don't output to file
-		accessLogger.Info().
-			Msg(fmt.Sprintf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took))
+		accessLogger.Printf("- %q - %q -%q - %d - %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took)
 	})
 }

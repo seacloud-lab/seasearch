@@ -19,11 +19,12 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
 
 func Setup(app *gin.Engine) {
 	// Recovery middleware recovers from any panics and writes a 500 if there was one.
-	app.Use(gin.Recovery())
+	app.Use(gin.RecoveryWithWriter(log.Logger))
 	// set release as default gin mode.
 	if mode := os.Getenv(gin.EnvGinMode); mode == "" {
 		gin.SetMode(gin.ReleaseMode)
