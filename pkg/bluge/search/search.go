@@ -48,6 +48,9 @@ func MultiSearch(
 		}, nil
 	}
 	if len(readers) == 1 {
+		defer func() {
+			_ = readers[0].Close()
+		}()
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
 			return nil, err
@@ -87,10 +90,17 @@ func MultiSearch(
 		}
 		return nil
 	})
+
+	closeReaders := func() {
+		for _, r := range readers {
+			_ = r.Close()
+		}
+	}
 	for _, r := range readers {
 		r := r
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
+			closeReaders()
 			return nil, err
 		}
 		if docList.sort == nil {
@@ -99,6 +109,9 @@ func MultiSearch(
 			}
 		}
 		eg.Go(func() error {
+			defer func() {
+				_ = r.Close()
+			}()
 			var n int64
 			dmi, err := r.Search(ctx, req)
 			if err != nil {

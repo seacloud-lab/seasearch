@@ -60,11 +60,6 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		for _, reader := range readers {
-			_ = reader.Close()
-		}
-	}()
 
 	// query document by Id
 	dmi, err := zincsearch.MultiSearch(context.Background(), &meta.ZincQuery{

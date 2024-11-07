@@ -45,11 +45,6 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 		log.Printf("index.SearchV2: error accessing reader: %s", err.Error())
 		return nil, err
 	}
-	defer func() {
-		for _, reader := range readers {
-			reader.Close()
-		}
-	}()
 
 	ctx := context.Background()
 	var cancel context.CancelFunc

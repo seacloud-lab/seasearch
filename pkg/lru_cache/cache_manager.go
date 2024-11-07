@@ -75,7 +75,6 @@ func createCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
 		panic(fmt.Sprintf("init cache error: %v", err))
 	}
 
-	go cacheManager.cleanup()
 	return cacheManager
 }
 
@@ -117,23 +116,6 @@ func (c *LruCache) init() error {
 		return err
 	})
 	return err
-}
-
-func (c *LruCache) cleanup() {
-	defer c.closer.Done()
-
-	tick := time.NewTicker(time.Minute * 5)
-	for {
-		select {
-		case <-tick.C:
-			err := c.doCleanup()
-			if err != nil {
-				log.Error().Err(err).Msg("cache cleanup err: ")
-			}
-		case <-c.closer.HasBeenClosed():
-			return
-		}
-	}
 }
 
 type tempFile struct {
@@ -187,11 +169,6 @@ func (c *LruCache) doCleanup() error {
 		return nil
 	}
 
-	if float64(curSize) < targetSize {
-		log.Debug().Msgf("clean up finished: cache size is below max")
-		return nil
-	}
-
 	sort.Slice(tempFiles, func(i, j int) bool {
 		return tempFiles[i].aTime.Before(tempFiles[j].aTime)
 	})
@@ -219,6 +196,36 @@ func (c *LruCache) doCleanup() error {
 	return nil
 }
 
+func (c *LruCache) checkCacheSize() (bool, error) {
+	var curSize int64 = 0
+	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return err
+		}
+
+		ext := path.Ext(info.Name())
+		if !c.fileExt(ext) {
+			return err
+		}
+		fi, err1 := os.Stat(p)
+		if err1 != nil {
+			return err1
+		}
+
+		curSize += fi.Size()
+		return nil
+	})
+
+	if err != nil {
+		return false, fmt.Errorf("filepath walk err: %w", err)
+	}
+	return curSize > c.maxSize, nil
+}
+
 // CacheFile
 // Prevent duplicate downloads from obj_store
 // the filePath is the absolute path of cache file.
@@ -227,6 +234,16 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 	err := c.Setup(dir, false)
 	if err != nil {
 		return nil, err
+	}
+	clean, err := c.checkCacheSize()
+	if err != nil {
+		return nil, fmt.Errorf("check cache size err: %w", err)
+	}
+	if clean {
+		err = c.doCleanup()
+		if err != nil {
+			return nil, fmt.Errorf("lru clean cache err: %w", err)
+		}
 	}
 	for {
 		c.lock.Lock()
@@ -306,6 +323,16 @@ func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFil
 	err := c.Setup(dir, false)
 	if err != nil {
 		return nil, err
+	}
+	clean, err := c.checkCacheSize()
+	if err != nil {
+		return nil, fmt.Errorf("check cache size err: %w", err)
+	}
+	if clean {
+		err = c.doCleanup()
+		if err != nil {
+			return nil, fmt.Errorf("lru clean cache err: %w", err)
+		}
 	}
 	err = os.Rename(inputFile, filePath)
 	if err != nil {
@@ -485,9 +512,6 @@ func (c *LruCache) Lock(path string) (pid *os.File, err error) {
 	err = unix.Flock(int(pid.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err != nil {
 		_ = pid.Close()
-		return
-	}
-	if err != nil {
 		return pid, fmt.Errorf("unable to obtain exclusive access: %w", err)
 	}
 	err = pid.Truncate(0)

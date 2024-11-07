@@ -11,6 +11,7 @@ import (
 // is an interface for easy to search with bluge.reader or unified_searcher in a consistent way
 type Searcher interface {
 	Search(ctx context.Context, req bluge.SearchRequest) (search.DocumentMatchIterator, error)
+	Close() error
 }
 
 // UnifiedSearcher is an alternative to bluge.Reader.
@@ -58,4 +59,11 @@ func (u *UnifiedSearcher) Search(ctx context.Context, req bluge.SearchRequest) (
 	}
 
 	return dmItr, nil
+}
+
+func (u *UnifiedSearcher) Close() error {
+	if u.reader == nil {
+		return nil
+	}
+	return u.reader.Close()
 }
