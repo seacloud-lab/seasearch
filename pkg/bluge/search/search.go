@@ -95,18 +95,18 @@ func MultiSearch(
 			_ = r.Close()
 		}
 	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		closeReaders()
+		return nil, err
+	}
+	if docList.sort == nil {
+		if req, ok := req.(*bluge.TopNSearch); ok {
+			docList.sort = req.SortOrder().Copy()
+		}
+	}
 	for _, r := range readers {
 		r := r
-		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
-		if err != nil {
-			closeReaders()
-			return nil, err
-		}
-		if docList.sort == nil {
-			if req, ok := req.(*bluge.TopNSearch); ok {
-				docList.sort = req.SortOrder().Copy()
-			}
-		}
 		eg.Go(func() error {
 			defer func() {
 				_ = r.Close()
