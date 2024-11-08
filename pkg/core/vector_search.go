@@ -62,19 +62,14 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 	}
 
 	// query document by Id
-	dmi, err := zincsearch.MultiSearch(context.Background(), &meta.ZincQuery{
+	query := &meta.ZincQuery{
 		Query: &meta.Query{
 			Ids: &meta.IdsQuery{
 				Values: docIdSlice,
 			},
 		},
 		Size: len(docIdSlice),
-	}, mappings, nil, ToSearcher(readers)...)
-	if err != nil {
-		return nil, err
 	}
-
-	query := &meta.ZincQuery{}
 	query.Source, err = source.Request(q.Source)
 	if err != nil {
 		return nil, err
@@ -86,7 +81,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 			}
 		}
 	}
-	resp, err := searchV2(zincIndex.GetAllShardNum(), int64(len(readers)), dmi, query, mappings)
+	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, zincIndex.GetAllShardNum(), ToSearcher(readers)...)
 	if err != nil {
 		return nil, err
 	}

@@ -270,6 +270,7 @@ func (index *Index) GetWALSize() uint64 {
 }
 
 // GetReaders return all shard readers
+// reader must be released after use.
 func (index *Index) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error) {
 	readers := make([]*bluge.Reader, 0)
 	for _, shard := range index.shards {

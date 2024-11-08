@@ -30,7 +30,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/blugelabs/bluge/analysis"
-	"github.com/rs/zerolog/log"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -126,20 +125,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 		searchers = ToSearcher(readers)
 	}
 
-	dmi, err := zincsearch.MultiSearch(ctx, query, mappings, analyzers, searchers...)
-	if err != nil {
-		log.Printf("core.MultiSearchV2: error executing search: %s", err.Error())
-		if err == context.DeadlineExceeded {
-			return &meta.SearchResponse{
-				TimedOut: true,
-				Error:    err.Error(),
-				Hits:     meta.Hits{Hits: []meta.Hit{}},
-			}, nil
-		}
-		return nil, err
-	}
-
-	return searchV2(shardNum, int64(len(readers)), dmi, query, mappings)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, searchers...)
 }
 
 func ToSearcher(readers []*bluge.Reader) []zincsearch.Searcher {

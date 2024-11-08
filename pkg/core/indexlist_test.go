@@ -29,6 +29,11 @@ func TestIndexList_List(t *testing.T) {
 	assert.NotNil(t, index)
 
 	rs, err := index.GetReaders(0, 0)
+	defer func() {
+		for _, r := range rs {
+			r.Close()
+		}
+	}()
 	assert.NoError(t, err)
 	assert.NotNil(t, rs)
 
