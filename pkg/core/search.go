@@ -30,7 +30,7 @@ import (
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
 	mappings := index.GetMappings()
 	analyzers := index.GetAnalyzers()
-	_, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	_, _, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}

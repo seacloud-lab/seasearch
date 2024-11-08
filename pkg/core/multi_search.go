@@ -103,7 +103,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 		return &meta.SearchResponse{}, nil
 	}
 
-	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
+	_, _, err = uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}

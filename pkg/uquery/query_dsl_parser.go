@@ -33,8 +33,11 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 )
 
-// ParseQueryDSL parse query DSL and return searchRequest
-func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) (bluge.SearchRequest, error) {
+// ParseQueryDSL
+// parse the query and return a normalized query, it won't modify old query to avoid data race
+func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) (*meta.ZincQuery, bluge.SearchRequest, error) {
+	nq := *q
+	q = &nq
 	// parse size
 	if q.Size > config.Global.MaxResults {
 		q.Size = config.Global.MaxResults
@@ -43,10 +46,10 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 	// parse query
 	query, err := query.Query(q.Query, mappings, analyzers)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if query == nil {
-		return nil, errors.New(errors.ErrorTypeNotImplemented, fmt.Sprintf("[%s] query doesn't support", q.Query))
+		return nil, nil, errors.New(errors.ErrorTypeNotImplemented, fmt.Sprintf("[%s] query doesn't support", q.Query))
 	}
 
 	// create search request
@@ -54,7 +57,9 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 
 	// parse highlight
 	if q.Highlight != nil {
-		_ = highlight.Request(q.Highlight)
+		h := *q.Highlight
+		_ = highlight.Request(&h)
+		q.Highlight = &h
 		request.IncludeLocations()
 	}
 
@@ -71,7 +76,7 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 	// parse aggregations
 	if q.Aggregations != nil {
 		if err := aggregation.Request(request, q.Aggregations, mappings); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -79,20 +84,20 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 	if q.Fields != nil {
 		if v, ok := q.Fields.([]interface{}); ok {
 			if q.Fields, err = fields.Request(v); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 
 	// parse source
 	if q.Source, err = source.Request(q.Source); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// parse sort
 	if q.Sort != nil {
 		if q.Sort, err = sort.Request(q.Sort); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if q.Sort != nil {
 			request.SortByCustom(q.Sort.(search.SortOrder))
@@ -102,5 +107,5 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 	// pagenation
 	// TODO: search after PIT support
 
-	return request, nil
+	return q, request, nil
 }

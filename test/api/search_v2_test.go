@@ -36,142 +36,142 @@ func TestSearchV2(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
-	// t.Run("POST /es/:target/_search", func(t *testing.T) {
-	// 	t.Run("search document with not exist indexName", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{}`)
-	// 		resp := request("POST", "/es/notExistSearch/_search", body)
-	// 		assert.Equal(t, http.StatusBadRequest, resp.Code)
-	// 	})
-	// 	t.Run("search document with exist indexName", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	// 	})
-	// 	t.Run("search document with index alias", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexAlias+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	// 	})
-	// 	t.Run("search document without target", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
-	// 		resp := request("POST", "/es/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	// 	})
-	// 	t.Run("search document with not exist term", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match": {"_all": "xxxx"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.Equal(t, 0, data.Hits.Total.Value)
-	// 	})
-	// 	t.Run("search document with exist term", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: match_all", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match_all": {}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: wildcard", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"wildcard": {"Athlete": "dem*"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: fuzzy", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"fuzzy": {"Athlete": "demtschenk"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: term", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"term": {"City": "turin"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: match", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: matchphrase", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"match_phrase": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: prefix", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"prefix": {"Athlete": "dem"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// 	t.Run("search document type: querystring", func(t *testing.T) {
-	// 		body := bytes.NewBuffer(nil)
-	// 		body.WriteString(`{"query": {"query_string": {"query": "Athlete:DEMTSCHENKO"}}, "size":10}`)
-	// 		resp := request("POST", "/es/"+indexName+"/_search", body)
-	// 		assert.Equal(t, http.StatusOK, resp.Code)
-	//
-	// 		data := new(meta.SearchResponse)
-	// 		err := json.Unmarshal(resp.Body.Bytes(), data)
-	// 		assert.NoError(t, err)
-	// 		assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-	// 	})
-	// })
+	t.Run("POST /es/:target/_search", func(t *testing.T) {
+		t.Run("search document with not exist indexName", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{}`)
+			resp := request("POST", "/es/notExistSearch/_search", body)
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+		})
+		t.Run("search document with exist indexName", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+		})
+		t.Run("search document with index alias", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
+			resp := request("POST", "/es/"+indexAlias+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+		})
+		t.Run("search document without target", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match_all":{}}, "size":10}`)
+			resp := request("POST", "/es/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+		})
+		t.Run("search document with not exist term", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match": {"_all": "xxxx"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, data.Hits.Total.Value)
+		})
+		t.Run("search document with exist term", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: match_all", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match_all": {}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: wildcard", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"wildcard": {"Athlete": "dem*"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: fuzzy", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"fuzzy": {"Athlete": "demtschenk"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: term", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"term": {"City": "turin"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: match", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: matchphrase", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"match_phrase": {"Athlete": "DEMTSCHENKO"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: prefix", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"prefix": {"Athlete": "dem"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+		t.Run("search document type: querystring", func(t *testing.T) {
+			body := bytes.NewBuffer(nil)
+			body.WriteString(`{"query": {"query_string": {"query": "Athlete:DEMTSCHENKO"}}, "size":10}`)
+			resp := request("POST", "/es/"+indexName+"/_search", body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			data := new(meta.SearchResponse)
+			err := json.Unmarshal(resp.Body.Bytes(), data)
+			assert.NoError(t, err)
+			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+		})
+	})
 
 	t.Run("POST /es/:target/_search with aggregations", func(t *testing.T) {
 		t.Run("terms aggregation", func(t *testing.T) {

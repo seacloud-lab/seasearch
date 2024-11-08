@@ -95,7 +95,8 @@ func MultiSearch(
 			_ = r.Close()
 		}
 	}
-	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+
+	_, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		closeReaders()
 		return nil, err
@@ -107,6 +108,12 @@ func MultiSearch(
 	}
 	for _, r := range readers {
 		r := r
+		// each search goroutine requires an independent searcher to avoid data race
+		normalizedQuery, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+		if err != nil {
+			closeReaders()
+			return nil, err
+		}
 		eg.Go(func() error {
 			defer func() {
 				_ = r.Close()
@@ -119,7 +126,7 @@ func MultiSearch(
 			next, err := dmi.Next()
 			for err == nil && next != nil {
 				n++
-				hit, err2 := visitMatchedDoc(next, query, mappings)
+				hit, err2 := visitMatchedDoc(next, normalizedQuery, mappings)
 				if err2 != nil {
 					return err2
 				}
@@ -180,7 +187,7 @@ func getSingleReaderResult(ctx context.Context,
 	defer func() {
 		_ = reader.Close()
 	}()
-	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	normalizedQuery, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +201,7 @@ func getSingleReaderResult(ctx context.Context,
 
 	next, err := dmi.Next()
 	for err == nil && next != nil {
-		hit, err2 := visitMatchedDoc(next, query, mappings)
+		hit, err2 := visitMatchedDoc(next, normalizedQuery, mappings)
 		if err2 != nil {
 			err = err2
 			break

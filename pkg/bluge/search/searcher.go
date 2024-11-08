@@ -11,6 +11,8 @@ import (
 // is an interface for easy to search with bluge.reader or unified_searcher in a consistent way
 type Searcher interface {
 	Search(ctx context.Context, req bluge.SearchRequest) (search.DocumentMatchIterator, error)
+	// Close release the bluge reader resources
+	// Please note that reader does not support repeated closing.
 	Close() error
 }
 
