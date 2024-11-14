@@ -14,8 +14,7 @@ import (
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
@@ -45,12 +44,7 @@ type S3Backend struct {
 	prefix string
 	path   string
 	cache  *lru_cache.LruCache
-	s3Client
-}
-
-type s3Client struct {
-	client     *minio.Client
-	bucketName string
+	objclient.Client
 }
 
 func CreateS3Backend(dataPath string, indexName string) (*S3Backend, error) {
@@ -62,59 +56,29 @@ func CreateS3Backend(dataPath string, indexName string) (*S3Backend, error) {
 	s3.cache = lru_cache.Instance
 	s3.prefix = indexName
 	s3.path = path.Join(dataPath, indexName)
-	s3.s3Client = *cli
+	s3.Client = cli
 	return s3, nil
 }
 
 var createS3Once = sync.Once{}
-var s3cli *s3Client
+var s3cli objclient.Client
 
-func createS3Client() (*s3Client, error) {
+func createS3Client() (objclient.Client, error) {
 	var err error
 	createS3Once.Do(func() {
-		accessKeyID := config.Global.S3.AccessId
-		accessKeySecret := config.Global.S3.AccessSecret
-		bucketName := config.Global.S3.Bucket
-		endPoint := config.Global.S3.Endpoint
-		useV4Sig := config.Global.S3.UseV4Signature
-		useHTTPS := config.Global.S3.UseHttps
-		pathStyleRequest := config.Global.S3.PathStyleRequest
-		awsRegion := config.Global.S3.AwsRegion
-		s3cli, err = newS3client(
-			accessKeyID, accessKeySecret, bucketName,
-			endPoint, awsRegion, useHTTPS, pathStyleRequest, useV4Sig)
+		var objConf objclient.S3Config
+		objConf.KeyID = config.Global.S3.AccessId
+		objConf.Key = config.Global.S3.AccessSecret
+		objConf.Bucket = config.Global.S3.Bucket
+		objConf.Endpoint = config.Global.S3.Endpoint
+		objConf.V4Signature = fmt.Sprint(config.Global.S3.UseV4Signature)
+		objConf.HTTPS = fmt.Sprint(config.Global.S3.UseHttps)
+		objConf.PathStyleRequest = fmt.Sprint(config.Global.S3.PathStyleRequest)
+		objConf.Region = config.Global.S3.AwsRegion
+		s3cli, err = objclient.NewS3Client(objConf)
 	})
 
 	return s3cli, err
-}
-
-func newS3client(accessKeyID, accessKeySecret, bucketName, endPoint, region string, useHTTPS, pathStyleRequest, useV4Sig bool) (*s3Client, error) {
-	var bucketLookup minio.BucketLookupType
-	if pathStyleRequest {
-		bucketLookup = minio.BucketLookupPath
-	}
-	if endPoint == "" {
-		if region != "" {
-			endPoint = "s3." + region + ".amazonaws.com"
-		} else {
-			endPoint = "s3.amazonaws.com"
-		}
-	}
-	if useV4Sig {
-		cli, err := minio.New(endPoint, &minio.Options{
-			Creds:        credentials.NewStaticV4(accessKeyID, accessKeySecret, ""),
-			Secure:       useHTTPS,
-			Region:       region,
-			BucketLookup: bucketLookup,
-		})
-		return &s3Client{client: cli, bucketName: bucketName}, err
-	}
-	cli, err := minio.New(endPoint, &minio.Options{
-		Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
-		Secure:       useHTTPS,
-		BucketLookup: bucketLookup,
-	})
-	return &s3Client{client: cli, bucketName: bucketName}, err
 }
 
 // RemoveS3Index
@@ -125,7 +89,7 @@ func RemoveS3Index(indexName string) error {
 		log.Error().Err(err).Msgf("Remove index %s err: create s3 client err: ", indexName)
 		return fmt.Errorf("create s3 client err: %w", err)
 	}
-	objs, err := s3.listObjects(indexName)
+	objs, err := s3.List(context.Background(), indexName)
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove index %s err: ", indexName)
 		return err
@@ -140,7 +104,7 @@ func RemoveS3Index(indexName string) error {
 	}
 	// remove obj storage
 	for _, obj := range objs {
-		err = s3.remove(obj.Key)
+		err = s3.Remove(context.Background(), obj.Key)
 		if err != nil {
 			log.Error().Err(err).Msgf("Remove index %s err: remove object err: ", indexName)
 			return fmt.Errorf("failed to remove object: %w", err)
@@ -156,50 +120,11 @@ func S3Exists(indexName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	objs, err := s3.listObjects(indexName)
+	objs, err := s3.List(context.Background(), indexName)
 	if err != nil {
 		return false, err
 	}
 	return len(objs) > 0, nil
-}
-
-func (b *s3Client) read(key string) (io.ReadCloser, error) {
-	return b.client.GetObject(context.Background(), b.bucketName, key, minio.GetObjectOptions{})
-}
-
-func (b *s3Client) write(key string, r io.Reader, l int) error {
-	opts := minio.PutObjectOptions{}
-	return b.writeWithMeta(key, opts, r, int64(l))
-}
-
-func (b *s3Client) writeWithMeta(key string, opts minio.PutObjectOptions, r io.Reader, l int64) error {
-	// we should always set objectSize instead of -1 to reduce memory overhead
-	_, err := b.client.PutObject(context.Background(), b.bucketName, key, r, l, opts)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (b *s3Client) listObjects(prefix string) ([]minio.ObjectInfo, error) {
-	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
-	objs := b.client.ListObjects(context.Background(), b.bucketName, opts)
-
-	var info []minio.ObjectInfo
-	for obj := range objs {
-		if obj.Err != nil {
-			return nil, fmt.Errorf("failed to list folder: %w", obj.Err)
-		}
-		info = append(info, obj)
-	}
-
-	return info, nil
-}
-
-func (b *s3Client) remove(key string) error {
-	opts := minio.RemoveObjectOptions{}
-	err := b.client.RemoveObject(context.Background(), b.bucketName, key, opts)
-	return err
 }
 
 func (b *S3Backend) Setup(readOnly bool) error {
@@ -207,7 +132,7 @@ func (b *S3Backend) Setup(readOnly bool) error {
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {
-	list, err := b.listObjects(b.prefix)
+	list, err := b.Client.List(context.Background(), b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, fmt.Errorf("list objects err: %w", err)
@@ -237,7 +162,7 @@ func (b *S3Backend) Load(kind string, id uint64) (*segment.Data, io.Closer, erro
 		return cf.LoadReadOnlyData()
 	}
 
-	reader, err := b.read(path.Join(b.prefix, key))
+	reader, err := b.Client.Read(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
 		log.Error().Err(err).Msgf("Load index %s file err: Read file from s3 err: ", b.prefix)
 		return nil, nil, fmt.Errorf("load file err: read file from s3 err: %w", err)
@@ -271,7 +196,9 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 			ch <- err
 			return
 		}
-		err = b.write(backendKey, &buffer, buffer.Len())
+		err = b.Client.Write(context.Background(), backendKey, &buffer, &objclient.WriteOptions{
+			Size: int64(buffer.Len()),
+		})
 		if err != nil {
 			ch <- err
 			return
@@ -329,7 +256,7 @@ func (b *S3Backend) Remove(kind string, id uint64) error {
 		return err
 	}
 
-	err = b.remove(path.Join(b.prefix, key))
+	err = b.Client.Remove(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove index file %s from obj store err: ", path.Join(b.prefix, key))
 		return fmt.Errorf("remove object err: %w", err)
@@ -338,7 +265,7 @@ func (b *S3Backend) Remove(kind string, id uint64) error {
 }
 
 func (b *S3Backend) Stats() (numItems uint64, numBytes uint64) {
-	objs, err := b.listObjects(b.prefix)
+	objs, err := b.Client.List(context.Background(), b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("Stats index %s err: list objects err: ", b.prefix)
 		return 0, 0
