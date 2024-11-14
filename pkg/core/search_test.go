@@ -259,7 +259,6 @@ func TestIndex_Search(t *testing.T) {
 		})
 
 		for _, d := range prepareData {
-			rand.Seed(time.Now().UnixNano())
 			docId := rand.Intn(1000)
 			err := index.CreateDocument(strconv.Itoa(docId), d, false)
 			assert.NoError(t, err)
