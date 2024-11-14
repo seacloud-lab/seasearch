@@ -2,6 +2,7 @@ package directory
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"path"
@@ -10,10 +11,10 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
+	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
@@ -23,12 +24,7 @@ type OssBackend struct {
 	path   string
 	prefix string
 	cache  *lru_cache.LruCache
-	ossClient
-}
-
-type ossClient struct {
-	client *oss.Client
-	bucket *oss.Bucket
+	objclient.Client
 }
 
 func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
@@ -60,37 +56,24 @@ func CreateOSSBackend(dataPath string, indexName string) (*OssBackend, error) {
 	o.cache = lru_cache.Instance
 	o.prefix = indexName
 	o.path = path.Join(dataPath, indexName)
-	o.ossClient = *cli
+	o.Client = cli
 	return o, nil
 }
 
 var createOssOnce = sync.Once{}
-var ossBackend *ossClient
+var ossBackend objclient.Client
 
-func createOssClient() (*ossClient, error) {
+func createOssClient() (objclient.Client, error) {
 	var err error
 	createOssOnce.Do(func() {
-		accessKeyID := config.Global.Oss.AccessId
-		accessKeySecret := config.Global.Oss.AccessSecret
-		bucketName := config.Global.Oss.Bucket
-		endPoint := config.Global.Oss.Endpoint
-		ossBackend, err = newOSSClient(endPoint, accessKeyID, accessKeySecret, bucketName)
+		var objConf objclient.OSSConfig
+		objConf.KeyID = config.Global.Oss.AccessId
+		objConf.Key = config.Global.Oss.AccessSecret
+		objConf.Bucket = config.Global.Oss.Bucket
+		objConf.Endpoint = config.Global.Oss.Endpoint
+		ossBackend, err = objclient.NewOSSClient(objConf)
 	})
 	return ossBackend, err
-}
-
-func newOSSClient(endPoint, accessKeyID, accessKeySecret, bucketName string) (*ossClient, error) {
-	client, err := oss.New(endPoint, accessKeyID, accessKeySecret)
-	if err != nil {
-		return nil, err
-	}
-	cli := new(ossClient)
-	cli.client = client
-	cli.bucket, err = client.Bucket(bucketName)
-	if err != nil {
-		return nil, err
-	}
-	return cli, nil
 }
 
 // RemoveOssIndex
@@ -101,7 +84,7 @@ func RemoveOssIndex(indexName string) error {
 		log.Error().Err(err).Msgf("Remove index %s err: create oss client err: ", indexName)
 		return fmt.Errorf("create oss client err: %w", err)
 	}
-	objs, err := o.listObjects(indexName)
+	objs, err := o.List(context.Background(), indexName)
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove index %s err: ", indexName)
 		return err
@@ -116,7 +99,7 @@ func RemoveOssIndex(indexName string) error {
 	}
 	// remove obj storage
 	for _, obj := range objs {
-		err = o.remove(obj.Key)
+		err = o.Remove(context.Background(), obj.Key)
 		if err != nil {
 			log.Error().Err(err).Msgf("Remove index %s err: remove object err: ", indexName)
 			return fmt.Errorf("failed to remove object: %w", err)
@@ -132,51 +115,11 @@ func OssExists(indexName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	objs, err := o.listObjects(indexName)
+	objs, err := o.List(context.Background(), indexName)
 	if err != nil {
 		return false, err
 	}
 	return len(objs) > 0, nil
-}
-
-func (b *ossClient) read(key string) (io.ReadCloser, error) {
-	return b.bucket.GetObject(key)
-}
-
-func (b *ossClient) write(key string, r io.Reader) error {
-	err := b.bucket.PutObject(key, io.NopCloser(r))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (b *ossClient) listObjects(prefix string) ([]oss.ObjectProperties, error) {
-	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
-
-	var info []oss.ObjectProperties
-	for i := 0; ; i++ {
-		result, err := b.bucket.ListObjectsV2(opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list objects: %w", err)
-		}
-		info = append(info, result.Objects...)
-		if !result.IsTruncated {
-			break
-		} else if i == 0 {
-			opts = append(opts, oss.ContinuationToken(result.NextContinuationToken))
-		} else {
-			opts[len(opts)-1] = oss.ContinuationToken(result.NextContinuationToken)
-		}
-	}
-
-	return info, nil
-}
-
-func (b *ossClient) remove(key string) error {
-	err := b.bucket.DeleteObject(key)
-	return err
 }
 
 func (b *OssBackend) Setup(readOnly bool) error {
@@ -184,7 +127,7 @@ func (b *OssBackend) Setup(readOnly bool) error {
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {
-	list, err := b.listObjects(b.prefix)
+	list, err := b.Client.List(context.Background(), b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, err
@@ -214,7 +157,7 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 		return cf.LoadReadOnlyData()
 	}
 
-	reader, err := b.read(path.Join(b.prefix, key))
+	reader, err := b.Client.Read(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
 		log.Error().Err(err).Msgf("Load index %s file err: Read file from oss err: ", b.prefix)
 		return nil, nil, fmt.Errorf("load file err: read file from oss err: %w", err)
@@ -248,7 +191,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 			ch <- err
 			return
 		}
-		err = b.write(backendKey, &buffer)
+		err = b.Client.Write(context.Background(), backendKey, &buffer, &objclient.WriteOptions{})
 		if err != nil {
 			ch <- err
 			return
@@ -307,7 +250,7 @@ func (b *OssBackend) Remove(kind string, id uint64) error {
 		return err
 	}
 
-	err = b.remove(path.Join(b.prefix, key))
+	err = b.Client.Remove(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove index file %s from obj store err: ", path.Join(b.prefix, key))
 		return fmt.Errorf("remove object err: %w", err)
@@ -316,7 +259,7 @@ func (b *OssBackend) Remove(kind string, id uint64) error {
 }
 
 func (b *OssBackend) Stats() (numItems uint64, numBytes uint64) {
-	objs, err := b.listObjects(b.prefix)
+	objs, err := b.Client.List(context.Background(), b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("Stats index %s err: ", b.prefix)
 		return 0, 0
