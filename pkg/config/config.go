@@ -46,7 +46,7 @@ type config struct {
 	ServerAddress             string        `env:"ZINC_SERVER_ADDRESS"`
 	ServerTLSCertificateFile  string        `env:"ZINC_SERVER_TLS_CERTIFICATE_FILE"`
 	ServerTLSKeyFile          string        `env:"ZINC_SERVER_TLS_KEY_FILE"`
-	ServerMode                string        `env:"SS_SERVER_MODE,default=none"`
+	ServerMode                string        `env:"SS_SERVER_MODE,default=node"`
 	NodeID                    int           `env:"ZINC_NODE_ID,default=1"`
 	DataPath                  string        `env:"ZINC_DATA_PATH,default=./data"`
 	MetadataStorage           string        `env:"ZINC_METADATA_STORAGE,default=bolt"`
