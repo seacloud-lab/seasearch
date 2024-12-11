@@ -155,11 +155,14 @@ func TestConfigStorageType(t *testing.T) {
 		os.Setenv("SS_OSS_ACCESS_SECRET", "pwd")
 		os.Setenv("SS_OSS_BUCKET", "bucket")
 		os.Setenv("SS_OSS_ENDPOINT", "endpoint")
+
+		os.Setenv("ZINC_DATA_PATH", "./zinc_path")
+		os.Setenv("SS_DATA_PATH", "./ss_path")
 	})
 
 	t.Run("check", func(t *testing.T) {
 		c := new(config)
-		loadConfig(reflect.ValueOf(c).Elem())
+		initConfig(c)
 
 		assert.Equal(t, 10, c.Shard.LoadObjGoroutineNum)
 		assert.Equal(t, "oss", c.StorageType)
@@ -167,6 +170,7 @@ func TestConfigStorageType(t *testing.T) {
 		assert.Equal(t, "pwd", c.Oss.AccessSecret)
 		assert.Equal(t, "bucket", c.Oss.Bucket)
 		assert.Equal(t, "endpoint", c.Oss.Endpoint)
+		assert.Equal(t, "./ss_path", c.DataPath)
 	})
 }
 
