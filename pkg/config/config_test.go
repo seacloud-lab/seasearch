@@ -156,7 +156,6 @@ func TestConfigStorageType(t *testing.T) {
 		os.Setenv("SS_OSS_BUCKET", "bucket")
 		os.Setenv("SS_OSS_ENDPOINT", "endpoint")
 
-		os.Setenv("ZINC_DATA_PATH", "./zinc_path")
 		os.Setenv("SS_DATA_PATH", "./ss_path")
 	})
 

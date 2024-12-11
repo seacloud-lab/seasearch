@@ -48,8 +48,7 @@ type config struct {
 	ServerTLSKeyFile          string        `env:"ZINC_SERVER_TLS_KEY_FILE"`
 	ServerMode                string        `env:"SS_SERVER_MODE,default=node"`
 	NodeID                    int           `env:"ZINC_NODE_ID,default=1"`
-	DataPath                  string        `env:"ZINC_DATA_PATH,default=./data"`
-	SeaSearchDataPath         string        `env:"SS_DATA_PATH,default=./data"` // This option will override DataPath.
+	DataPath                  string        `env:"SS_DATA_PATH,default=./data"`
 	MetadataStorage           string        `env:"ZINC_METADATA_STORAGE,default=bolt"`
 	IceCompressor             string        `env:"ZINC_ICE_COMPRESSOR,default=zstd"`
 	SentryEnable              bool          `env:"ZINC_SENTRY,default=true"`
@@ -178,8 +177,6 @@ func init() {
 func initConfig(c *config) {
 	loadConfig(reflect.ValueOf(c).Elem())
 
-	// override data path
-	c.DataPath = c.SeaSearchDataPath
 	// configure gin
 	if c.GinMode == "release" {
 		gin.SetMode(gin.ReleaseMode)
