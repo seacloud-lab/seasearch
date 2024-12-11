@@ -37,7 +37,7 @@ func TestConfig(t *testing.T) {
 		c := new(config)
 		loadConfig(reflect.ValueOf(c).Elem())
 
-		assert.Equal(t, "", c.GinMode)
+		assert.Equal(t, "release", c.GinMode)
 		assert.Equal(t, "4080", c.ServerPort)
 		assert.Equal(t, "node", c.ServerMode)
 		assert.Equal(t, 8, c.NodeID)
