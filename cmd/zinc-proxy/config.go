@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 type ProxyConfig struct {
@@ -21,13 +22,13 @@ type ProxyConfig struct {
 type GeneralConfig struct {
 	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
 	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
-	LogDir           string `env:"ZINC_CLUSTER_PROXY_LOG_DIR"`
+	LogDir           string `env:"SS_CLUSTER_PROXY_LOG_DIR,default=./log"`
 }
 
 type ClusterProxyConfig struct {
-	Host               string `env:"ZINC_CLUSTER_PROXY_HOST"`
-	Port               int    `env:"ZINC_CLUSTER_PROXY_PORT"`
-	ClusterManagerAddr string `env:"ZINC_CLUSTER_MANAGER_ADDR"`
+	ClusterManagerAddr string `env:"SS_CLUSTER_MANAGER_ADDR"`
+	Host               string `env:"SS_CLUSTER_PROXY_HOST,default=0.0.0.0"`
+	Port               int    `env:"SS_CLUSTER_PROXY_PORT,default=4082"`
 }
 
 func initConfig() {
@@ -37,6 +38,7 @@ func initConfig() {
 	}
 	loadConfig(reflect.ValueOf(conf).Elem())
 	gin.SetMode(gin.ReleaseMode)
+	config.Global.ServerMode = config.ServerModeProxy
 }
 
 func loadConfig(rv reflect.Value) {

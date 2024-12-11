@@ -26,12 +26,12 @@ type ClusterManagerConfig struct {
 type GeneralConfig struct {
 	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
 	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
-	LogDir           string `env:"ZINC_CLUSTER_MANAGER_LOG_DIR"`
+	LogDir           string `env:"SS_CLUSTER_MANAGER_LOG_DIR,default=./log"`
 }
 
 type ManagerConfig struct {
-	Host string `env:"ZINC_CLUSTER_MANAGER_HOST"`
-	Port int    `env:"ZINC_CLUSTER_MANAGER_PORT"`
+	Host string `env:"SS_CLUSTER_MANAGER_HOST,default=0.0.0.0"`
+	Port int    `env:"SS_CLUSTER_MANAGER_PORT,default=4081"`
 }
 
 type ClusterConfig struct {
