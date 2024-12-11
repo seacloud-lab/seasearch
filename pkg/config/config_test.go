@@ -35,9 +35,9 @@ func TestConfig(t *testing.T) {
 
 	t.Run("check", func(t *testing.T) {
 		c := new(config)
-		loadConfig(reflect.ValueOf(c).Elem())
+		initConfig(c)
 
-		assert.Equal(t, "", c.GinMode)
+		assert.Equal(t, "release", c.GinMode)
 		assert.Equal(t, "4080", c.ServerPort)
 		assert.Equal(t, "node", c.ServerMode)
 		assert.Equal(t, 8, c.NodeID)
@@ -51,9 +51,14 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 1024, c.BatchSize)
 		assert.Equal(t, 10000, c.MaxResults)
 		assert.Equal(t, 1000, c.AggregationTermsSize)
+		assert.Equal(t, int64(10000000000), c.ObjCache.MaxCacheSize)
+		assert.Equal(t, 1, c.Shard.LoadObjGoroutineNum)
+		assert.Equal(t, "disk", c.StorageType)
+		assert.Equal(t, false, c.EnableWal)
+		assert.Equal(t, 1, c.Cluster.NodeId)
+		assert.Equal(t, int64(100000), c.VectorConfig.IvfPqThreshold)
 
 		assert.Equal(t, 10*time.Second, c.WalSyncInterval)
-
 		assert.Equal(t, []string{"localhost:2379"}, c.Etcd.Endpoints)
 
 		assert.Equal(t, false, c.Plugin.GSE.Enable)
@@ -142,6 +147,30 @@ func TestConfig(t *testing.T) {
 
 	})
 
+}
+func TestConfigStorageType(t *testing.T) {
+	t.Run("prepare", func(t *testing.T) {
+		os.Setenv("SS_STORAGE_TYPE", "oss")
+		os.Setenv("SS_OSS_ACCESS_ID", "admin")
+		os.Setenv("SS_OSS_ACCESS_SECRET", "pwd")
+		os.Setenv("SS_OSS_BUCKET", "bucket")
+		os.Setenv("SS_OSS_ENDPOINT", "endpoint")
+
+		os.Setenv("SS_DATA_PATH", "./ss_path")
+	})
+
+	t.Run("check", func(t *testing.T) {
+		c := new(config)
+		initConfig(c)
+
+		assert.Equal(t, 10, c.Shard.LoadObjGoroutineNum)
+		assert.Equal(t, "oss", c.StorageType)
+		assert.Equal(t, "admin", c.Oss.AccessId)
+		assert.Equal(t, "pwd", c.Oss.AccessSecret)
+		assert.Equal(t, "bucket", c.Oss.Bucket)
+		assert.Equal(t, "endpoint", c.Oss.Endpoint)
+		assert.Equal(t, "./ss_path", c.DataPath)
+	})
 }
 
 func TestSentryDSNOverride(t *testing.T) {
