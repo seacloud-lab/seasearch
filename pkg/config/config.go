@@ -41,12 +41,12 @@ const (
 )
 
 type config struct {
-	GinMode                   string        `env:"GIN_MODE"`
+	GinMode                   string        `env:"GIN_MODE,default=release"`
 	ServerPort                string        `env:"ZINC_SERVER_PORT,default=4080"`
 	ServerAddress             string        `env:"ZINC_SERVER_ADDRESS"`
 	ServerTLSCertificateFile  string        `env:"ZINC_SERVER_TLS_CERTIFICATE_FILE"`
 	ServerTLSKeyFile          string        `env:"ZINC_SERVER_TLS_KEY_FILE"`
-	ServerMode                string        `env:"ZINC_SERVER_MODE,default=node"`
+	ServerMode                string        `env:"SS_SERVER_MODE,default=none"`
 	NodeID                    int           `env:"ZINC_NODE_ID,default=1"`
 	DataPath                  string        `env:"ZINC_DATA_PATH,default=./data"`
 	MetadataStorage           string        `env:"ZINC_METADATA_STORAGE,default=bolt"`
@@ -67,7 +67,7 @@ type config struct {
 	WalSyncInterval           time.Duration `env:"ZINC_WAL_SYNC_INTERVAL,default=1s"`      // sync wal to disk, 1s, 10ms
 	WalRedoLogNoSync          bool          `env:"ZINC_WAL_REDOLOG_NO_SYNC,default=false"` // control sync after every write
 	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
-	EnableWal                 bool          `env:"ZINC_WAL_ENABLE,default=true"`
+	EnableWal                 bool          `env:"ZINC_WAL_ENABLE,default=false"`
 	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
 	WalConfig                 walConfig
 	StorageType               string `env:"ZINC_STORAGE_TYPE,default=disk"`
@@ -85,34 +85,34 @@ type config struct {
 type logConfig struct {
 	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
 	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
-	LogDir           string `env:"ZINC_LOG_DIR,default=./log"`
-	LogLevel         string `env:"ZINC_LOG_LEVEL,default=debug"`
+	LogDir           string `env:"SS_LOG_DIR,default=./log"`
+	LogLevel         string `env:"SS_LOG_LEVEL,default=debug"`
 }
 
 type objCache struct {
-	MaxCacheSize int64 `env:"ZINC_MAX_OBJ_CACHE_SIZE,default=10737418240"`
+	MaxCacheSize int64 `env:"SS_MAX_OBJ_CACHE_SIZE,default=10737418240"`
 }
 
 type s3 struct {
-	AccessId         string `env:"ZINC_S3_ACCESS_ID"`
-	AccessSecret     string `env:"ZINC_S3_ACCESS_SECRET"`
-	Bucket           string `env:"ZINC_S3_BUCKET"`
-	Endpoint         string `env:"ZINC_S3_ENDPOINT"`
-	UseV4Signature   bool   `env:"ZINC_S3_USE_V4_SIGNATURE"`
-	UseHttps         bool   `env:"ZINC_S3_USE_HTTPS"`
-	PathStyleRequest bool   `env:"ZINC_S3_PATH_STYLE_REQUEST"`
-	AwsRegion        string `env:"ZINC_S3_AWS_REGION"`
+	AccessId         string `env:"SS_S3_ACCESS_ID"`
+	AccessSecret     string `env:"SS_S3_ACCESS_SECRET"`
+	Bucket           string `env:"SS_S3_BUCKET"`
+	Endpoint         string `env:"SS_S3_ENDPOINT"`
+	UseV4Signature   bool   `env:"SS_S3_USE_V4_SIGNATURE"`
+	UseHttps         bool   `env:"SS_S3_USE_HTTPS"`
+	PathStyleRequest bool   `env:"SS_S3_PATH_STYLE_REQUEST"`
+	AwsRegion        string `env:"SS_S3_AWS_REGION"`
 }
 
 type oss struct {
-	AccessId     string `env:"ZINC_OSS_ACCESS_ID"`
-	AccessSecret string `env:"ZINC_OSS_ACCESS_SECRET"`
-	Bucket       string `env:"ZINC_OSS_BUCKET"`
-	Endpoint     string `env:"ZINC_OSS_ENDPOINT"`
+	AccessId     string `env:"SS_OSS_ACCESS_ID"`
+	AccessSecret string `env:"SS_OSS_ACCESS_SECRET"`
+	Bucket       string `env:"SS_OSS_BUCKET"`
+	Endpoint     string `env:"SS_OSS_ENDPOINT"`
 }
 
 type cluster struct {
-	NodeId int `env:"ZINC_CLUSTER_ID"`
+	NodeId int `env:"SS_CLUSTER_ID,default=1"`
 }
 
 type shard struct {
@@ -123,7 +123,7 @@ type shard struct {
 	// MaxSize is the maximum size limit for one shard, or will create a new shard.
 	MaxSize uint64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
 	// LoadObjGoroutineNum concurrently load index from Obj storage
-	LoadObjGoroutineNum int `env:"ZINC_SHARD_LOAD_OBJS_GOROUTINE_NUM,default=1"`
+	LoadObjGoroutineNum int `env:"ZINC_SHARD_LOAD_OBJS_GOROUTINE_NUM,default=10"`
 }
 
 type etcd struct {
@@ -161,7 +161,7 @@ type walConfig struct {
 }
 
 type vectorConfig struct {
-	IvfPqThreshold int64 `env:"ZINC_VECTOR_IVFPQ_THRESHOLD,default=100000"`
+	IvfPqThreshold int64 `env:"SS_VECTOR_IVFPQ_THRESHOLD,default=100000"`
 }
 
 var Global = new(config)

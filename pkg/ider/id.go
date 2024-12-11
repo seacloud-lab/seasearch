@@ -31,7 +31,7 @@ var local *Node
 
 func init() {
 	var err error
-	local, err = NewNode(config.Global.NodeID)
+	local, err = NewNode(config.Global.Cluster.NodeId)
 	if err != nil {
 		log.Fatal().Msgf("id generater init[local] err %s", err.Error())
 	}
