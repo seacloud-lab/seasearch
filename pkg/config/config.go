@@ -70,7 +70,7 @@ type config struct {
 	EnableWal                 bool          `env:"ZINC_WAL_ENABLE,default=false"`
 	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
 	WalConfig                 walConfig
-	StorageType               string `env:"ZINC_STORAGE_TYPE,default=disk"`
+	StorageType               string `env:"SS_STORAGE_TYPE,default=disk"`
 	ObjCache                  objCache
 	LogConfig                 logConfig
 	VectorConfig              vectorConfig
@@ -90,7 +90,7 @@ type logConfig struct {
 }
 
 type objCache struct {
-	MaxCacheSize int64 `env:"SS_MAX_OBJ_CACHE_SIZE,default=10737418240"`
+	MaxCacheSize int64 `env:"SS_MAX_OBJ_CACHE_SIZE,default=10GB"`
 }
 
 type s3 struct {
@@ -171,15 +171,19 @@ func init() {
 	if err != nil {
 		log.Print(err.Error())
 	}
-	loadConfig(reflect.ValueOf(Global).Elem())
+	initConfig(Global)
+}
+
+func initConfig(c *config) {
+	loadConfig(reflect.ValueOf(c).Elem())
 
 	// configure gin
-	if Global.GinMode == "release" {
+	if c.GinMode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	// check data path
-	testPath := path.Join(Global.DataPath, "_test_")
+	testPath := path.Join(c.DataPath, "_test_")
 	if err := os.MkdirAll(testPath, 0755); err != nil {
 		log.Fatal().Err(err).Msg("ZINC_DATA_PATH is not writable")
 	}
@@ -188,7 +192,7 @@ func init() {
 	}
 
 	// configure ice compress algorithm
-	switch strings.ToUpper(Global.IceCompressor) {
+	switch strings.ToUpper(c.IceCompressor) {
 	case "SNAPPY":
 		compress.Algorithm = compress.SNAPPY
 	case "S2":
@@ -201,6 +205,10 @@ func init() {
 	checkOss()
 	checkS3()
 	checkWalConfig()
+	// for disk storage we use single-threaded for loading indexes
+	if c.StorageType == "disk" {
+		c.Shard.LoadObjGoroutineNum = 1
+	}
 }
 
 func checkOss() {
