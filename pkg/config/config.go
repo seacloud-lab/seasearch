@@ -102,6 +102,7 @@ type s3 struct {
 	UseHttps         bool   `env:"SS_S3_USE_HTTPS"`
 	PathStyleRequest bool   `env:"SS_S3_PATH_STYLE_REQUEST"`
 	AwsRegion        string `env:"SS_S3_AWS_REGION"`
+	SsecKey          string `env:"SS_S3_SSE_C_KEY"`
 }
 
 type oss struct {

@@ -75,6 +75,7 @@ func createS3Client() (objclient.Client, error) {
 		objConf.HTTPS = fmt.Sprint(config.Global.S3.UseHttps)
 		objConf.PathStyleRequest = fmt.Sprint(config.Global.S3.PathStyleRequest)
 		objConf.Region = config.Global.S3.AwsRegion
+		objConf.SSECKey = config.Global.S3.SsecKey
 		s3cli, err = objclient.NewS3Client(objConf)
 	})
 

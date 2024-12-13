@@ -144,6 +144,7 @@ func createS3Client() (objclient.Client, error) {
 	objConf.PathStyleRequest = fmt.Sprint(config.Global.S3.PathStyleRequest)
 	objConf.Endpoint = config.Global.S3.Endpoint
 	objConf.Region = config.Global.S3.AwsRegion
+	objConf.SSECKey = config.Global.S3.SsecKey
 
 	return objclient.NewS3Client(objConf)
 }
