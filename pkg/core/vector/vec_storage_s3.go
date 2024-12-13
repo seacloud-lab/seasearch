@@ -76,11 +76,7 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 
 	// cache file
 	localPath := path.Join(s.cachePath, name, getFileName())
-	localCache, err := s.cache.UpdateCacheFile(inputFile, localPath)
-	if err != nil {
-		return err
-	}
-	return localCache.Close()
+	return s.cache.UpdateCacheFile(inputFile, localPath)
 }
 
 // Remove vector index, the input name should be index_name/vec_index_name

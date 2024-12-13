@@ -108,9 +108,14 @@ func (c *LruCache) init() error {
 		if !c.fileExt(ext) {
 			return err
 		}
+		fi, err1 := os.Stat(p)
+		if err1 != nil {
+			return err1
+		}
 		c.caches[p] = &CacheFile{
 			path:     p,
 			refCount: 0,
+			size:     fi.Size(),
 		}
 
 		return err
@@ -124,9 +129,18 @@ type tempFile struct {
 	size  int64
 }
 
-func (c *LruCache) doCleanup() error {
-	var tempFiles []tempFile
+func (c *LruCache) makeRoomForCacheFile() error {
 	var curSize int64 = 0
+	c.lock.RLock()
+	for _, f := range c.caches {
+		curSize += f.size
+	}
+	c.lock.RUnlock()
+	if curSize < c.maxSize {
+		return nil
+	}
+	var tempFiles []tempFile
+
 	var targetSize = float64(c.maxSize) * 0.7
 
 	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
@@ -147,16 +161,12 @@ func (c *LruCache) doCleanup() error {
 			return err1
 		}
 
-		curSize += fi.Size()
-
 		statT := fi.Sys().(*syscall.Stat_t)
-
 		tempFiles = append(tempFiles, tempFile{
 			aTime: GetAtime(statT),
 			size:  fi.Size(),
 			path:  p,
 		})
-
 		return nil
 	})
 
@@ -196,36 +206,6 @@ func (c *LruCache) doCleanup() error {
 	return nil
 }
 
-func (c *LruCache) checkCacheSize() (bool, error) {
-	var curSize int64 = 0
-	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return err
-		}
-
-		ext := path.Ext(info.Name())
-		if !c.fileExt(ext) {
-			return err
-		}
-		fi, err1 := os.Stat(p)
-		if err1 != nil {
-			return err1
-		}
-
-		curSize += fi.Size()
-		return nil
-	})
-
-	if err != nil {
-		return false, fmt.Errorf("filepath walk err: %w", err)
-	}
-	return curSize > c.maxSize, nil
-}
-
 // CacheFile
 // Prevent duplicate downloads from obj_store
 // the filePath is the absolute path of cache file.
@@ -235,15 +215,9 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 	if err != nil {
 		return nil, err
 	}
-	clean, err := c.checkCacheSize()
+	err = c.makeRoomForCacheFile()
 	if err != nil {
-		return nil, fmt.Errorf("check cache size err: %w", err)
-	}
-	if clean {
-		err = c.doCleanup()
-		if err != nil {
-			return nil, fmt.Errorf("lru clean cache err: %w", err)
-		}
+		return nil, fmt.Errorf("lru clean cache err: %w", err)
 	}
 	for {
 		c.lock.Lock()
@@ -277,7 +251,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 			cleanup()
 			return nil, fmt.Errorf("cache file err: create temp file err: %w", err)
 		}
-		_, err = io.Copy(tempfile, reader)
+		size, err := io.Copy(tempfile, reader)
 		if err != nil {
 			log.Error().Err(err).Msgf("Cache %s err: copy temp cache file error", filePath)
 			cleanup()
@@ -308,6 +282,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 			path:     filePath,
 			ref:      c,
 			refCount: 1,
+			size:     size,
 		}
 		delete(c.readyMap, filePath)
 		c.lock.Unlock()
@@ -318,38 +293,36 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 
 // UpdateCacheFile
 // the filePath is the absolute path of cache file.
-func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFile, error) {
+func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) error {
 	dir, _ := filepath.Split(filePath)
 	err := c.Setup(dir, false)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	clean, err := c.checkCacheSize()
+	err = c.makeRoomForCacheFile()
 	if err != nil {
-		return nil, fmt.Errorf("check cache size err: %w", err)
-	}
-	if clean {
-		err = c.doCleanup()
-		if err != nil {
-			return nil, fmt.Errorf("lru clean cache err: %w", err)
-		}
+		return fmt.Errorf("lru clean cache err: %w", err)
 	}
 	err = os.Rename(inputFile, filePath)
 	if err != nil {
 		log.Error().Err(err).Msgf("Rename file %s to %s err: ", inputFile, filePath)
-		return nil, fmt.Errorf("update cache file err: rename temp file err : %w", err)
+		return fmt.Errorf("update cache file err: rename temp file err : %w", err)
 	}
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		log.Error().Err(err).Msgf("Stat file %s err: ", filePath)
+		return fmt.Errorf("update cache file err: stat file err : %w", err)
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if cf, ok := c.caches[filePath]; ok {
-		return cf, nil
-	}
 	c.caches[filePath] = &CacheFile{
 		ref:      c,
 		path:     filePath,
-		refCount: 1,
+		refCount: 0,
+		size:     stat.Size(),
 	}
-	return c.caches[filePath], nil
+	return nil
 }
 
 // GetCacheFile
@@ -561,6 +534,12 @@ func (t *tempWriteFile) Close() error {
 		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
 		return fmt.Errorf("close temp write file err: sync err: %w", err)
 	}
+	stat, err := t.f.Stat()
+	if err != nil {
+		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
+		return fmt.Errorf("close temp write file err: stat file err: %w", err)
+	}
+	t.cf.size = stat.Size()
 	return t.f.Close()
 }
 
@@ -568,6 +547,7 @@ type CacheFile struct {
 	ref      *LruCache
 	path     string
 	refCount uint
+	size     int64
 }
 
 func (c *CacheFile) GetPath() string {

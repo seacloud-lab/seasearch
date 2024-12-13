@@ -47,7 +47,13 @@ func MultiSearch(
 ) (*meta.SearchResponse, error) {
 	if len(readers) == 0 {
 		return &meta.SearchResponse{
-			Hits: meta.Hits{Hits: []meta.Hit{}},
+			Hits: meta.Hits{
+				Hits: []meta.Hit{},
+				Total: meta.Total{
+					Value: 0,
+				}},
+			Took:   0,
+			Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(readers))},
 		}, nil
 	}
 	// for single reader, we just get result directly.
@@ -95,8 +101,11 @@ func MultiSearch(
 			_ = r.Close()
 		}
 	}
-
-	_, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		closeReaders()
 		return nil, err
@@ -109,7 +118,7 @@ func MultiSearch(
 	for _, r := range readers {
 		r := r
 		// each search goroutine requires an independent searcher to avoid data race
-		normalizedQuery, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
 			closeReaders()
 			return nil, err
@@ -126,7 +135,7 @@ func MultiSearch(
 			next, err := dmi.Next()
 			for err == nil && next != nil {
 				n++
-				hit, err2 := visitMatchedDoc(next, normalizedQuery, mappings)
+				hit, err2 := visitMatchedDoc(next, query, mappings)
 				if err2 != nil {
 					return err2
 				}
@@ -187,7 +196,11 @@ func getSingleReaderResult(ctx context.Context,
 	defer func() {
 		_ = reader.Close()
 	}()
-	normalizedQuery, req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +214,7 @@ func getSingleReaderResult(ctx context.Context,
 
 	next, err := dmi.Next()
 	for err == nil && next != nil {
-		hit, err2 := visitMatchedDoc(next, normalizedQuery, mappings)
+		hit, err2 := visitMatchedDoc(next, query, mappings)
 		if err2 != nil {
 			err = err2
 			break

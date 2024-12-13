@@ -68,11 +68,7 @@ func (o *OssStorage) SaveFile(inputFile string, name string) error {
 		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
 	}
 	localPath := path.Join(o.cachePath, name, getFileName())
-	localCache, err := o.cache.UpdateCacheFile(inputFile, localPath)
-	if err != nil {
-		return err
-	}
-	return localCache.Close()
+	return o.cache.UpdateCacheFile(inputFile, localPath)
 }
 
 // Remove vector index, the input name should be index_name/vec_index_name

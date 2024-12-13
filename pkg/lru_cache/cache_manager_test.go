@@ -2,12 +2,14 @@ package lru_cache
 
 import (
 	"bytes"
-	"github.com/blugelabs/bluge/index"
-	"github.com/stretchr/testify/assert"
+	"io"
 	"os"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/blugelabs/bluge/index"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLru(t *testing.T) {
@@ -28,22 +30,26 @@ func TestLru(t *testing.T) {
 	cache1 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t1.seg"),
+		size:     250,
 	}
 	// this will be remained, cause refCount
 	cache2 := &CacheFile{
 		refCount: 1,
 		path:     path.Join(temp, "t2.seg"),
+		size:     250,
 	}
 
 	// this will be removed
 	cache3 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t3.seg"),
+		size:     250,
 	}
 	// this will be remained, it's under 70% max
 	cache4 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t4.seg"),
+		size:     250,
 	}
 
 	m.caches[cache1.path] = cache1
@@ -65,7 +71,7 @@ func TestLru(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	err := m.doCleanup()
+	err := m.makeRoomForCacheFile()
 	assert.Nil(t, err)
 
 	_, ok := m.caches[cache1.path]
@@ -121,4 +127,158 @@ func TestCacheFile(t *testing.T) {
 	assert.Nil(t, err)
 
 	assert.Equal(t, uint(0), cf.refCount)
+}
+
+func TestInitLruCache(t *testing.T) {
+	temp := t.TempDir()
+	defer os.Remove(temp)
+	m := LruCache{
+		caches:   make(map[string]*CacheFile),
+		readyMap: make(map[string]chan struct{}),
+		maxSize:  1000,
+		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
+	}
+
+	cache1 := &CacheFile{
+		refCount: 0,
+		path:     path.Join(temp, "t1.seg"),
+		size:     250,
+	}
+	cache2 := &CacheFile{
+		refCount: 1,
+		path:     path.Join(temp, "t2.seg"),
+		size:     250,
+	}
+	cache3 := &CacheFile{
+		refCount: 0,
+		path:     path.Join(temp, "t3.seg"),
+		size:     250,
+	}
+	cache4 := &CacheFile{
+		refCount: 0,
+		path:     path.Join(temp, "t4.seg"),
+		size:     250,
+	}
+	var slice = []*CacheFile{cache1, cache2, cache3, cache4}
+
+	for _, c := range slice {
+		fi, _ := os.OpenFile(c.path, os.O_CREATE|os.O_RDWR, 0777)
+		b := bytes.Buffer{}
+		for i := 0; i < 250; i++ {
+			b.Write([]byte("1"))
+		}
+		_, _ = fi.Write(b.Bytes())
+		_ = fi.Sync()
+		_ = fi.Close()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	err := m.init()
+	assert.Nil(t, err)
+	totalSize := int64(0)
+	for _, c := range m.caches {
+		totalSize += c.size
+	}
+
+	assert.Equal(t, int64(1000), totalSize)
+}
+
+func TestCacheFileSize(t *testing.T) {
+	temp := t.TempDir()
+	defer os.Remove(temp)
+	m := LruCache{
+		caches:   make(map[string]*CacheFile),
+		readyMap: make(map[string]chan struct{}),
+		maxSize:  1000,
+		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
+	}
+
+	b := bytes.Buffer{}
+	for i := 0; i < 250; i++ {
+		b.Write([]byte("1"))
+	}
+
+	storePath := path.Join(temp, "store.seg")
+	cacheFile, err := m.CacheFile(storePath, &b)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(250), cacheFile.size)
+	s, ok := m.caches[storePath]
+	assert.True(t, ok)
+	assert.Equal(t, int64(250), s.size)
+}
+
+func TestOpenWriterSize(t *testing.T) {
+	temp := t.TempDir()
+	defer os.Remove(temp)
+	m := LruCache{
+		caches:   make(map[string]*CacheFile),
+		readyMap: make(map[string]chan struct{}),
+		maxSize:  1000,
+		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
+	}
+
+	fpath := path.Join(temp, "store.seg")
+	writer, err := m.OpenWriter(fpath)
+	assert.Nil(t, err)
+
+	b := bytes.Buffer{}
+	for i := 0; i < 250; i++ {
+		b.Write([]byte("1"))
+	}
+
+	n, err := io.Copy(writer, &b)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(250), n)
+
+	cf, ok := m.caches[fpath]
+	assert.True(t, ok)
+	assert.Equal(t, int64(0), cf.size)
+
+	assert.Nil(t, writer.Close())
+
+	cf, ok = m.caches[fpath]
+	assert.True(t, ok)
+	assert.Equal(t, int64(250), cf.size)
+}
+
+func TestUpdateCacheSize(t *testing.T) {
+	temp := t.TempDir()
+	defer os.Remove(temp)
+	m := LruCache{
+		caches:   make(map[string]*CacheFile),
+		readyMap: make(map[string]chan struct{}),
+		maxSize:  1000,
+		rootPath: temp,
+		fileExt: func(ext string) bool {
+			return ext == index.ItemKindSnapshot || ext == index.ItemKindSegment
+		},
+		tempExt: TempExt,
+	}
+	fPath := path.Join(temp, "temp.seg")
+	fi, _ := os.OpenFile(fPath, os.O_CREATE|os.O_RDWR, 0777)
+	b := bytes.Buffer{}
+	for i := 0; i < 250; i++ {
+		b.Write([]byte("1"))
+	}
+	_, _ = fi.Write(b.Bytes())
+	_ = fi.Sync()
+	_ = fi.Close()
+	realPath := path.Join(temp, "store.seg")
+	assert.Nil(t, m.UpdateCacheFile(fPath, realPath))
+
+	cf, ok := m.caches[realPath]
+	assert.True(t, ok)
+	assert.Equal(t, int64(250), cf.size)
 }

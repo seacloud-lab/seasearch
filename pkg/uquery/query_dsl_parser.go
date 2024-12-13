@@ -34,22 +34,15 @@ import (
 )
 
 // ParseQueryDSL
-// parse the query and return a normalized query, it won't modify old query to avoid data race
-func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) (*meta.ZincQuery, bluge.SearchRequest, error) {
-	nq := *q
-	q = &nq
-	// parse size
-	if q.Size > config.Global.MaxResults {
-		q.Size = config.Global.MaxResults
-	}
-
+// all query passed to this function must be normalized, call NormalizeQuery first.
+func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) (bluge.SearchRequest, error) {
 	// parse query
 	query, err := query.Query(q.Query, mappings, analyzers)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if query == nil {
-		return nil, nil, errors.New(errors.ErrorTypeNotImplemented, fmt.Sprintf("[%s] query doesn't support", q.Query))
+		return nil, errors.New(errors.ErrorTypeNotImplemented, fmt.Sprintf("[%s] query doesn't support", q.Query))
 	}
 
 	// create search request
@@ -57,9 +50,6 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 
 	// parse highlight
 	if q.Highlight != nil {
-		h := *q.Highlight
-		_ = highlight.Request(&h)
-		q.Highlight = &h
 		request.IncludeLocations()
 	}
 
@@ -76,36 +66,63 @@ func ParseQueryDSL(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[str
 	// parse aggregations
 	if q.Aggregations != nil {
 		if err := aggregation.Request(request, q.Aggregations, mappings); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
+	}
+	if q.Sort != nil {
+		request.SortByCustom(q.Sort.(search.SortOrder))
+	}
+
+	// pagenation
+	// TODO: search after PIT support
+
+	return request, nil
+}
+
+// Used to normalize incoming queries
+func NormalizeQuery(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer) error {
+	// parse size
+	if q.Size > config.Global.MaxResults {
+		q.Size = config.Global.MaxResults
+	}
+	// parse query
+	query, err := query.Query(q.Query, mappings, analyzers)
+	if err != nil {
+		return err
+	}
+	if query == nil {
+		return errors.New(errors.ErrorTypeNotImplemented, fmt.Sprintf("[%s] query doesn't support", q.Query))
+	}
+	if q.Highlight != nil {
+		h := *q.Highlight
+		_ = highlight.Request(&h)
+		q.Highlight = &h
+	}
+
+	tempRequest := bluge.NewTopNSearch(q.Size, query).WithStandardAggregations()
+	if err := aggregation.Request(tempRequest, q.Aggregations, mappings); err != nil {
+		return err
+	}
+
+	// parse source
+	if q.Source, err = source.Request(q.Source); err != nil {
+		return err
 	}
 
 	// parse fields
 	if q.Fields != nil {
 		if v, ok := q.Fields.([]interface{}); ok {
 			if q.Fields, err = fields.Request(v); err != nil {
-				return nil, nil, err
+				return err
 			}
 		}
-	}
-
-	// parse source
-	if q.Source, err = source.Request(q.Source); err != nil {
-		return nil, nil, err
 	}
 
 	// parse sort
 	if q.Sort != nil {
 		if q.Sort, err = sort.Request(q.Sort); err != nil {
-			return nil, nil, err
-		}
-		if q.Sort != nil {
-			request.SortByCustom(q.Sort.(search.SortOrder))
+			return err
 		}
 	}
-
-	// pagenation
-	// TODO: search after PIT support
-
-	return q, request, nil
+	return nil
 }
