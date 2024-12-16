@@ -33,7 +33,6 @@ import (
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/uquery"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 )
 
@@ -101,14 +100,6 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 			return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
 		}
 		return &meta.SearchResponse{}, nil
-	}
-	err = uquery.NormalizeQuery(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-	}
-	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
 	}
 
 	ctx := context.Background()

@@ -112,21 +112,17 @@ func (c *LruCache) init() error {
 		if err1 != nil {
 			return err1
 		}
+		statT := fi.Sys().(*syscall.Stat_t)
 		c.caches[p] = &CacheFile{
 			path:     p,
 			refCount: 0,
 			size:     fi.Size(),
+			atime:    GetAtime(statT),
 		}
 
 		return err
 	})
 	return err
-}
-
-type tempFile struct {
-	aTime time.Time
-	path  string
-	size  int64
 }
 
 func (c *LruCache) makeRoomForCacheFile() error {
@@ -135,44 +131,17 @@ func (c *LruCache) makeRoomForCacheFile() error {
 	for _, f := range c.caches {
 		curSize += f.size
 	}
-	c.lock.RUnlock()
 	if curSize < c.maxSize {
+		c.lock.RUnlock()
 		return nil
 	}
-	var tempFiles []tempFile
+	var tempFiles []*CacheFile
+	for _, f := range c.caches {
+		tempFiles = append(tempFiles, f)
+	}
+	c.lock.RUnlock()
 
 	var targetSize = float64(c.maxSize) * 0.7
-
-	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return err
-		}
-
-		ext := path.Ext(info.Name())
-		if !c.fileExt(ext) {
-			return err
-		}
-		fi, err1 := os.Stat(p)
-		if err1 != nil {
-			return err1
-		}
-
-		statT := fi.Sys().(*syscall.Stat_t)
-		tempFiles = append(tempFiles, tempFile{
-			aTime: GetAtime(statT),
-			size:  fi.Size(),
-			path:  p,
-		})
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("filepath walk err: %w", err)
-	}
 
 	if len(tempFiles) == 0 {
 		log.Debug().Msgf("clean up finished: there are no cached files")
@@ -180,7 +149,7 @@ func (c *LruCache) makeRoomForCacheFile() error {
 	}
 
 	sort.Slice(tempFiles, func(i, j int) bool {
-		return tempFiles[i].aTime.Before(tempFiles[j].aTime)
+		return tempFiles[i].atime.Before(tempFiles[j].atime)
 	})
 
 	c.lock.Lock()
@@ -224,6 +193,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 		// the file has already in local and cached.
 		if cf, ok := c.caches[filePath]; ok {
 			cf.refCount++
+			cf.atime = time.Now()
 			c.lock.Unlock()
 			return cf, nil
 		}
@@ -283,6 +253,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 			ref:      c,
 			refCount: 1,
 			size:     size,
+			atime:    time.Now(),
 		}
 		delete(c.readyMap, filePath)
 		c.lock.Unlock()
@@ -321,6 +292,7 @@ func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) error {
 		path:     filePath,
 		refCount: 0,
 		size:     stat.Size(),
+		atime:    time.Now(),
 	}
 	return nil
 }
@@ -335,7 +307,7 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 		return nil, false
 	}
 	f.refCount++
-
+	f.atime = time.Now()
 	_, err := os.Stat(filePath)
 	if err != nil {
 		delete(c.caches, filePath)
@@ -430,12 +402,14 @@ func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	var ok bool
 	if cf, ok = c.caches[filePath]; ok {
 		cf.refCount++
+		cf.atime = time.Now()
 		c.lock.Unlock()
 	} else {
 		cf = &CacheFile{
 			path:     filePath,
 			refCount: 1,
 			ref:      c,
+			atime:    time.Now(),
 		}
 		c.caches[filePath] = cf
 		c.lock.Unlock()
@@ -539,7 +513,16 @@ func (t *tempWriteFile) Close() error {
 		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
 		return fmt.Errorf("close temp write file err: stat file err: %w", err)
 	}
-	t.cf.size = stat.Size()
+	t.cf.ref.lock.Lock()
+	t.cf.ref.caches[t.realPath] = &CacheFile{
+		ref:      t.cf.ref,
+		path:     t.realPath,
+		refCount: 0,
+		size:     stat.Size(),
+		atime:    time.Now(),
+	}
+	t.cf.ref.lock.Unlock()
+
 	return t.f.Close()
 }
 
@@ -548,6 +531,7 @@ type CacheFile struct {
 	path     string
 	refCount uint
 	size     int64
+	atime    time.Time
 }
 
 func (c *CacheFile) GetPath() string {

@@ -117,7 +117,7 @@ func MultiSearch(
 	}
 	for _, r := range readers {
 		r := r
-		// each search goroutine requires an independent searcher to avoid data race
+		// A new request is created for each reader. Query is not modified concurrently.
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
 			closeReaders()

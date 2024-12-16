@@ -99,11 +99,6 @@ func NormalizeQuery(q *meta.ZincQuery, mappings *meta.Mappings, analyzers map[st
 		q.Highlight = &h
 	}
 
-	tempRequest := bluge.NewTopNSearch(q.Size, query).WithStandardAggregations()
-	if err := aggregation.Request(tempRequest, q.Aggregations, mappings); err != nil {
-		return err
-	}
-
 	// parse source
 	if q.Source, err = source.Request(q.Source); err != nil {
 		return err

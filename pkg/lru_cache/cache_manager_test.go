@@ -31,12 +31,14 @@ func TestLru(t *testing.T) {
 		refCount: 0,
 		path:     path.Join(temp, "t1.seg"),
 		size:     250,
+		atime:    time.Now().Add(-4 * time.Second),
 	}
 	// this will be remained, cause refCount
 	cache2 := &CacheFile{
 		refCount: 1,
 		path:     path.Join(temp, "t2.seg"),
 		size:     250,
+		atime:    time.Now().Add(-3 * time.Second),
 	}
 
 	// this will be removed
@@ -44,12 +46,14 @@ func TestLru(t *testing.T) {
 		refCount: 0,
 		path:     path.Join(temp, "t3.seg"),
 		size:     250,
+		atime:    time.Now().Add(-2 * time.Second),
 	}
 	// this will be remained, it's under 70% max
 	cache4 := &CacheFile{
 		refCount: 0,
 		path:     path.Join(temp, "t4.seg"),
 		size:     250,
+		atime:    time.Now().Add(-1 * time.Second),
 	}
 
 	m.caches[cache1.path] = cache1
@@ -68,7 +72,6 @@ func TestLru(t *testing.T) {
 		_, _ = fi.Write(b.Bytes())
 		_ = fi.Sync()
 		_ = fi.Close()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	err := m.makeRoomForCacheFile()
