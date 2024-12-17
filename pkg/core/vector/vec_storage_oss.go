@@ -1,19 +1,20 @@
 package vector
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path"
 
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
 
 type OssStorage struct {
-	bucket    *oss.Bucket
+	cli       objclient.Client
 	prefix    string
 	cache     *lru_cache.LruCache
 	cachePath string
@@ -21,10 +22,10 @@ type OssStorage struct {
 
 func (o *OssStorage) ExistsFile(name string) (bool, error) {
 	key := path.Join(o.prefix, name, getFileName())
-	exists, err := o.bucket.IsObjectExist(key)
+	exists, err := o.cli.Exist(context.Background(), key)
 	if err != nil {
-		log.Err(err).Msgf("Exists vec index %s err: ", name)
-		return exists, fmt.Errorf("get exeists err: %w", err)
+		log.Error().Err(err).Msgf("check vec index exists %s err: ", name)
+		return false, err
 	}
 	return exists, nil
 }
@@ -36,7 +37,7 @@ func (o *OssStorage) LoadFile(name string) (string, io.Closer, error) {
 		return cf.GetPath(), cf, nil
 	}
 	key := path.Join(o.prefix, name, getFileName())
-	reader, err := o.bucket.GetObject(key)
+	reader, err := o.cli.Read(context.Background(), key)
 	if err != nil {
 		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
 		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
@@ -61,7 +62,7 @@ func (o *OssStorage) SaveFile(inputFile string, name string) error {
 		_ = f.Close()
 	}()
 	key := path.Join(o.prefix, name, getFileName())
-	err = o.bucket.PutObject(key, f)
+	err = o.cli.Write(context.Background(), key, f, &objclient.WriteOptions{})
 	if err != nil {
 		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
 		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
@@ -74,49 +75,27 @@ func (o *OssStorage) SaveFile(inputFile string, name string) error {
 // Remove vector index, the input name should be index_name/vec_index_name
 func (o *OssStorage) Remove(name string) error {
 	prefix := path.Join(o.prefix, name)
-	objs, err := o.listObjects(prefix)
+	objs, err := o.cli.List(context.Background(), prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove vec index file %s err: ", name)
 		return fmt.Errorf("remove vec index file err: %w", err)
 	}
+	keys := make([]string, 0, len(objs))
 	// remove local file
 	for _, obj := range objs {
 		err = o.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
 			return err
 		}
+		keys = append(keys, obj.Key)
 	}
 	// remove obj storage
-	for _, obj := range objs {
-		err = o.bucket.DeleteObject(obj.Key)
-		if err != nil {
-			log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
-			return fmt.Errorf("remove vec index file err: delete object err: %w", err)
-		}
+	err = o.cli.Remove(context.Background(), keys...)
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
+		return fmt.Errorf("remove vec index file err: delete object err: %w", err)
 	}
 	return nil
-}
-
-func (o *OssStorage) listObjects(prefix string) ([]oss.ObjectProperties, error) {
-	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
-
-	var info []oss.ObjectProperties
-	for i := 0; ; i++ {
-		result, err := o.bucket.ListObjectsV2(opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list objects: %w", err)
-		}
-		info = append(info, result.Objects...)
-		if !result.IsTruncated {
-			break
-		} else if i == 0 {
-			opts = append(opts, oss.ContinuationToken(result.NextContinuationToken))
-		} else {
-			opts[len(opts)-1] = oss.ContinuationToken(result.NextContinuationToken)
-		}
-	}
-
-	return info, nil
 }
 
 func createOssStorage() (ObjStore, error) {
@@ -126,7 +105,7 @@ func createOssStorage() (ObjStore, error) {
 		cachePath: path.Join(config.Global.DataPath, VecPrefix),
 	}
 	var err error
-	o.bucket, err = createOssClient()
+	o.cli, err = createOssClient()
 	if err != nil {
 		return nil, err
 	}
@@ -140,21 +119,9 @@ func listOssVecStoreSegments(prefix string) ([]string, error) {
 		return nil, fmt.Errorf("create oss client err: %w", err)
 	}
 
-	opts := []oss.Option{oss.Prefix(prefix), oss.MaxKeys(10)}
-	var objs []oss.ObjectProperties
-	for i := 0; ; i++ {
-		result, err := o.ListObjectsV2(opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list objects: %w", err)
-		}
-		objs = append(objs, result.Objects...)
-		if !result.IsTruncated {
-			break
-		} else if i == 0 {
-			opts = append(opts, oss.ContinuationToken(result.NextContinuationToken))
-		} else {
-			opts[len(opts)-1] = oss.ContinuationToken(result.NextContinuationToken)
-		}
+	objs, err := o.List(context.Background(), prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list objects: %w", err)
 	}
 	res := make([]string, 0, len(objs))
 	for _, obj := range objs {
@@ -163,20 +130,12 @@ func listOssVecStoreSegments(prefix string) ([]string, error) {
 	return res, nil
 }
 
-func createOssClient() (*oss.Bucket, error) {
-	accessKeyID := config.Global.Oss.AccessId
-	accessKeySecret := config.Global.Oss.AccessSecret
-	bucketName := config.Global.Oss.Bucket
-	endPoint := config.Global.Oss.Endpoint
+func createOssClient() (objclient.Client, error) {
+	var objConf objclient.OSSConfig
+	objConf.KeyID = config.Global.Oss.AccessId
+	objConf.Key = config.Global.Oss.AccessSecret
+	objConf.Bucket = config.Global.Oss.Bucket
+	objConf.Endpoint = config.Global.Oss.Endpoint
 
-	client, err := oss.New(endPoint, accessKeyID, accessKeySecret)
-	if err != nil {
-		return nil, err
-	}
-	bucket, err := client.Bucket(bucketName)
-	if err != nil {
-		return nil, err
-	}
-
-	return bucket, nil
+	return objclient.NewOSSClient(objConf)
 }

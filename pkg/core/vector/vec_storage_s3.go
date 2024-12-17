@@ -7,34 +7,27 @@ import (
 	"os"
 	"path"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
 
 type s3Storage struct {
-	cli        *minio.Client
-	prefix     string
-	cachePath  string
-	bucketName string
-	cache      *lru_cache.LruCache
+	cli       objclient.Client
+	prefix    string
+	cachePath string
+	cache     *lru_cache.LruCache
 }
 
 func (s *s3Storage) ExistsFile(name string) (bool, error) {
 	key := path.Join(s.prefix, name, getFileName())
-	_, err := s.cli.StatObject(context.Background(), s.bucketName, key, minio.StatObjectOptions{})
+	exists, err := s.cli.Exist(context.Background(), key)
 	if err != nil {
-		if rsp, ok := err.(minio.ErrorResponse); ok {
-			if rsp.StatusCode == 404 {
-				return false, nil
-			}
-		}
-		log.Err(err).Msgf("Exists vec index %s err: ", name)
-		return false, fmt.Errorf("get exists err: %w", err)
+		log.Error().Err(err).Msgf("check vec index exists %s err: ", name)
+		return false, err
 	}
-	return true, nil
+	return exists, nil
 }
 
 func (s *s3Storage) LoadFile(name string) (string, io.Closer, error) {
@@ -44,7 +37,7 @@ func (s *s3Storage) LoadFile(name string) (string, io.Closer, error) {
 		return cf.GetPath(), cf, nil
 	}
 	key := path.Join(s.prefix, name, getFileName())
-	reader, err := s.cli.GetObject(context.Background(), s.bucketName, key, minio.GetObjectOptions{})
+	reader, err := s.cli.Read(context.Background(), key)
 	if err != nil {
 		log.Error().Err(err).Msgf("Load vec index object %s err: ", name)
 		return "", nil, fmt.Errorf("load vec index err: get object err: %w", err)
@@ -73,7 +66,9 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 		return err
 	}
 	key := path.Join(s.prefix, name, getFileName())
-	_, err = s.cli.PutObject(context.Background(), s.bucketName, key, f, info.Size(), minio.PutObjectOptions{})
+	err = s.cli.Write(context.Background(), key, f, &objclient.WriteOptions{
+		Size: info.Size(),
+	})
 	if err != nil {
 		log.Error().Err(err).Msgf("Save vec index file %s err: save file to obj store err: ", name)
 		return fmt.Errorf("save vec index err: save file to obj store err: %w", err)
@@ -88,18 +83,15 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 // Remove vector index, the input name should be index_name/vec_index_name
 func (s *s3Storage) Remove(name string) error {
 	prefix := path.Join(s.prefix, name)
-	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
+	objs, err := s.cli.List(context.Background(), prefix)
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove vec index file %s err: list objects err: ", name)
+		return fmt.Errorf("remove vec index file err: list objects err: %w", err)
+	}
 
-	objs := s.cli.ListObjects(context.Background(), s.bucketName, opts)
-
-	// s3 list objects return a channel that can only traverse once, so we temp store the keys.
-	keys := make([]string, 0)
+	keys := make([]string, 0, len(objs))
 	// remove local file
-	for obj := range objs {
-		if obj.Err != nil {
-			log.Error().Err(obj.Err).Msgf("Remove vec index file %s err: list objects err: ", name)
-			return fmt.Errorf("remove vec index file err: list objects err: %w", obj.Err)
-		}
+	for _, obj := range objs {
 		err := s.cache.Remove(path.Join(config.Global.DataPath, obj.Key))
 		if err != nil {
 			return err
@@ -107,22 +99,19 @@ func (s *s3Storage) Remove(name string) error {
 		keys = append(keys, obj.Key)
 	}
 	// remove obj storage
-	for _, key := range keys {
-		err := s.cli.RemoveObject(context.Background(), s.bucketName, key, minio.RemoveObjectOptions{})
-		if err != nil {
-			log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
-			return fmt.Errorf("remove vec index file err: delete object err: %w", err)
-		}
+	err = s.cli.Remove(context.Background(), keys...)
+	if err != nil {
+		log.Error().Err(err).Msgf("Remove vec index file %s err: delete object err: ", name)
+		return fmt.Errorf("remove vec index file err: delete object err: %w", err)
 	}
 	return nil
 }
 
 func createS3Storage() (ObjStore, error) {
 	s3 := &s3Storage{
-		cache:      lru_cache.Instance,
-		bucketName: config.Global.S3.Bucket,
-		prefix:     VecPrefix,
-		cachePath:  path.Join(config.Global.DataPath, VecPrefix),
+		cache:     lru_cache.Instance,
+		prefix:    VecPrefix,
+		cachePath: path.Join(config.Global.DataPath, VecPrefix),
 	}
 	var err error
 	s3.cli, err = createS3Client()
@@ -138,53 +127,35 @@ func listS3VecStoreSegments(prefix string) ([]string, error) {
 		log.Error().Err(err).Msgf("list vec store segments %s err: create s3 client err: ", prefix)
 		return nil, fmt.Errorf("create s3 client err: %w", err)
 	}
-	opts := minio.ListObjectsOptions{Prefix: prefix, Recursive: true}
-	objs := s3.ListObjects(context.Background(), config.Global.S3.Bucket, opts)
-	res := make([]string, 0)
-	for obj := range objs {
-		if obj.Err != nil {
-			return nil, fmt.Errorf("failed to list folder: %w", obj.Err)
-		}
+
+	objs, err := s3.List(context.Background(), prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list folder: %w", err)
+	}
+	res := make([]string, len(objs))
+	for _, obj := range objs {
 		res = append(res, obj.Key)
 	}
 	return res, nil
 }
 
-func createS3Client() (*minio.Client, error) {
-	accessKeyID := config.Global.S3.AccessId
-	accessKeySecret := config.Global.S3.AccessSecret
-	endPoint := config.Global.S3.Endpoint
-	useV4Sig := config.Global.S3.UseV4Signature
-	useHTTPS := config.Global.S3.UseHttps
-	pathStyleRequest := config.Global.S3.PathStyleRequest
-	awsRegion := config.Global.S3.AwsRegion
+func createS3Client() (objclient.Client, error) {
+	var objConf objclient.S3Config
+	objConf.KeyID = config.Global.S3.AccessId
+	objConf.Key = config.Global.S3.AccessSecret
+	objConf.Bucket = config.Global.S3.Bucket
+	if config.Global.S3.UseV4Signature != "" {
+		objConf.V4Signature = config.Global.S3.UseV4Signature
+	}
+	if config.Global.S3.UseHttps != "" {
+		objConf.HTTPS = config.Global.S3.UseHttps
+	}
+	if config.Global.S3.PathStyleRequest != "" {
+		objConf.PathStyleRequest = config.Global.S3.PathStyleRequest
+	}
+	objConf.Endpoint = config.Global.S3.Endpoint
+	objConf.Region = config.Global.S3.AwsRegion
+	objConf.SSECKey = config.Global.S3.SsecKey
 
-	var bucketLookup minio.BucketLookupType
-	if pathStyleRequest {
-		bucketLookup = minio.BucketLookupPath
-	}
-	if endPoint == "" {
-		if awsRegion != "" {
-			endPoint = "s3." + awsRegion + ".amazonaws.com"
-		} else {
-			endPoint = "s3.amazonaws.com"
-		}
-	}
-	var res *minio.Client
-	var err error
-	if useV4Sig {
-		res, err = minio.New(endPoint, &minio.Options{
-			Creds:        credentials.NewStaticV4(accessKeyID, accessKeySecret, ""),
-			Secure:       useHTTPS,
-			Region:       awsRegion,
-			BucketLookup: bucketLookup,
-		})
-	} else {
-		res, err = minio.New(endPoint, &minio.Options{
-			Creds:        credentials.NewStaticV2(accessKeyID, accessKeySecret, ""),
-			Secure:       useHTTPS,
-			BucketLookup: bucketLookup,
-		})
-	}
-	return res, err
+	return objclient.NewS3Client(objConf)
 }
