@@ -350,29 +350,17 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 
 	// check id store by which shard
 	shardID := int64(-1)
-	writers, err := s.GetWriters()
-	defer func() {
-		_ = s.Close()
-	}()
+	readers, err := s.GetReaders(0, 0)
 	if err != nil {
 		return shardID, err
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	for id := int64(len(writers)) - 1; id >= 0; id-- {
+	for id := int64(len(readers)) - 1; id >= 0; id-- {
 		id := id
-		w := writers[id]
+		r := readers[id]
 		eg.Go(func() error {
-			r, err := w.Reader()
-			if err != nil {
-				log.Error().Err(err).
-					Str("index", s.GetIndexName()).
-					Str("shard", s.GetID()).
-					Int64("second shard", id).
-					Msg("failed to get reader")
-				return nil // not check err, if returns err with cancel all goroutines.
-			}
 			defer r.Close()
 			dmi, err := r.Search(ctx, request)
 			if err != nil {
@@ -406,7 +394,7 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 
 	// check id store by which shard
 	var hit *meta.Hit
-	writers, err := s.GetWriters()
+	readers, err := s.GetReaders(0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -416,19 +404,10 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	for id := int64(len(writers)) - 1; id >= 0; id-- {
+	for id := int64(len(readers)) - 1; id >= 0; id-- {
 		id := id
-		w := writers[id]
+		r := readers[id]
 		eg.Go(func() error {
-			r, err := w.Reader()
-			if err != nil {
-				log.Error().Err(err).
-					Str("index", s.GetIndexName()).
-					Str("shard", s.GetID()).
-					Int64("second shard", id).
-					Msg("failed to get reader")
-				return nil // not check err, if returns err with cancel all goroutines.
-			}
 			defer r.Close()
 			dmi, err := r.Search(ctx, request)
 			if err != nil {
