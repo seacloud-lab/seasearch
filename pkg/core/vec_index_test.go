@@ -373,14 +373,14 @@ func testAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	assert.EqualValues(t, 98, idx.segments[1].ref.Count)
 	assert.EqualValues(t, 98, idx.ref.Segments[1].Count)
 
-	reader1, err := idx.segments[1].vecStoreWriter.Reader()
+	reader1, err := idx.segments[1].openReader()
 	assert.Nil(t, err)
 	seg1Count, err := reader1.Count()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 98, seg1Count)
 	assert.Nil(t, idx.segments[1].index)
 
-	reader0, err := idx.segments[0].vecStoreWriter.Reader()
+	reader0, err := idx.segments[0].openReader()
 	assert.Nil(t, err)
 	seg0Count, err := reader0.Count()
 	assert.Nil(t, err)

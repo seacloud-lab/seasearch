@@ -26,10 +26,9 @@ import (
 const internalVecField = "vec"
 
 type VecSegment struct {
-	baseIndex      VectorIndex
-	ref            *meta.VectorSegment
-	vecStoreWriter *bluge.Writer
-	index          faiss.Index
+	baseIndex VectorIndex
+	ref       *meta.VectorSegment
+	index     faiss.Index
 	// cache for search
 	cachedVectorsCache []float32
 	// vector idx -> docId
@@ -53,12 +52,20 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 	}
 	// load faiss index
 	if ref.Status == vector.StatusSealed {
-		err = seg.loadFaissIndexFile()
+		err := seg.loadFaissIndexFile()
 		if err != nil {
 			return nil, fmt.Errorf("open seg faiss index err: %w", err)
 		}
 	}
 	return seg, nil
+}
+
+func (s *VecSegment) loadVectorStore() error {
+	w, err := s.openWriter()
+	if err != nil {
+		return err
+	}
+	return w.Close()
 }
 
 func (s *VecSegment) saveFaissIndex() error {
@@ -94,11 +101,7 @@ func (s *VecSegment) loadFaissIndexFile() error {
 	return err
 }
 
-func (s *VecSegment) getFaissVecStorePath() string {
-	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
-}
-
-func (s *VecSegment) loadVectorStore() error {
+func (s *VecSegment) openWriter() (*bluge.Writer, error) {
 	dataPath := config.Global.DataPath
 	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
@@ -110,11 +113,40 @@ func (s *VecSegment) loadVectorStore() error {
 	case "oss":
 		cfg = directory.GetOssConfig(dataPath, name)
 	default:
-		return fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
+		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
 	}
-	var err error
-	s.vecStoreWriter, err = bluge.OpenWriter(cfg)
-	return err
+
+	writer, err := bluge.OpenWriter(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return writer, nil
+}
+
+func (s *VecSegment) openReader() (*bluge.Reader, error) {
+	dataPath := config.Global.DataPath
+	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
+	var cfg bluge.Config
+	switch config.Global.StorageType {
+	case "disk":
+		cfg = directory.GetDiskConfig(dataPath, name)
+	case "s3":
+		cfg = directory.GetS3Config(dataPath, name)
+	case "oss":
+		cfg = directory.GetOssConfig(dataPath, name)
+	default:
+		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
+	}
+
+	reader, err := bluge.OpenReader(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (s *VecSegment) getFaissVecStorePath() string {
+	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
 }
 
 func (s *VecSegment) Batch(batch *segBatch) error {
@@ -148,7 +180,13 @@ func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 		doc.AddField(bluge.NewStoredOnlyField(internalVecField, zutils.VectorToBytes(vec)))
 		batch.Insert(doc)
 	}
-	err := s.vecStoreWriter.Batch(batch)
+	writer, err := s.openWriter()
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	err = writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("add vectors to bluge err: %w", err)
 	}
@@ -173,7 +211,12 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 	for _, id := range ids {
 		batch.Delete(bluge.Identifier(base62.Encode(id)))
 	}
-	err := s.vecStoreWriter.Batch(batch)
+	writer, err := s.openWriter()
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	err = writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("remove seg bluge index err: %w", err)
 	}
@@ -183,7 +226,7 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 // GetExistsIds
 // Filter out the id that exists in this segment. It‘s lock free.
 func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
-	r, err := s.vecStoreWriter.Reader()
+	r, err := s.openReader()
 	defer func() {
 		_ = r.Close()
 	}()
@@ -226,7 +269,7 @@ func (s *VecSegment) save() error {
 		s.freeCache()
 
 		// update count
-		r, err := s.vecStoreWriter.Reader()
+		r, err := s.openReader()
 		if err != nil {
 			return err
 		}
@@ -245,7 +288,6 @@ func (s *VecSegment) save() error {
 }
 
 func (s *VecSegment) Free() {
-	_ = s.vecStoreWriter.Close()
 	if s.index != nil {
 		s.index.Delete()
 	}
@@ -502,7 +544,7 @@ func (s *VecSegment) getAllVectors() ([]float32, []int64, error) {
 }
 
 func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
-	reader, err := s.vecStoreWriter.Reader()
+	reader, err := s.openReader()
 	defer func() {
 		_ = reader.Close()
 	}()
