@@ -22,7 +22,12 @@ type OssStorage struct {
 
 func (o *OssStorage) ExistsFile(name string) (bool, error) {
 	key := path.Join(o.prefix, name, getFileName())
-	return o.cli.Exist(context.Background(), key)
+	exists, err := o.cli.Exist(context.Background(), key)
+	if err != nil {
+		log.Error().Err(err).Msgf("check vec index exists %s err: ", name)
+		return false, err
+	}
+	return exists, nil
 }
 
 func (o *OssStorage) LoadFile(name string) (string, io.Closer, error) {

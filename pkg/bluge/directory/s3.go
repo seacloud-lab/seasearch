@@ -71,9 +71,15 @@ func createS3Client() (objclient.Client, error) {
 		objConf.Key = config.Global.S3.AccessSecret
 		objConf.Bucket = config.Global.S3.Bucket
 		objConf.Endpoint = config.Global.S3.Endpoint
-		objConf.V4Signature = fmt.Sprint(config.Global.S3.UseV4Signature)
-		objConf.HTTPS = fmt.Sprint(config.Global.S3.UseHttps)
-		objConf.PathStyleRequest = fmt.Sprint(config.Global.S3.PathStyleRequest)
+		if config.Global.S3.UseV4Signature != "" {
+			objConf.V4Signature = config.Global.S3.UseV4Signature
+		}
+		if config.Global.S3.UseHttps != "" {
+			objConf.HTTPS = config.Global.S3.UseHttps
+		}
+		if config.Global.S3.PathStyleRequest != "" {
+			objConf.PathStyleRequest = config.Global.S3.PathStyleRequest
+		}
 		objConf.Region = config.Global.S3.AwsRegion
 		objConf.SSECKey = config.Global.S3.SsecKey
 		s3cli, err = objclient.NewS3Client(objConf)

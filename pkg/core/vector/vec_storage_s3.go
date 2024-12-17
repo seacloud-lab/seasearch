@@ -22,7 +22,12 @@ type s3Storage struct {
 
 func (s *s3Storage) ExistsFile(name string) (bool, error) {
 	key := path.Join(s.prefix, name, getFileName())
-	return s.cli.Exist(context.Background(), key)
+	exists, err := s.cli.Exist(context.Background(), key)
+	if err != nil {
+		log.Error().Err(err).Msgf("check vec index exists %s err: ", name)
+		return false, err
+	}
+	return exists, nil
 }
 
 func (s *s3Storage) LoadFile(name string) (string, io.Closer, error) {
@@ -139,9 +144,15 @@ func createS3Client() (objclient.Client, error) {
 	objConf.KeyID = config.Global.S3.AccessId
 	objConf.Key = config.Global.S3.AccessSecret
 	objConf.Bucket = config.Global.S3.Bucket
-	objConf.V4Signature = fmt.Sprint(config.Global.S3.UseV4Signature)
-	objConf.HTTPS = fmt.Sprint(config.Global.S3.UseHttps)
-	objConf.PathStyleRequest = fmt.Sprint(config.Global.S3.PathStyleRequest)
+	if config.Global.S3.UseV4Signature != "" {
+		objConf.V4Signature = config.Global.S3.UseV4Signature
+	}
+	if config.Global.S3.UseHttps != "" {
+		objConf.HTTPS = config.Global.S3.UseHttps
+	}
+	if config.Global.S3.PathStyleRequest != "" {
+		objConf.PathStyleRequest = config.Global.S3.PathStyleRequest
+	}
 	objConf.Endpoint = config.Global.S3.Endpoint
 	objConf.Region = config.Global.S3.AwsRegion
 	objConf.SSECKey = config.Global.S3.SsecKey

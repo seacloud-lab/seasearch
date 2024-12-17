@@ -98,9 +98,9 @@ type s3 struct {
 	AccessSecret     string `env:"SS_S3_ACCESS_SECRET"`
 	Bucket           string `env:"SS_S3_BUCKET"`
 	Endpoint         string `env:"SS_S3_ENDPOINT"`
-	UseV4Signature   bool   `env:"SS_S3_USE_V4_SIGNATURE"`
-	UseHttps         bool   `env:"SS_S3_USE_HTTPS"`
-	PathStyleRequest bool   `env:"SS_S3_PATH_STYLE_REQUEST"`
+	UseV4Signature   string `env:"SS_S3_USE_V4_SIGNATURE"`
+	UseHttps         string `env:"SS_S3_USE_HTTPS"`
+	PathStyleRequest string `env:"SS_S3_PATH_STYLE_REQUEST"`
 	AwsRegion        string `env:"SS_S3_AWS_REGION"`
 	SsecKey          string `env:"SS_S3_SSE_C_KEY"`
 }
