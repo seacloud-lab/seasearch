@@ -365,6 +365,10 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 	if !ok {
 		return nil
 	}
+	defer func() {
+		_ = shard.Close()
+	}()
+
 	var writer *bluge.Writer
 	otherWriters := make([]*bluge.Writer, 0)
 	otherBatch := blugeindex.NewBatch()
@@ -512,6 +516,11 @@ func (w *walMergeDocs) WriteToShardRollback(shard *IndexShard, shardID int64, ba
 	if !ok {
 		return nil
 	}
+
+	defer func() {
+		_ = shard.Close()
+	}()
+
 	var writer *bluge.Writer
 	var err error
 	if shardID >= 0 {

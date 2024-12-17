@@ -185,6 +185,7 @@ func TestInitLruCache(t *testing.T) {
 	totalSize := int64(0)
 	for _, c := range m.caches {
 		totalSize += c.size
+		assert.Equal(t, m, c.ref)
 	}
 
 	assert.Equal(t, int64(1000), totalSize)

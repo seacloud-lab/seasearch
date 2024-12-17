@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/config"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -28,12 +29,20 @@ import (
 )
 
 func TestSearchV2(t *testing.T) {
+	config.Global.EnableWal = false
+	defer func() {
+		config.Global.EnableWal = true
+	}()
 	t.Run("init data for search", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(indexData)
 		resp := request("PUT", "/api/"+indexName+"/_doc", body)
 		assert.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias(indexAlias, []string{indexName}))
 		assert.Equal(t, http.StatusOK, resp.Code)
+		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate3")
+		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate2")
+		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate")
+		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate")
 	})
 
 	t.Run("POST /es/:target/_search", func(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -97,6 +98,9 @@ func (s *IndexShard) CheckShards() error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = s.Close()
+	}()
 	_, size := w.DirectoryStats()
 	if size > config.Global.Shard.MaxSize {
 		return s.NewShard()
@@ -153,6 +157,7 @@ func (s *IndexShard) NewShard() error {
 }
 
 // GetWriter return the newest shard writer or special shard writer
+// After using the writer, we should immediately call IndexShard.Close to release the writer
 func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	var id int64
 	if len(shardID) == 1 {
@@ -193,6 +198,7 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 }
 
 // GetWriters return all shard writers
+// After using the writer, we should immediately call IndexShard.Close to release the writer
 func (s *IndexShard) GetWriters() ([]*bluge.Writer, error) {
 	ws := make([]*bluge.Writer, 0, s.GetShardNum())
 	for i := int64(0); i < s.GetShardNum(); i++ {
@@ -206,6 +212,7 @@ func (s *IndexShard) GetWriters() ([]*bluge.Writer, error) {
 }
 
 // GetReaders return all shard readers
+// readers should be closed after using.
 func (s *IndexShard) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error) {
 	rs := make([]*bluge.Reader, 0, 1)
 	chs := make(chan *bluge.Reader, s.GetShardNum())
@@ -223,15 +230,13 @@ func (s *IndexShard) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error)
 			continue
 		}
 		eg.Go(func() error {
-			w, err := s.GetWriter(i)
+			r, err := s.openReader(i)
 			if err != nil {
 				return err
 			}
-			r, err := w.Reader()
-			if err != nil {
-				return err
+			if r != nil {
+				chs <- r
 			}
-			chs <- r
 			return nil
 		})
 		if sMin > 0 && sMin < timeMin {
@@ -266,6 +271,32 @@ func (s *IndexShard) openWriter(shardID int64) error {
 	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexName(), s.GetID(), shardID)
 	secondShard.writer, err = OpenIndexWriter(indexName, s.root.GetStorageType(), defaultSearchAnalyzer, 0, 0)
 	return err
+}
+
+// openReader
+// We open the reader directly through bluge to avoid getting it through the writer,
+// which can ensure that the resources corresponding to the reader are released in time.
+func (s *IndexShard) openReader(shardID int64) (*bluge.Reader, error) {
+	var defaultSearchAnalyzer *analysis.Analyzer
+	analyzers := s.root.GetAnalyzers()
+	if analyzers != nil {
+		defaultSearchAnalyzer = analyzers["default"]
+	}
+	var err error
+	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexName(), s.GetID(), shardID)
+	cfg, err := getOpenConfig(indexName, s.root.GetStorageType(), defaultSearchAnalyzer, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	r, err := bluge.OpenReader(cfg)
+	if err != nil {
+		// it's a new empty index, without any document
+		if errors.Is(err, directory.ErrPathNotExists) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open %s %s err: %w", s.root.GetName(), s.GetID(), err)
+	}
+	return r, nil
 }
 
 func (s *IndexShard) Close() error {
@@ -320,6 +351,9 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 	// check id store by which shard
 	shardID := int64(-1)
 	writers, err := s.GetWriters()
+	defer func() {
+		_ = s.Close()
+	}()
 	if err != nil {
 		return shardID, err
 	}
@@ -376,6 +410,9 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		_ = s.Close()
+	}()
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
