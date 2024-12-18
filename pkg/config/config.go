@@ -122,7 +122,7 @@ type shard struct {
 	// DefaultNum is the default number of shards.
 	Num int64 `env:"ZINC_SHARD_NUM,default=1"`
 	// MaxSize is the maximum size limit for one shard, or will create a new shard.
-	MaxSize uint64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
+	MaxSize int64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
 	// LoadObjGoroutineNum concurrently load index from Obj storage
 	LoadObjGoroutineNum int `env:"SS_SHARD_LOAD_OBJS_GOROUTINE_NUM,default=10"`
 }

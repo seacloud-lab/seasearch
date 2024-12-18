@@ -56,11 +56,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 		i++
 	}
 
-	readers, err := zincIndex.GetReaders(0, 0)
-	if err != nil {
-		return nil, err
-	}
-
+	readerOpeners := zincIndex.GetReaderOpeners()
 	// query document by Id
 	query := &meta.ZincQuery{
 		Query: &meta.Query{
@@ -81,7 +77,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 			}
 		}
 	}
-	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, zincIndex.GetAllShardNum(), ToSearcher(readers)...)
+	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, zincIndex.GetAllShardNum(), readerOpeners)
 	if err != nil {
 		return nil, err
 	}

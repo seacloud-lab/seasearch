@@ -366,7 +366,7 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 		return nil
 	}
 	defer func() {
-		_ = shard.Close()
+		shard.CloseWriter()
 	}()
 
 	var writer *bluge.Writer
@@ -518,7 +518,7 @@ func (w *walMergeDocs) WriteToShardRollback(shard *IndexShard, shardID int64, ba
 	}
 
 	defer func() {
-		_ = shard.Close()
+		shard.CloseWriter()
 	}()
 
 	var writer *bluge.Writer

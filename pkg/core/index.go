@@ -16,11 +16,13 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
+	"github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"golang.org/x/sync/errgroup"
 
@@ -283,6 +285,63 @@ func (index *Index) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error) 
 		}
 	}
 	return readers, nil
+}
+
+type ReaderOpener struct {
+	shard         *IndexShard
+	secondShardId int64
+}
+
+func (o *ReaderOpener) GetReader() (search.Searcher, error) {
+	r, err := o.shard.openReader(o.secondShardId)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, nil
+	}
+	return r, nil
+}
+func (o *ReaderOpener) GetId() int64 {
+	return o.secondShardId
+}
+
+type UnifiedReaderOpener struct {
+	getReader search.ReaderOpener
+	stats     *search.UnifiedStats
+}
+
+func (u *UnifiedReaderOpener) GetReader() (search.Searcher, error) {
+	r, err := u.getReader.GetReader()
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, nil
+	}
+	br, _ := r.(*bluge.Reader)
+	if br == nil {
+		return nil, fmt.Errorf("invalid reader: %T", r)
+	}
+	return search.NewUnifiedSearcher(br, u.stats), nil
+}
+func (u *UnifiedReaderOpener) GetId() int64 {
+	return u.getReader.GetId()
+}
+
+// GetReaderOpeners
+// used for lazy getting reader, the reader won't be loaded until GetReader() be called.
+func (index *Index) GetReaderOpeners() []search.ReaderOpener {
+	result := make([]search.ReaderOpener, 0, index.GetAllShardNum())
+	for _, shard := range index.shards {
+		for i := shard.GetLatestShardID(); i >= 0; i-- {
+			result = append(result, &ReaderOpener{
+				shard:         shard,
+				secondShardId: i,
+			})
+		}
+	}
+	return result
 }
 
 // UpdateMetadata update index metadata, mainly docNum and storageSize

@@ -86,6 +86,7 @@ func TestVecIndex(t *testing.T) {
 	// config.Global.Oss.Bucket = ""
 	// config.Global.Oss.Endpoint = ""
 	lru_cache.Init()
+	go lazyCloseSegment()
 	defer func() {
 		config.Global.StorageType = "disk"
 		lru_cache.ShutDown()

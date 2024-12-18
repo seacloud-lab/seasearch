@@ -21,18 +21,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zincsearch/zincsearch/pkg/config"
-
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
 func TestSearchV2(t *testing.T) {
-	config.Global.EnableWal = false
-	defer func() {
-		config.Global.EnableWal = true
-	}()
 	t.Run("init data for search", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(indexData)

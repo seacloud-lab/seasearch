@@ -59,6 +59,7 @@ func init() {
 	ZINC_INDEX_LIST.gcCloser = z.NewCloser(1)
 
 	go ZINC_INDEX_LIST.StartGC()
+	go LazyCloseIndexShard()
 
 	// in cluster mode, we load metadata later when assigns ready
 	if config.Global.ServerMode != config.ServerModeCluster {

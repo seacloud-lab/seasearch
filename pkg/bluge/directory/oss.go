@@ -212,6 +212,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 		_, err = w.WriteTo(writer, closeCh)
 		if err != nil {
 			ch <- fmt.Errorf("write to file error: %w", err)
+			_ = writer.Close()
 			return
 		}
 

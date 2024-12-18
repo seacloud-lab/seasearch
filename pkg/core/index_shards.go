@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
+	"github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -99,10 +101,10 @@ func (s *IndexShard) CheckShards() error {
 		return err
 	}
 	defer func() {
-		_ = s.Close()
+		s.CloseWriter()
 	}()
 	_, size := w.DirectoryStats()
-	if size > config.Global.Shard.MaxSize {
+	if size > uint64(config.Global.Shard.MaxSize) {
 		return s.NewShard()
 	}
 	return nil
@@ -157,7 +159,7 @@ func (s *IndexShard) NewShard() error {
 }
 
 // GetWriter return the newest shard writer or special shard writer
-// After using the writer, we should immediately call IndexShard.Close to release the writer
+// After using the writer, we should immediately call IndexShard.CloseWriter to release the writer
 func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	var id int64
 	if len(shardID) == 1 {
@@ -194,11 +196,12 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	secondShard.lock.RLock()
 	w = secondShard.writer
 	secondShard.lock.RUnlock()
+	reopenChannel <- s
 	return w, nil
 }
 
 // GetWriters return all shard writers
-// After using the writer, we should immediately call IndexShard.Close to release the writer
+// After using the writer, we should immediately call IndexShard.CloseWriter to release the writer
 func (s *IndexShard) GetWriters() ([]*bluge.Writer, error) {
 	ws := make([]*bluge.Writer, 0, s.GetShardNum())
 	for i := int64(0); i < s.GetShardNum(); i++ {
@@ -251,6 +254,17 @@ func (s *IndexShard) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error)
 		rs = append(rs, r)
 	}
 	return rs, nil
+}
+
+func (s *IndexShard) GetReaderOpener() []search.ReaderOpener {
+	result := make([]search.ReaderOpener, 0)
+	for i := s.GetLatestShardID(); i >= 0; i-- {
+		result = append(result, &ReaderOpener{
+			shard:         s,
+			secondShardId: i,
+		})
+	}
+	return result
 }
 
 func (s *IndexShard) openWriter(shardID int64) error {
@@ -326,6 +340,10 @@ func (s *IndexShard) Close() error {
 	return nil
 }
 
+func (s *IndexShard) CloseWriter() {
+	closeChannel <- s
+}
+
 func (s *IndexShard) SetTimestamp(t int64) {
 	s.root.lock.Lock()
 	defer s.root.lock.Unlock()
@@ -350,29 +368,36 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 
 	// check id store by which shard
 	shardID := int64(-1)
-	readers, err := s.GetReaders(0, 0)
-	if err != nil {
-		return shardID, err
-	}
+	readerOpeners := s.GetReaderOpener()
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	for id := int64(len(readers)) - 1; id >= 0; id-- {
-		id := id
-		r := readers[id]
+	for _, opener := range readerOpeners {
+		opener := opener
 		eg.Go(func() error {
-			defer r.Close()
+			r, err := opener.GetReader()
+			if err != nil {
+				return err
+			}
+			// new shard without any documents
+			if r == nil {
+				return nil
+			}
+			defer func() {
+				_ = r.Close()
+			}()
+
 			dmi, err := r.Search(ctx, request)
 			if err != nil {
 				log.Error().Err(err).
 					Str("index", s.GetIndexName()).
 					Str("shard", s.GetID()).
-					Int64("second shard", id).
+					Int64("second shard", opener.GetId()).
 					Msg("failed to do search")
 				return nil // not check err, if returns err with cancel all goroutines.
 			}
 			if dmi.Aggregations().Count() > 0 {
-				shardID = id
+				shardID = opener.GetId()
 				return errors.ErrCancelSignal // check err, if returns err with cancel other all goroutines.
 			}
 			return nil
@@ -394,27 +419,30 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 
 	// check id store by which shard
 	var hit *meta.Hit
-	readers, err := s.GetReaders(0, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = s.Close()
-	}()
+	readerOpeners := s.GetReaderOpener()
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	for id := int64(len(readers)) - 1; id >= 0; id-- {
-		id := id
-		r := readers[id]
+	for _, opener := range readerOpeners {
+		opener := opener
 		eg.Go(func() error {
-			defer r.Close()
+			r, err := opener.GetReader()
+			if err != nil {
+				return err
+			}
+			// new shard without any document
+			if r == nil {
+				return nil
+			}
+			defer func() {
+				_ = r.Close()
+			}()
 			dmi, err := r.Search(ctx, request)
 			if err != nil {
 				log.Error().Err(err).
 					Str("index", s.GetIndexName()).
 					Str("shard", s.GetID()).
-					Int64("second shard", id).
+					Int64("second shard", opener.GetId()).
 					Msg("failed to do search")
 				return nil // not check err, if returns err with cancel all goroutines.
 			}
@@ -454,4 +482,63 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 		return nil, errors.ErrorIDNotFound
 	}
 	return hit, nil
+}
+
+var closeChannel = make(chan *IndexShard, 10)
+var reopenChannel = make(chan *IndexShard, 10)
+
+const expireTime = 5 * time.Minute
+
+type tempShardClose struct {
+	shard     *IndexShard
+	closeTime time.Time
+}
+
+func LazyCloseIndexShard() {
+	closeMap := make(map[string]tempShardClose)
+	mutex := sync.Mutex{}
+	go func() {
+		for {
+			select {
+			case needClose := <-closeChannel:
+				mutex.Lock()
+				closeMap[needClose.name] = tempShardClose{
+					shard:     needClose,
+					closeTime: time.Now(),
+				}
+				mutex.Unlock()
+			case reopen := <-reopenChannel:
+				mutex.Lock()
+				delete(closeMap, reopen.name)
+				mutex.Unlock()
+			}
+		}
+	}()
+	ticker := time.NewTicker(5 * time.Second)
+	for t := range ticker.C {
+		closeList := make([]tempShardClose, 0)
+		mutex.Lock()
+		for key, shd := range closeMap {
+			if shd.closeTime.Add(expireTime).Before(t) {
+				closeList = append(closeList, shd)
+				delete(closeMap, key)
+			}
+		}
+		mutex.Unlock()
+		for _, shd := range closeList {
+			shd.shard.lock.Lock()
+			for _, secondShard := range shd.shard.shards {
+				if secondShard.writer == nil {
+					continue
+				}
+				if err := secondShard.writer.Close(); err != nil {
+					log.Error().Err(err).Msgf("close writer for %s err:", shd.shard.name)
+					continue
+				}
+				secondShard.writer = nil
+			}
+			shd.shard.lock.Unlock()
+			log.Info().Msgf("lazy close shard writer %s finsihed", shd.shard.name)
+		}
+	}
 }

@@ -19,12 +19,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/rs/zerolog/log"
-
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
-	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 )
 
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
@@ -39,13 +36,7 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 		return nil, err
 	}
 
-	timeMin, timeMax := timerange.Query(query.Query)
-	readers, err := index.GetReaders(timeMin, timeMax)
-	if err != nil {
-		log.Printf("index.SearchV2: error accessing reader: %s", err.Error())
-		return nil, err
-	}
-
+	readerOpeners := index.GetReaderOpeners()
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if query.Timeout > 0 {
@@ -54,5 +45,5 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), ToSearcher(readers)...)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), readerOpeners)
 }

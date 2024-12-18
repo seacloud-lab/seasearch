@@ -226,6 +226,7 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 		_, err = w.WriteTo(writer, closeCh)
 		if err != nil {
 			ch <- fmt.Errorf("write to file error: %w", err)
+			_ = writer.Close()
 			return
 		}
 

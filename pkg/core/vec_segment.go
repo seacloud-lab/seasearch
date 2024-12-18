@@ -8,6 +8,7 @@ import (
 	"path"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/blugelabs/bluge"
@@ -26,9 +27,10 @@ import (
 const internalVecField = "vec"
 
 type VecSegment struct {
-	baseIndex VectorIndex
-	ref       *meta.VectorSegment
-	index     faiss.Index
+	baseIndex      VectorIndex
+	ref            *meta.VectorSegment
+	vecStoreWriter *bluge.Writer
+	index          faiss.Index
 	// cache for search
 	cachedVectorsCache []float32
 	// vector idx -> docId
@@ -37,6 +39,8 @@ type VecSegment struct {
 	// for growing segment, the lock is used for synchronizing cache.
 	// for sealed segment, the lock is used for avoiding concurrent read and write for faiss index.
 	sync.RWMutex
+
+	writerLock sync.Mutex
 }
 
 func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
@@ -46,7 +50,7 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 		baseIndex: vecIndex,
 	}
 	// first load vector store
-	err := seg.loadVectorStore()
+	err := seg.initPath()
 	if err != nil {
 		return nil, fmt.Errorf("open seg bluge store err: %w", err)
 	}
@@ -60,12 +64,13 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 	return seg, nil
 }
 
-func (s *VecSegment) loadVectorStore() error {
-	w, err := s.openWriter()
+func (s *VecSegment) initPath() error {
+	p := path.Join(config.Global.DataPath, path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec"))
+	err := os.MkdirAll(p, 0777)
 	if err != nil {
-		return err
+		return fmt.Errorf("init path err: error creating directory '%s': %w", p, err)
 	}
-	return w.Close()
+	return nil
 }
 
 func (s *VecSegment) saveFaissIndex() error {
@@ -102,6 +107,12 @@ func (s *VecSegment) loadFaissIndexFile() error {
 }
 
 func (s *VecSegment) openWriter() (*bluge.Writer, error) {
+	s.writerLock.Lock()
+	w := s.vecStoreWriter
+	s.writerLock.Unlock()
+	if w != nil {
+		return w, nil
+	}
 	dataPath := config.Global.DataPath
 	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
@@ -120,7 +131,19 @@ func (s *VecSegment) openWriter() (*bluge.Writer, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.writerLock.Lock()
+	s.vecStoreWriter = writer
+	s.writerLock.Unlock()
+	reopenVecChannel <- s
 	return writer, nil
+}
+
+func (s *VecSegment) closeWriter() {
+	closeVecChannel <- s
+}
+
+func (s *VecSegment) getName() string {
+	return fmt.Sprintf("%s_%d", s.baseIndex.Name(), s.ref.Id)
 }
 
 func (s *VecSegment) openReader() (*bluge.Reader, error) {
@@ -184,7 +207,7 @@ func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 	if err != nil {
 		return err
 	}
-	defer writer.Close()
+	defer s.closeWriter()
 
 	err = writer.Batch(batch)
 	if err != nil {
@@ -215,7 +238,7 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 	if err != nil {
 		return err
 	}
-	defer writer.Close()
+	defer s.closeWriter()
 	err = writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("remove seg bluge index err: %w", err)
@@ -291,6 +314,12 @@ func (s *VecSegment) Free() {
 	if s.index != nil {
 		s.index.Delete()
 	}
+	s.writerLock.Lock()
+	if s.vecStoreWriter != nil {
+		_ = s.vecStoreWriter.Close()
+	}
+	s.writerLock.Unlock()
+
 	s.Lock()
 	s.freeCache()
 	s.Unlock()
@@ -581,4 +610,54 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 	}
 
 	return vectors, ids, nil
+}
+
+var closeVecChannel = make(chan *VecSegment, 10)
+var reopenVecChannel = make(chan *VecSegment, 10)
+
+type tempSegClose struct {
+	segment   *VecSegment
+	closeTime time.Time
+}
+
+func lazyCloseSegment() {
+	closeMap := make(map[string]tempSegClose)
+	mutex := sync.Mutex{}
+	go func() {
+		for {
+			select {
+			case needClose := <-closeVecChannel:
+				mutex.Lock()
+				closeMap[needClose.getName()] = tempSegClose{
+					segment:   needClose,
+					closeTime: time.Now(),
+				}
+				mutex.Unlock()
+			case reopen := <-reopenVecChannel:
+				mutex.Lock()
+				delete(closeMap, reopen.getName())
+				mutex.Unlock()
+			}
+		}
+	}()
+	ticker := time.NewTicker(5 * time.Second)
+	for t := range ticker.C {
+		closeList := make([]tempSegClose, 0)
+		mutex.Lock()
+		for key, vec := range closeMap {
+			if vec.closeTime.Add(expireTime).Before(t) {
+				closeList = append(closeList, vec)
+				delete(closeMap, key)
+			}
+		}
+		mutex.Unlock()
+		for _, tempVec := range closeList {
+			tempVec.segment.writerLock.Lock()
+			if tempVec.segment.vecStoreWriter != nil {
+				_ = tempVec.segment.vecStoreWriter.Close()
+				tempVec.segment.vecStoreWriter = nil
+			}
+			tempVec.segment.writerLock.Unlock()
+		}
+	}
 }
