@@ -19,7 +19,6 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/blugelabs/bluge"
@@ -38,23 +37,15 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 )
 
-// ReaderOpener
-// used for lazy load readers
-// it won't load reader until GetReader() be called
-type ReaderOpener interface {
-	GetReader() (Searcher, error)
-	GetId() int64
-}
-
 func MultiSearch(
 	ctx context.Context,
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
 	shardNum int64,
-	readerOpeners []ReaderOpener,
+	searchers ...Searcher,
 ) (*meta.SearchResponse, error) {
-	if len(readerOpeners) == 0 {
+	if len(searchers) == 0 {
 		return &meta.SearchResponse{
 			Hits: meta.Hits{
 				Hits: []meta.Hit{},
@@ -62,28 +53,12 @@ func MultiSearch(
 					Value: 0,
 				}},
 			Took:   0,
-			Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(readerOpeners))},
+			Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(searchers))},
 		}, nil
 	}
 	// for single reader, we just get result directly.
-	if len(readerOpeners) == 1 {
-		reader, err := readerOpeners[0].GetReader()
-		if err != nil {
-			return nil, fmt.Errorf("open reader err: %w", err)
-		}
-		// there is not any document
-		if reader == nil {
-			return &meta.SearchResponse{
-				Hits: meta.Hits{
-					Hits: []meta.Hit{},
-					Total: meta.Total{
-						Value: 0,
-					}},
-				Took:   0,
-				Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(readerOpeners))},
-			}, nil
-		}
-		return getSingleReaderResult(ctx, query, mappings, analyzers, shardNum, reader)
+	if len(searchers) == 1 {
+		return getSingleReaderResult(ctx, query, mappings, analyzers, shardNum, searchers[0])
 	}
 
 	// for multi-reader we need to use heap sort to combine all the results,
@@ -93,8 +68,8 @@ func MultiSearch(
 
 	eg := &errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	docs := make(chan *Document, len(readerOpeners)*10)
-	aggs := make(chan *search.Bucket, len(readerOpeners))
+	docs := make(chan *Document, len(searchers)*10)
+	aggs := make(chan *search.Bucket, len(searchers))
 
 	docList := &DocumentList{
 		bucket: search.NewBucket("", bucketAggs),
@@ -135,38 +110,26 @@ func MultiSearch(
 		}
 	}
 
-	openedMutex := sync.Mutex{}
-	opened := make([]Searcher, 0)
 	defer func() {
-		for _, r := range opened {
+		for _, r := range searchers {
 			_ = r.Close()
 		}
 	}()
 
-	for _, opener := range readerOpeners {
+	for _, searcher := range searchers {
 		// A new request is created for each reader. Query is not modified concurrently.
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
 			return nil, err
 		}
-		opener := opener
+		searcher := searcher
 		eg.Go(func() error {
-			r, err := opener.GetReader()
-			if err != nil {
-				return fmt.Errorf("open reader err: %w", err)
-			}
-			// new shard without any document
-			if r == nil {
-				return nil
-			}
 			defer func() {
-				_ = r.Close()
+				_ = searcher.Close()
 			}()
-			openedMutex.Lock()
-			opened = append(opened, r)
-			openedMutex.Unlock()
+
 			var n int64
-			dmi, err := r.Search(ctx, req)
+			dmi, err := searcher.Search(ctx, req)
 			if err != nil {
 				return err
 			}
@@ -217,7 +180,7 @@ func MultiSearch(
 		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
 	}
 	resp.Took = int(docList.Aggregations().Duration().Milliseconds())
-	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(len(readerOpeners)), Skipped: shardNum - int64(len(readerOpeners))}
+	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(len(searchers)), Skipped: shardNum - int64(len(searchers))}
 	resp.Hits.Total = meta.Total{Value: int(docList.Aggregations().Count())}
 	resp.Hits.MaxScore = docList.Aggregations().Metric("max_score")
 	if err := uquery.FormatResponse(resp, query, docList.Aggregations()); err != nil {

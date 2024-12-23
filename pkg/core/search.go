@@ -22,6 +22,7 @@ import (
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
+	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 )
 
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
@@ -36,7 +37,8 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 		return nil, err
 	}
 
-	readerOpeners := index.GetReaderOpeners()
+	timeMin, timeMax := timerange.Query(query.Query)
+	searchers := index.GetSearchers(timeMin, timeMax)
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if query.Timeout > 0 {
@@ -45,5 +47,5 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), readerOpeners)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
 }

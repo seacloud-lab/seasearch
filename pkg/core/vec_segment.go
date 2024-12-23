@@ -40,7 +40,9 @@ type VecSegment struct {
 	// for sealed segment, the lock is used for avoiding concurrent read and write for faiss index.
 	sync.RWMutex
 
-	writerLock sync.Mutex
+	writerLock     sync.RWMutex
+	writerRefCount int64
+	closeTime      time.Time
 }
 
 func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
@@ -111,6 +113,7 @@ func (s *VecSegment) openWriter() (*bluge.Writer, error) {
 	w := s.vecStoreWriter
 	s.writerLock.Unlock()
 	if w != nil {
+		atomic.AddInt64(&s.writerRefCount, 1)
 		return w, nil
 	}
 	dataPath := config.Global.DataPath
@@ -134,12 +137,15 @@ func (s *VecSegment) openWriter() (*bluge.Writer, error) {
 	s.writerLock.Lock()
 	s.vecStoreWriter = writer
 	s.writerLock.Unlock()
-	reopenVecChannel <- s
+	atomic.AddInt64(&s.writerRefCount, 1)
 	return writer, nil
 }
 
 func (s *VecSegment) closeWriter() {
-	closeVecChannel <- s
+	s.writerLock.Lock()
+	s.closeTime = time.Now()
+	s.writerLock.Unlock()
+	atomic.AddInt64(&s.writerRefCount, -1)
 }
 
 func (s *VecSegment) getName() string {
@@ -612,52 +618,30 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 	return vectors, ids, nil
 }
 
-var closeVecChannel = make(chan *VecSegment, 10)
-var reopenVecChannel = make(chan *VecSegment, 10)
-
-type tempSegClose struct {
-	segment   *VecSegment
-	closeTime time.Time
-}
-
-func lazyCloseSegment() {
-	closeMap := make(map[string]tempSegClose)
-	mutex := sync.Mutex{}
-	go func() {
-		for {
-			select {
-			case needClose := <-closeVecChannel:
-				mutex.Lock()
-				closeMap[needClose.getName()] = tempSegClose{
-					segment:   needClose,
-					closeTime: time.Now(),
-				}
-				mutex.Unlock()
-			case reopen := <-reopenVecChannel:
-				mutex.Lock()
-				delete(closeMap, reopen.getName())
-				mutex.Unlock()
-			}
+func lazyCloseSegmentWriter() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		closeList := make([]*VecSegment, 0)
+		vecIdxManager.lock.Lock()
+		for _, vec := range vecIdxManager.cache {
+			closeList = append(closeList, vec.ListSegment()...)
 		}
-	}()
-	ticker := time.NewTicker(5 * time.Second)
-	for t := range ticker.C {
-		closeList := make([]tempSegClose, 0)
-		mutex.Lock()
-		for key, vec := range closeMap {
-			if vec.closeTime.Add(expireTime).Before(t) {
-				closeList = append(closeList, vec)
-				delete(closeMap, key)
+		vecIdxManager.lock.Unlock()
+
+		for _, segment := range closeList {
+			segment.writerLock.RLock()
+			w := segment.vecStoreWriter
+			refCount := segment.writerRefCount
+			closeTime := segment.closeTime
+			segment.writerLock.RUnlock()
+
+			if refCount == 0 && time.Since(closeTime) > 5*time.Minute {
+				segment.writerLock.Lock()
+				segment.vecStoreWriter = nil
+				segment.writerLock.Unlock()
+				_ = w.Close()
+				log.Debug().Msgf("lazy lose vec index %s", segment.getName())
 			}
-		}
-		mutex.Unlock()
-		for _, tempVec := range closeList {
-			tempVec.segment.writerLock.Lock()
-			if tempVec.segment.vecStoreWriter != nil {
-				_ = tempVec.segment.vecStoreWriter.Close()
-				tempVec.segment.vecStoreWriter = nil
-			}
-			tempVec.segment.writerLock.Unlock()
 		}
 	}
 }

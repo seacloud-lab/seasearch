@@ -33,10 +33,6 @@ func TestSearchV2(t *testing.T) {
 		resp := request("PUT", "/api/"+indexName+"/_doc", body)
 		assert.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias(indexAlias, []string{indexName}))
 		assert.Equal(t, http.StatusOK, resp.Code)
-		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate3")
-		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate2")
-		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate")
-		core.ZINC_INDEX_LIST.Delete("notExistIndexCreate")
 	})
 
 	t.Run("POST /es/:target/_search", func(t *testing.T) {

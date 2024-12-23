@@ -76,7 +76,7 @@ func InitVecIndexManager() {
 
 	go backgroundSeal()
 
-	go lazyCloseSegment()
+	go lazyCloseSegmentWriter()
 }
 
 func CloseVecIndexManager() {

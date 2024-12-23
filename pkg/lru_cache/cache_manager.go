@@ -195,7 +195,7 @@ func (c *LruCache) makeRoomForCacheFile() error {
 // the filePath is the absolute path of cache file.
 func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, error) {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 // the filePath is the absolute path of cache file.
 func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) error {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,9 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 	return f, true
 }
 
-func (c *LruCache) Setup(path string, readOnly bool) error {
+// Setup
+// just make sure the directory is ready.
+func (c *LruCache) Setup(path string) error {
 	dirExists, err := dirExists(path)
 	if err != nil {
 		log.Error().Err(err).Msgf("Setup %s err: check dir exists err: ", path)
@@ -404,7 +406,7 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
 		return nil, fmt.Errorf("open cache writer err: %w", err)
 	}

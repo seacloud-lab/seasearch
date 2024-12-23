@@ -28,7 +28,7 @@ func TestIndexList_List(t *testing.T) {
 	assert.False(t, exist)
 	assert.NotNil(t, index)
 
-	rs, err := index.GetReaders(0, 0)
+	rs := index.GetSearchers(0, 0)
 	defer func() {
 		for _, r := range rs {
 			r.Close()
