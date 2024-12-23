@@ -70,10 +70,10 @@ func initPermissionCache() error {
 
 func initFirstUser() error {
 	// create default user from environment variable
-	adminUser := os.Getenv("ZINC_FIRST_ADMIN_USER")
-	adminPassword := os.Getenv("ZINC_FIRST_ADMIN_PASSWORD")
+	adminUser := os.Getenv("SS_FIRST_ADMIN_USER")
+	adminPassword := os.Getenv("SS_FIRST_ADMIN_PASSWORD")
 	if adminUser == "" || adminPassword == "" {
-		return errors.New("ZINC_FIRST_ADMIN_USER and ZINC_FIRST_ADMIN_PASSWORD must be set on first start. You should also change the credentials after first login")
+		return errors.New("SS_FIRST_ADMIN_USER and SS_FIRST_ADMIN_PASSWORD must be set on first start. You should also change the credentials after first login")
 	}
 
 	_, err := CreateUser(adminUser, adminUser, adminPassword, "admin")

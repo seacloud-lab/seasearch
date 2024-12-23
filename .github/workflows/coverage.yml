@@ -4,8 +4,8 @@ jobs:
   Codecov-coverage:
     runs-on: ubuntu-latest
     env:
-      ZINC_FIRST_ADMIN_USER: admin
-      ZINC_FIRST_ADMIN_PASSWORD: Complexpass#123
+      SS_FIRST_ADMIN_USER: admin
+      SS_FIRST_ADMIN_PASSWORD: Complexpass#123
       ZINC_WAL_SYNC_INTERVAL: 10ms
       ZINC_WAL_REDOLOG_NO_SYNC: true
       ZINC_ENABLE_TEXT_KEYWORD_MAPPING: true

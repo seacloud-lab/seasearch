@@ -42,8 +42,8 @@ func TestInitFirstUser(t *testing.T) {
 			name: "init first user with error",
 			args: args{
 				init: func() {
-					os.Setenv("ZINC_FIRST_ADMIN_USER", "")
-					os.Setenv("ZINC_FIRST_ADMIN_PASSWORD", "")
+					os.Setenv("SS_FIRST_ADMIN_USER", "")
+					os.Setenv("SS_FIRST_ADMIN_PASSWORD", "")
 				},
 			},
 			wantErr: true,
