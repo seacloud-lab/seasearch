@@ -125,7 +125,7 @@ func OssExists(indexName string) (bool, error) {
 func (b *OssBackend) Setup(readOnly bool) error {
 	if readOnly {
 		// read only, check if there are any objects here.
-		list, err := b.listObjects(b.prefix)
+		list, err := b.Client.List(context.Background(), b.prefix)
 		if err != nil {
 			log.Error().Err(err).Msgf("Setup index %s err: ", b.prefix)
 			return fmt.Errorf("setup backend err: %w", err)
