@@ -95,15 +95,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 	}
 
 	if stats != nil {
-		unifiedSearchers := make([]*UnifiedSearcher, 0, len(searchers))
-		for i, r := range searchers {
-			unifiedSearchers[i] = &UnifiedSearcher{
-				stats:         stats,
-				secondShardID: r.secondShardID,
-				shard:         r.shard,
-			}
-		}
-		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, unifiedSearchersToSearcher(unifiedSearchers)...)
+		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 	}
 
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToSearcher(searchers)...)
@@ -117,12 +109,16 @@ func simpleSearchersToSearcher(readers []*SimpleSearcher) []zincsearch.Searcher 
 	return searchReaders
 }
 
-func unifiedSearchersToSearcher(readers []*UnifiedSearcher) []zincsearch.Searcher {
-	searchReaders := make([]zincsearch.Searcher, len(readers))
-	for i, r := range readers {
-		searchReaders[i] = r
+func simpleSearchersToUnifiedSearcher(stats *zincsearch.UnifiedStats, searchers []*SimpleSearcher) []zincsearch.Searcher {
+	result := make([]zincsearch.Searcher, len(searchers))
+	for i, r := range searchers {
+		result[i] = &UnifiedSearcher{
+			stats:         stats,
+			secondShardID: r.secondShardID,
+			shard:         r.shard,
+		}
 	}
-	return searchReaders
+	return result
 }
 
 // isMatchIndex("abc", "a")  false
@@ -247,8 +243,8 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 			_ = s.Close()
 		}
 	}()
-	for _, opener := range searchers {
-		reader, err := opener.GetReader()
+	for _, searcher := range searchers {
+		reader, err := searcher.GetReader()
 		if err != nil {
 			return nil, err
 		}

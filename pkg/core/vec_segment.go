@@ -27,10 +27,9 @@ import (
 const internalVecField = "vec"
 
 type VecSegment struct {
-	baseIndex      VectorIndex
-	ref            *meta.VectorSegment
-	vecStoreWriter *bluge.Writer
-	index          faiss.Index
+	baseIndex VectorIndex
+	ref       *meta.VectorSegment
+	index     faiss.Index
 	// cache for search
 	cachedVectorsCache []float32
 	// vector idx -> docId
@@ -40,6 +39,7 @@ type VecSegment struct {
 	// for sealed segment, the lock is used for avoiding concurrent read and write for faiss index.
 	sync.RWMutex
 
+	vecStoreWriter *bluge.Writer
 	writerLock     sync.RWMutex
 	writerRefCount int64
 	closeTime      time.Time
@@ -52,7 +52,7 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 		baseIndex: vecIndex,
 	}
 	// first load vector store
-	err := seg.initPath()
+	err := seg.initVecStorePath()
 	if err != nil {
 		return nil, fmt.Errorf("open seg bluge store err: %w", err)
 	}
@@ -66,7 +66,7 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 	return seg, nil
 }
 
-func (s *VecSegment) initPath() error {
+func (s *VecSegment) initVecStorePath() error {
 	p := path.Join(config.Global.DataPath, path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec"))
 	err := os.MkdirAll(p, 0777)
 	if err != nil {
@@ -75,40 +75,29 @@ func (s *VecSegment) initPath() error {
 	return nil
 }
 
-func (s *VecSegment) saveFaissIndex() error {
-	f, err := os.CreateTemp(vecIdxManager.tmpDir, "temp_index")
-	if err != nil {
-		return err
+func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
+	dataPath := config.Global.DataPath
+	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
+	var cfg bluge.Config
+	switch config.Global.StorageType {
+	case "disk":
+		cfg = directory.GetDiskConfig(dataPath, name)
+	case "s3":
+		cfg = directory.GetS3Config(dataPath, name)
+	case "oss":
+		cfg = directory.GetOssConfig(dataPath, name)
+	default:
+		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
 	}
-	_ = f.Close()
-	defer func() {
-		_ = os.Remove(f.Name())
-	}()
 
-	err = faiss.WriteIndex(s.index, f.Name())
+	reader, err := bluge.OpenReader(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	err = vecIdxManager.storage.SaveFile(f.Name(), s.getFaissVecStorePath())
-	if err != nil {
-		return err
-	}
-	return err
+	return reader, nil
 }
 
-func (s *VecSegment) loadFaissIndexFile() error {
-	localFile, closer, err := vecIdxManager.storage.LoadFile(s.getFaissVecStorePath())
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = closer.Close()
-	}()
-	s.index, err = faiss.ReadIndex(localFile, faiss.IOFlagReadOnly)
-	return err
-}
-
-func (s *VecSegment) openWriter() (*bluge.Writer, error) {
+func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
 	s.writerLock.Lock()
 	w := s.vecStoreWriter
 	s.writerLock.Unlock()
@@ -141,7 +130,7 @@ func (s *VecSegment) openWriter() (*bluge.Writer, error) {
 	return writer, nil
 }
 
-func (s *VecSegment) closeWriter() {
+func (s *VecSegment) closeVecStoreWriter() {
 	s.writerLock.Lock()
 	s.closeTime = time.Now()
 	s.writerLock.Unlock()
@@ -152,29 +141,40 @@ func (s *VecSegment) getName() string {
 	return fmt.Sprintf("%s_%d", s.baseIndex.Name(), s.ref.Id)
 }
 
-func (s *VecSegment) openReader() (*bluge.Reader, error) {
-	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
-	var cfg bluge.Config
-	switch config.Global.StorageType {
-	case "disk":
-		cfg = directory.GetDiskConfig(dataPath, name)
-	case "s3":
-		cfg = directory.GetS3Config(dataPath, name)
-	case "oss":
-		cfg = directory.GetOssConfig(dataPath, name)
-	default:
-		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
-	}
-
-	reader, err := bluge.OpenReader(cfg)
+func (s *VecSegment) saveFaissIndex() error {
+	f, err := os.CreateTemp(vecIdxManager.tmpDir, "temp_index")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return reader, nil
+	_ = f.Close()
+	defer func() {
+		_ = os.Remove(f.Name())
+	}()
+
+	err = faiss.WriteIndex(s.index, f.Name())
+	if err != nil {
+		return err
+	}
+	err = vecIdxManager.storage.SaveFile(f.Name(), s.getFaissIndexPath())
+	if err != nil {
+		return err
+	}
+	return err
 }
 
-func (s *VecSegment) getFaissVecStorePath() string {
+func (s *VecSegment) loadFaissIndexFile() error {
+	localFile, closer, err := vecIdxManager.storage.LoadFile(s.getFaissIndexPath())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = closer.Close()
+	}()
+	s.index, err = faiss.ReadIndex(localFile, faiss.IOFlagReadOnly)
+	return err
+}
+
+func (s *VecSegment) getFaissIndexPath() string {
 	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
 }
 
@@ -209,11 +209,11 @@ func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 		doc.AddField(bluge.NewStoredOnlyField(internalVecField, zutils.VectorToBytes(vec)))
 		batch.Insert(doc)
 	}
-	writer, err := s.openWriter()
+	writer, err := s.openVecStoreWriter()
 	if err != nil {
 		return err
 	}
-	defer s.closeWriter()
+	defer s.closeVecStoreWriter()
 
 	err = writer.Batch(batch)
 	if err != nil {
@@ -240,11 +240,11 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 	for _, id := range ids {
 		batch.Delete(bluge.Identifier(base62.Encode(id)))
 	}
-	writer, err := s.openWriter()
+	writer, err := s.openVecStoreWriter()
 	if err != nil {
 		return err
 	}
-	defer s.closeWriter()
+	defer s.closeVecStoreWriter()
 	err = writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("remove seg bluge index err: %w", err)
@@ -255,7 +255,7 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 // GetExistsIds
 // Filter out the id that exists in this segment. It‘s lock free.
 func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
-	r, err := s.openReader()
+	r, err := s.openVecStoreReader()
 	defer func() {
 		_ = r.Close()
 	}()
@@ -298,7 +298,7 @@ func (s *VecSegment) save() error {
 		s.freeCache()
 
 		// update count
-		r, err := s.openReader()
+		r, err := s.openVecStoreReader()
 		if err != nil {
 			return err
 		}
@@ -579,7 +579,7 @@ func (s *VecSegment) getAllVectors() ([]float32, []int64, error) {
 }
 
 func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
-	reader, err := s.openReader()
+	reader, err := s.openVecStoreReader()
 	defer func() {
 		_ = reader.Close()
 	}()
@@ -616,32 +616,4 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 	}
 
 	return vectors, ids, nil
-}
-
-func lazyCloseSegmentWriter() {
-	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		closeList := make([]*VecSegment, 0)
-		vecIdxManager.lock.Lock()
-		for _, vec := range vecIdxManager.cache {
-			closeList = append(closeList, vec.ListSegment()...)
-		}
-		vecIdxManager.lock.Unlock()
-
-		for _, segment := range closeList {
-			segment.writerLock.RLock()
-			w := segment.vecStoreWriter
-			refCount := segment.writerRefCount
-			closeTime := segment.closeTime
-			segment.writerLock.RUnlock()
-
-			if refCount == 0 && time.Since(closeTime) > 5*time.Minute {
-				segment.writerLock.Lock()
-				segment.vecStoreWriter = nil
-				segment.writerLock.Unlock()
-				_ = w.Close()
-				log.Debug().Msgf("lazy lose vec index %s", segment.getName())
-			}
-		}
-	}
 }

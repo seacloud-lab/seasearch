@@ -313,7 +313,7 @@ func testSealIvfPq(t *testing.T) {
 	assert.EqualValues(t, 5100, idx.segments[0].index.Ntotal())
 
 	// check faiss file
-	fileInfo, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.segments[0].getFaissVecStorePath(), "index.index"))
+	fileInfo, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.segments[0].getFaissIndexPath(), "index.index"))
 	assert.Nil(t, err)
 	assert.False(t, fileInfo.IsDir())
 
@@ -374,14 +374,14 @@ func testAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	assert.EqualValues(t, 98, idx.segments[1].ref.Count)
 	assert.EqualValues(t, 98, idx.ref.Segments[1].Count)
 
-	reader1, err := idx.segments[1].openReader()
+	reader1, err := idx.segments[1].openVecStoreReader()
 	assert.Nil(t, err)
 	seg1Count, err := reader1.Count()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 98, seg1Count)
 	assert.Nil(t, idx.segments[1].index)
 
-	reader0, err := idx.segments[0].openReader()
+	reader0, err := idx.segments[0].openVecStoreReader()
 	assert.Nil(t, err)
 	seg0Count, err := reader0.Count()
 	assert.Nil(t, err)
