@@ -180,8 +180,8 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	w := secondShard.writer
 	secondShard.lock.RUnlock()
 	if w != nil {
-		log.Debug().Msgf("open writer index shard %s second shard %d", s.name, shardID)
-		atomic.AddInt64(&secondShard.writerRefcount, 1)
+		curRef := atomic.AddInt64(&secondShard.writerRefcount, 1)
+		log.Debug().Msgf("open writer index shard %s second shard %d, current ref count: %d", s.name, id, curRef)
 		return w, nil
 	}
 
@@ -200,8 +200,8 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	secondShard.lock.RLock()
 	w = secondShard.writer
 	secondShard.lock.RUnlock()
-	log.Debug().Msgf("open writer index shard %s second shard %d", s.name, shardID)
-	atomic.AddInt64(&secondShard.writerRefcount, 1)
+	curRef := atomic.AddInt64(&secondShard.writerRefcount, 1)
+	log.Debug().Msgf("open writer index shard %s second shard %d, current ref count: %d", s.name, id, curRef)
 	return w, nil
 }
 
@@ -329,11 +329,12 @@ func (s *IndexShard) CloseWriter(shardId int64) {
 	// it means close all second shard writers
 	if shardId < 0 {
 		s.lock.RLock()
-		for _, secondShard := range s.shards {
+		for id, secondShard := range s.shards {
 			secondShard.lock.Lock()
 			secondShard.closeTime = time.Now()
 			secondShard.lock.Unlock()
-			atomic.AddInt64(&secondShard.writerRefcount, -1)
+			curRef := atomic.AddInt64(&secondShard.writerRefcount, -1)
+			log.Debug().Msgf("close writer index shard %s second shard %d, current ref count: %d", s.name, id, curRef)
 		}
 		s.lock.RUnlock()
 		return
@@ -345,7 +346,8 @@ func (s *IndexShard) CloseWriter(shardId int64) {
 		secondShard.lock.Lock()
 		secondShard.closeTime = time.Now()
 		secondShard.lock.Unlock()
-		atomic.AddInt64(&secondShard.writerRefcount, -1)
+		curRef := atomic.AddInt64(&secondShard.writerRefcount, -1)
+		log.Debug().Msgf("close writer index shard %s second shard %d, current ref count: %d", s.name, shardId, curRef)
 	}
 }
 

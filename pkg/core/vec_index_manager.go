@@ -166,7 +166,7 @@ func lazyCloseSegmentWriter() {
 			closeTime := segment.closeTime
 			segment.writerLock.RUnlock()
 
-			if refCount == 0 && time.Since(closeTime) > 5*time.Minute {
+			if refCount == 0 && time.Since(closeTime) > 5*time.Minute && w != nil {
 				segment.writerLock.Lock()
 				segment.vecStoreWriter = nil
 				segment.writerLock.Unlock()

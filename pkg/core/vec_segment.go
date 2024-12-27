@@ -102,7 +102,8 @@ func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
 	w := s.vecStoreWriter
 	s.writerLock.Unlock()
 	if w != nil {
-		atomic.AddInt64(&s.writerRefCount, 1)
+		curRef := atomic.AddInt64(&s.writerRefCount, 1)
+		log.Debug().Msgf("open vec segment %s, current ref count: %d", s.getName(), curRef)
 		return w, nil
 	}
 	dataPath := config.Global.DataPath
@@ -126,7 +127,8 @@ func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
 	s.writerLock.Lock()
 	s.vecStoreWriter = writer
 	s.writerLock.Unlock()
-	atomic.AddInt64(&s.writerRefCount, 1)
+	curRef := atomic.AddInt64(&s.writerRefCount, 1)
+	log.Debug().Msgf("open vec segment %s, current ref count: %d", s.getName(), curRef)
 	return writer, nil
 }
 
@@ -134,7 +136,8 @@ func (s *VecSegment) closeVecStoreWriter() {
 	s.writerLock.Lock()
 	s.closeTime = time.Now()
 	s.writerLock.Unlock()
-	atomic.AddInt64(&s.writerRefCount, -1)
+	curRef := atomic.AddInt64(&s.writerRefCount, -1)
+	log.Debug().Msgf("close vec segment %s, current ref count: %d", s.getName(), curRef)
 }
 
 func (s *VecSegment) getName() string {
@@ -256,12 +259,12 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 // Filter out the id that exists in this segment. It‘s lock free.
 func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
 	r, err := s.openVecStoreReader()
-	defer func() {
-		_ = r.Close()
-	}()
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		_ = r.Close()
+	}()
 	q := bluge.NewBooleanQuery()
 	for _, id := range ids {
 		sub := bluge.NewTermQuery(base62.Encode(id)).SetField("_id")
@@ -580,12 +583,12 @@ func (s *VecSegment) getAllVectors() ([]float32, []int64, error) {
 
 func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
 	reader, err := s.openVecStoreReader()
-	defer func() {
-		_ = reader.Close()
-	}()
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		_ = reader.Close()
+	}()
 
 	vectors := make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
 	ids := make([]int64, 0, count)

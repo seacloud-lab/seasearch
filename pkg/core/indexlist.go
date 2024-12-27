@@ -288,7 +288,7 @@ func LazyCloseSecondIndexShardWriters() {
 				shard.writer = nil
 				shard.lock.Unlock()
 				_ = w.Close()
-				log.Debug().Msgf("lazy lose second shard %s %d", temp.indexShard.name, shard.ref.ID)
+				log.Debug().Msgf("lazy close second shard %s %d", temp.indexShard.name, shard.ref.ID)
 			}
 		}
 	}
