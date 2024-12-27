@@ -16,6 +16,7 @@ import (
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/docker/go-units"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/unix"
 
@@ -75,7 +76,6 @@ func createCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
 		panic(fmt.Sprintf("init cache error: %v", err))
 	}
 
-	go cacheManager.cleanup()
 	return cacheManager
 }
 
@@ -109,9 +109,17 @@ func (c *LruCache) init() error {
 		if !c.fileExt(ext) {
 			return err
 		}
+		fi, err1 := os.Stat(p)
+		if err1 != nil {
+			return err1
+		}
+		statT := fi.Sys().(*syscall.Stat_t)
 		c.caches[p] = &CacheFile{
 			path:     p,
 			refCount: 0,
+			ref:      c,
+			size:     fi.Size(),
+			atime:    GetAtime(statT),
 		}
 
 		return err
@@ -119,92 +127,51 @@ func (c *LruCache) init() error {
 	return err
 }
 
-func (c *LruCache) cleanup() {
-	defer c.closer.Done()
-
-	tick := time.NewTicker(time.Minute * 5)
-	for {
-		select {
-		case <-tick.C:
-			err := c.doCleanup()
-			if err != nil {
-				log.Error().Err(err).Msg("cache cleanup err: ")
-			}
-		case <-c.closer.HasBeenClosed():
-			return
-		}
-	}
-}
-
-type tempFile struct {
-	aTime time.Time
-	path  string
-	size  int64
-}
-
-func (c *LruCache) doCleanup() error {
-	var tempFiles []tempFile
+func (c *LruCache) makeRoomForCacheFile() error {
 	var curSize int64 = 0
+	c.lock.RLock()
+	for _, f := range c.caches {
+		curSize += f.size
+	}
+	if curSize < c.maxSize {
+		c.lock.RUnlock()
+		return nil
+	}
+	var tempFiles []*CacheFile
+	for _, f := range c.caches {
+		tempFiles = append(tempFiles, f)
+	}
+	c.lock.RUnlock()
+
 	var targetSize = float64(c.maxSize) * 0.7
 
-	err := filepath.Walk(c.rootPath, func(p string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return err
-		}
-
-		ext := path.Ext(info.Name())
-		if !c.fileExt(ext) {
-			return err
-		}
-		fi, err1 := os.Stat(p)
-		if err1 != nil {
-			return err1
-		}
-
-		curSize += fi.Size()
-
-		statT := fi.Sys().(*syscall.Stat_t)
-
-		tempFiles = append(tempFiles, tempFile{
-			aTime: GetAtime(statT),
-			size:  fi.Size(),
-			path:  p,
-		})
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("filepath walk err: %w", err)
-	}
-
 	if len(tempFiles) == 0 {
-		log.Debug().Msgf("clean up finished: there are no cached files")
-		return nil
-	}
-
-	if float64(curSize) < targetSize {
-		log.Debug().Msgf("clean up finished: cache size is below max")
+		log.Info().Msgf("clean up finished: there are no cached files")
 		return nil
 	}
 
 	sort.Slice(tempFiles, func(i, j int) bool {
-		return tempFiles[i].aTime.Before(tempFiles[j].aTime)
+		return tempFiles[i].atime.Before(tempFiles[j].atime)
 	})
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
+	var (
+		oldTotalCacheSize = curSize
+		oldCacheCount     = len(tempFiles)
+		referedCount      = 0
+		deleteCount       = int64(0)
+		deletedSize       = int64(0)
+	)
 
 	for _, f := range tempFiles {
 		if cf, ok := c.caches[f.path]; ok {
 			if cf.refCount > 0 {
+				referedCount++
 				continue
 			}
 		}
+		deleteCount++
 		delete(c.caches, f.path)
 		err := os.Remove(f.path)
 		if err != nil {
@@ -212,10 +179,14 @@ func (c *LruCache) doCleanup() error {
 			continue
 		}
 		curSize -= f.size
+		deletedSize += f.size
 		if float64(curSize) <= targetSize {
 			break
 		}
 	}
+
+	log.Info().Msgf("LRU clean finished: old files: %d, old cache size: %s, refered files: %d, deleted files: %d, made room: %s",
+		oldCacheCount, units.BytesSize(float64(oldTotalCacheSize)), referedCount, deleteCount, units.BytesSize(float64(deletedSize)))
 	return nil
 }
 
@@ -224,15 +195,20 @@ func (c *LruCache) doCleanup() error {
 // the filePath is the absolute path of cache file.
 func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, error) {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
 		return nil, err
+	}
+	err = c.makeRoomForCacheFile()
+	if err != nil {
+		return nil, fmt.Errorf("lru clean cache err: %w", err)
 	}
 	for {
 		c.lock.Lock()
 		// the file has already in local and cached.
 		if cf, ok := c.caches[filePath]; ok {
 			cf.refCount++
+			cf.atime = time.Now()
 			c.lock.Unlock()
 			return cf, nil
 		}
@@ -260,7 +236,7 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 			cleanup()
 			return nil, fmt.Errorf("cache file err: create temp file err: %w", err)
 		}
-		_, err = io.Copy(tempfile, reader)
+		size, err := io.Copy(tempfile, reader)
 		if err != nil {
 			log.Error().Err(err).Msgf("Cache %s err: copy temp cache file error", filePath)
 			cleanup()
@@ -291,6 +267,8 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 			path:     filePath,
 			ref:      c,
 			refCount: 1,
+			size:     size,
+			atime:    time.Now(),
 		}
 		delete(c.readyMap, filePath)
 		c.lock.Unlock()
@@ -301,28 +279,37 @@ func (c *LruCache) CacheFile(filePath string, reader io.Reader) (*CacheFile, err
 
 // UpdateCacheFile
 // the filePath is the absolute path of cache file.
-func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) (*CacheFile, error) {
+func (c *LruCache) UpdateCacheFile(inputFile string, filePath string) error {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	err = c.makeRoomForCacheFile()
+	if err != nil {
+		return fmt.Errorf("lru clean cache err: %w", err)
 	}
 	err = os.Rename(inputFile, filePath)
 	if err != nil {
 		log.Error().Err(err).Msgf("Rename file %s to %s err: ", inputFile, filePath)
-		return nil, fmt.Errorf("update cache file err: rename temp file err : %w", err)
+		return fmt.Errorf("update cache file err: rename temp file err : %w", err)
 	}
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		log.Error().Err(err).Msgf("Stat file %s err: ", filePath)
+		return fmt.Errorf("update cache file err: stat file err : %w", err)
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if cf, ok := c.caches[filePath]; ok {
-		return cf, nil
-	}
 	c.caches[filePath] = &CacheFile{
 		ref:      c,
 		path:     filePath,
-		refCount: 1,
+		refCount: 0,
+		size:     stat.Size(),
+		atime:    time.Now(),
 	}
-	return c.caches[filePath], nil
+	return nil
 }
 
 // GetCacheFile
@@ -335,7 +322,7 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 		return nil, false
 	}
 	f.refCount++
-
+	f.atime = time.Now()
 	_, err := os.Stat(filePath)
 	if err != nil {
 		delete(c.caches, filePath)
@@ -344,17 +331,15 @@ func (c *LruCache) GetCacheFile(filePath string) (*CacheFile, bool) {
 	return f, true
 }
 
-func (c *LruCache) Setup(path string, readOnly bool) error {
+// Setup
+// just make sure the directory is ready.
+func (c *LruCache) Setup(path string) error {
 	dirExists, err := dirExists(path)
 	if err != nil {
 		log.Error().Err(err).Msgf("Setup %s err: check dir exists err: ", path)
 		return fmt.Errorf("setup err: error checking if directory exists '%s': %w", path, err)
 	}
 	if !dirExists {
-		if readOnly {
-			log.Error().Err(err).Msgf("Setup %s err: read only but dir not exists: ", path)
-			return fmt.Errorf("setup err: readOnly, directory does not exist")
-		}
 		err = os.MkdirAll(path, 0777)
 		if err != nil {
 			log.Error().Err(err).Msgf("Setup %s err: create dir err: ", path)
@@ -421,7 +406,7 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir, false)
+	err := c.Setup(dir)
 	if err != nil {
 		return nil, fmt.Errorf("open cache writer err: %w", err)
 	}
@@ -430,12 +415,14 @@ func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
 	var ok bool
 	if cf, ok = c.caches[filePath]; ok {
 		cf.refCount++
+		cf.atime = time.Now()
 		c.lock.Unlock()
 	} else {
 		cf = &CacheFile{
 			path:     filePath,
 			refCount: 1,
 			ref:      c,
+			atime:    time.Now(),
 		}
 		c.caches[filePath] = cf
 		c.lock.Unlock()
@@ -485,9 +472,6 @@ func (c *LruCache) Lock(path string) (pid *os.File, err error) {
 	err = unix.Flock(int(pid.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err != nil {
 		_ = pid.Close()
-		return
-	}
-	if err != nil {
 		return pid, fmt.Errorf("unable to obtain exclusive access: %w", err)
 	}
 	err = pid.Truncate(0)
@@ -526,7 +510,17 @@ func (t *tempWriteFile) Write(p []byte) (n int, err error) {
 }
 
 func (t *tempWriteFile) Close() error {
-	t.cf.Close()
+	_ = t.cf.Close()
+
+	// delete old cache
+	t.cf.ref.lock.Lock()
+	delete(t.cf.ref.caches, t.realPath)
+	t.cf.ref.lock.Unlock()
+
+	defer func() {
+		// we clear temp file
+		_ = os.RemoveAll(t.tempPath)
+	}()
 	err := os.Rename(t.tempPath, t.realPath)
 	if err != nil {
 		log.Error().Err(err).Msgf("close temp write file %s err: rename err: ", t.realPath)
@@ -537,6 +531,21 @@ func (t *tempWriteFile) Close() error {
 		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
 		return fmt.Errorf("close temp write file err: sync err: %w", err)
 	}
+	stat, err := t.f.Stat()
+	if err != nil {
+		log.Error().Err(err).Msgf("close temp write file %s err: sync err: ", t.realPath)
+		return fmt.Errorf("close temp write file err: stat file err: %w", err)
+	}
+	t.cf.ref.lock.Lock()
+	t.cf.ref.caches[t.realPath] = &CacheFile{
+		ref:      t.cf.ref,
+		path:     t.realPath,
+		refCount: 0,
+		size:     stat.Size(),
+		atime:    time.Now(),
+	}
+	t.cf.ref.lock.Unlock()
+
 	return t.f.Close()
 }
 
@@ -544,6 +553,8 @@ type CacheFile struct {
 	ref      *LruCache
 	path     string
 	refCount uint
+	size     int64
+	atime    time.Time
 }
 
 func (c *CacheFile) GetPath() string {

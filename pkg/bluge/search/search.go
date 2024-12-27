@@ -18,17 +18,23 @@ package search
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/blugelabs/bluge/search"
 	"github.com/blugelabs/bluge/search/aggregations"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/config"
+
 	"golang.org/x/sync/errgroup"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/blugelabs/bluge/search/highlight"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
+	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
+	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 )
 
 func MultiSearch(
@@ -36,32 +42,34 @@ func MultiSearch(
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
-	readers ...Searcher,
-) (search.DocumentMatchIterator, error) {
-	if len(readers) == 0 {
-		return &DocumentList{
-			bucket: search.NewBucket("",
-				map[string]search.Aggregation{
-					"duration": aggregations.Duration(),
-				},
-			),
+	shardNum int64,
+	searchers ...Searcher,
+) (*meta.SearchResponse, error) {
+	if len(searchers) == 0 {
+		return &meta.SearchResponse{
+			Hits: meta.Hits{
+				Hits: []meta.Hit{},
+				Total: meta.Total{
+					Value: 0,
+				}},
+			Took:   0,
+			Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(searchers))},
 		}, nil
 	}
-	if len(readers) == 1 {
-		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
-		if err != nil {
-			return nil, err
-		}
-		return readers[0].Search(ctx, req)
+	// for single reader, we just get result directly.
+	if len(searchers) == 1 {
+		return getSingleReaderResult(ctx, query, mappings, analyzers, shardNum, searchers[0])
 	}
 
+	// for multi-reader we need to use heap sort to combine all the results,
+	// and for each reader, it needs to be closed immediately after it completes the search to release resources.
 	bucketAggs := make(map[string]search.Aggregation)
 	bucketAggs["duration"] = aggregations.Duration()
 
 	eg := &errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
-	docs := make(chan *search.DocumentMatch, len(readers)*10)
-	aggs := make(chan *search.Bucket, len(readers))
+	docs := make(chan *Document, len(searchers)*10)
+	aggs := make(chan *search.Bucket, len(searchers))
 
 	docList := &DocumentList{
 		bucket: search.NewBucket("", bucketAggs),
@@ -77,7 +85,7 @@ func MultiSearch(
 	egDoc := &errgroup.Group{}
 	egDoc.Go(func() error {
 		for doc := range docs {
-			heap.Push(docList, &Document{doc})
+			heap.Push(docList, doc)
 		}
 		return nil
 	})
@@ -87,27 +95,52 @@ func MultiSearch(
 		}
 		return nil
 	})
-	for _, r := range readers {
-		r := r
+
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	if docList.sort == nil {
+		if req, ok := req.(*bluge.TopNSearch); ok {
+			docList.sort = req.SortOrder().Copy()
+		}
+	}
+
+	defer func() {
+		for _, r := range searchers {
+			_ = r.Close()
+		}
+	}()
+
+	for _, searcher := range searchers {
+		// A new request is created for each reader. Query is not modified concurrently.
 		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
 		if err != nil {
 			return nil, err
 		}
-		if docList.sort == nil {
-			if req, ok := req.(*bluge.TopNSearch); ok {
-				docList.sort = req.SortOrder().Copy()
-			}
-		}
+		searcher := searcher
 		eg.Go(func() error {
+			defer func() {
+				_ = searcher.Close()
+			}()
+
 			var n int64
-			dmi, err := r.Search(ctx, req)
+			dmi, err := searcher.Search(ctx, req)
 			if err != nil {
 				return err
 			}
 			next, err := dmi.Next()
 			for err == nil && next != nil {
 				n++
-				docs <- next
+				hit, err2 := visitMatchedDoc(next, query, mappings)
+				if err2 != nil {
+					return err2
+				}
+				docs <- &Document{hit: &hit, match: next}
 				next, err = dmi.Next()
 			}
 			aggs <- dmi.Aggregations()
@@ -134,11 +167,150 @@ func MultiSearch(
 		docList.size = maxSize
 	}
 
-	return docList, nil
+	resp := &meta.SearchResponse{
+		Hits: meta.Hits{Hits: []meta.Hit{}},
+	}
+
+	hit, err := docList.Next()
+	for err == nil && hit != nil {
+		resp.Hits.Hits = append(resp.Hits.Hits, *hit)
+		hit, err = docList.Next()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
+	}
+	resp.Took = int(docList.Aggregations().Duration().Milliseconds())
+	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(len(searchers)), Skipped: shardNum - int64(len(searchers))}
+	resp.Hits.Total = meta.Total{Value: int(docList.Aggregations().Count())}
+	resp.Hits.MaxScore = docList.Aggregations().Metric("max_score")
+	if err := uquery.FormatResponse(resp, query, docList.Aggregations()); err != nil {
+		log.Error().Msgf("search.MultiSearch: error format response: %s", err.Error())
+	}
+	return resp, nil
+}
+
+func getSingleReaderResult(ctx context.Context,
+	query *meta.ZincQuery,
+	mappings *meta.Mappings,
+	analyzers map[string]*analysis.Analyzer,
+	shardNum int64, reader Searcher) (*meta.SearchResponse, error) {
+	defer func() {
+		_ = reader.Close()
+	}()
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	dmi, err := reader.Search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	resp := &meta.SearchResponse{
+		Hits: meta.Hits{Hits: []meta.Hit{}},
+	}
+
+	next, err := dmi.Next()
+	for err == nil && next != nil {
+		hit, err2 := visitMatchedDoc(next, query, mappings)
+		if err2 != nil {
+			err = err2
+			break
+		}
+		resp.Hits.Hits = append(resp.Hits.Hits, hit)
+		next, err = dmi.Next()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
+	}
+	resp.Took = int(dmi.Aggregations().Duration().Milliseconds())
+	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(1), Skipped: shardNum - 1}
+	resp.Hits.Total = meta.Total{Value: int(dmi.Aggregations().Count())}
+	resp.Hits.MaxScore = dmi.Aggregations().Metric("max_score")
+	if err := uquery.FormatResponse(resp, query, dmi.Aggregations()); err != nil {
+		log.Error().Msgf("search.MultiSearch: error format response: %s", err.Error())
+	}
+
+	return resp, nil
+}
+
+// visitMatchedDoc
+// visit matched document's all fields, this must be called before reader close.
+func visitMatchedDoc(next *search.DocumentMatch, query *meta.ZincQuery, mappings *meta.Mappings) (meta.Hit, error) {
+	// highlight
+	var highlighter *highlight.SimpleHighlighter
+	if query.Highlight != nil {
+		if len(query.Highlight.PreTags) > 0 && len(query.Highlight.PostTags) > 0 {
+			highlighter = highlight.NewHTMLHighlighterTags(query.Highlight.PreTags[0], query.Highlight.PostTags[0])
+		} else {
+			highlighter = highlight.NewHTMLHighlighter()
+		}
+	}
+
+	var id string
+	var indexName string
+
+	var sourceData map[string]interface{}
+	var fieldsData map[string]interface{}
+	var highlightData map[string]interface{}
+	if query.Highlight != nil {
+		highlightData = make(map[string]interface{})
+	}
+	err := next.VisitStoredFields(func(field string, value []byte) bool {
+		switch field {
+		case "_id":
+			id = string(value)
+		case "_index":
+			indexName = string(value)
+		case "_source":
+			sourceData = source.Response(query.Source.(*meta.Source), value)
+			if query.Fields != nil {
+				fieldsData = fields.Response(query.Fields.([]*meta.Field), value, mappings)
+			}
+		default:
+			// highlight
+			if query.Highlight != nil && query.Highlight.Fields != nil {
+				if options, ok := query.Highlight.Fields[field]; ok {
+					if v, ok := next.Locations[field]; ok {
+						if len(options.PreTags) > 0 && len(options.PostTags) > 0 {
+							highlighter := highlight.NewHTMLHighlighterTags(options.PreTags[0], options.PostTags[0])
+							highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
+						} else {
+							highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
+						}
+					}
+				}
+			}
+		}
+
+		return true
+	})
+	if err != nil {
+		return meta.Hit{}, fmt.Errorf("search.MultiSearch: error accessing stored fields: %w", err)
+	}
+
+	hit := meta.Hit{
+		Index:     indexName,
+		Type:      "_doc",
+		ID:        id,
+		Score:     next.Score,
+		Source:    sourceData,
+		Fields:    fieldsData,
+		Highlight: highlightData,
+	}
+	if query.Explain {
+		hit.Explain = next.Explanation
+	}
+
+	return hit, nil
 }
 
 type Document struct {
-	doc *search.DocumentMatch
+	hit   *meta.Hit
+	match *search.DocumentMatch
 }
 
 type DocumentList struct {
@@ -161,13 +333,13 @@ func (d *DocumentList) Done() {
 	d.len = int64(len(d.docs))
 }
 
-func (d *DocumentList) Next() (*search.DocumentMatch, error) {
+func (d *DocumentList) Next() (*meta.Hit, error) {
 	if d.next >= d.size || d.next >= d.len {
 		return nil, nil
 	}
 	doc := heap.Pop(d)
 	d.next++
-	return doc.(*Document).doc, nil
+	return doc.(*Document).hit, nil
 }
 
 func (d *DocumentList) Aggregations() *search.Bucket {
@@ -185,6 +357,8 @@ func (d *DocumentList) Pop() interface{} {
 	return doc
 }
 
-func (d *DocumentList) Len() int           { return len(d.docs) }
-func (d *DocumentList) Less(i, j int) bool { return d.sort.Compare(d.docs[i].doc, d.docs[j].doc) < 0 }
-func (d *DocumentList) Swap(i, j int)      { d.docs[i], d.docs[j] = d.docs[j], d.docs[i] }
+func (d *DocumentList) Len() int { return len(d.docs) }
+func (d *DocumentList) Less(i, j int) bool {
+	return d.sort.Compare(d.docs[i].match, d.docs[j].match) < 0
+}
+func (d *DocumentList) Swap(i, j int) { d.docs[i], d.docs[j] = d.docs[j], d.docs[i] }

@@ -150,7 +150,6 @@ func TestVectorSearch(t *testing.T) {
 	config.Global.EnableWal = false
 	config.Global.LogConfig.LogLevel = "Debug"
 	defer func() {
-		config.Global.EnableWal = true
 		config.Global.StorageType = "disk"
 	}()
 	lru_cache.Init()

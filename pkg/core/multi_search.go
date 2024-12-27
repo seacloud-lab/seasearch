@@ -20,22 +20,19 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	query2 "github.com/zincsearch/zincsearch/pkg/uquery/query"
+	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/blugelabs/bluge/analysis"
-	"github.com/rs/zerolog/log"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/uquery"
-	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 )
 
 func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {
@@ -52,12 +49,12 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedStats, query *meta.ZincQuery) (*meta.SearchResponse, error) {
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
-	var readers []*bluge.Reader
+	searchers := make([]*SimpleSearcher, 0)
 	var shardNum int64
 
-	timeMin, timeMax := timerange.Query(query.Query)
 	hasIndex := false
 	searchIndex := make([]*Index, 0)
+	timeMin, timeMax := timerange.Query(query.Query)
 
 	for _, indexName := range searchIndexNames {
 		// this index should not handle by this servers
@@ -71,47 +68,23 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 		}
 	}
 
-	mutex := sync.Mutex{}
 	eg := errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+
 	for _, index := range searchIndex {
-		index := index
-		eg.Go(func() error {
-			reader, err := index.GetReaders(timeMin, timeMax)
-			if err != nil {
-				return err
-			}
-			mutex.Lock()
-			readers = append(readers, reader...)
-			shardNum += index.GetShardNum()
-			if mappings == nil {
-				mappings = index.GetMappings()
-				analyzers = index.GetAnalyzers()
-			}
-			mutex.Unlock()
-			return nil
-		})
+		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		shardNum += index.GetShardNum()
+		if mappings == nil {
+			mappings = index.GetMappings()
+			analyzers = index.GetAnalyzers()
+		}
 	}
 
-	err := eg.Wait()
-	if err != nil {
-		return nil, err
-	}
-	if len(readers) == 0 {
+	if len(searchers) == 0 {
 		if !hasIndex {
 			return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
 		}
 		return &meta.SearchResponse{}, nil
-	}
-	defer func() {
-		for _, reader := range readers {
-			reader.Close()
-		}
-	}()
-
-	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
 	}
 
 	ctx := context.Background()
@@ -121,38 +94,31 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 		defer cancel()
 	}
 
-	var searchers []zincsearch.Searcher
 	if stats != nil {
-		searchers = make([]zincsearch.Searcher, len(readers))
-		for i, r := range readers {
-			searchers[i] = zincsearch.NewUnifiedSearcher(r, stats)
-		}
-	} else {
-		searchers = ToSearcher(readers)
+		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 	}
 
-	dmi, err := zincsearch.MultiSearch(ctx, query, mappings, analyzers, searchers...)
-	if err != nil {
-		log.Printf("core.MultiSearchV2: error executing search: %s", err.Error())
-		if err == context.DeadlineExceeded {
-			return &meta.SearchResponse{
-				TimedOut: true,
-				Error:    err.Error(),
-				Hits:     meta.Hits{Hits: []meta.Hit{}},
-			}, nil
-		}
-		return nil, err
-	}
-
-	return searchV2(shardNum, int64(len(readers)), dmi, query, mappings)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToSearcher(searchers)...)
 }
 
-func ToSearcher(readers []*bluge.Reader) []zincsearch.Searcher {
+func simpleSearchersToSearcher(readers []*SimpleSearcher) []zincsearch.Searcher {
 	searchReaders := make([]zincsearch.Searcher, len(readers))
 	for i, r := range readers {
 		searchReaders[i] = r
 	}
 	return searchReaders
+}
+
+func simpleSearchersToUnifiedSearcher(stats *zincsearch.UnifiedStats, searchers []*SimpleSearcher) []zincsearch.Searcher {
+	result := make([]zincsearch.Searcher, len(searchers))
+	for i, r := range searchers {
+		result[i] = &UnifiedSearcher{
+			stats:         stats,
+			secondShardID: r.secondShardID,
+			shard:         r.shard,
+		}
+	}
+	return result
 }
 
 // isMatchIndex("abc", "a")  false
@@ -234,43 +200,23 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 			searchIndex = append(searchIndex, index)
 		}
 	}
-	var searchReaders []*bluge.Reader
 
-	mutex := sync.Mutex{}
-	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	timeMin, timeMax := timerange.Query(query.Query)
+	var searchers = make([]*SimpleSearcher, 0)
 	for _, index := range searchIndex {
-		index := index
-		eg.Go(func() error {
-			reader, err := index.GetReaders(0, 0)
-			if err != nil {
-				return err
-			}
-			mutex.Lock()
-			searchReaders = append(searchReaders, reader...)
-			if mappings == nil {
-				mappings = index.GetMappings()
-				analyzers = index.GetAnalyzers()
-			}
-			mutex.Unlock()
-			return nil
-		})
+		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		if mappings == nil {
+			mappings = index.GetMappings()
+			analyzers = index.GetAnalyzers()
+		}
 	}
-	err := eg.Wait()
-	if err != nil {
-		return nil, err
-	}
-	if len(searchReaders) == 0 {
+
+	if len(searchers) == 0 {
 		if !hasIndex {
 			return nil, fmt.Errorf("core.UnifySearch: error accessing reader: no index found")
 		}
 		return nil, nil
 	}
-	defer func() {
-		for _, readers := range searchReaders {
-			_ = readers.Close()
-		}
-	}()
 
 	result := &zincsearch.UnifiedStats{
 		FieldStats: map[string]*zincsearch.FieldStats{},
@@ -291,15 +237,31 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		}
 	}
 
-	for field, terms := range termMap {
-		for _, reader := range searchReaders {
+	opened := make([]zincsearch.Searcher, 0)
+	defer func() {
+		for _, s := range opened {
+			_ = s.Close()
+		}
+	}()
+	for _, searcher := range searchers {
+		reader, err := searcher.GetReader()
+		if err != nil {
+			return nil, err
+		}
+		if reader == nil {
+			continue
+		}
+		opened = append(opened, reader)
+		for field, terms := range termMap {
 			fieldStats, err := getFieldStats(reader, field, terms)
 			if err != nil {
 				return nil, err
 			}
 			result.MergeField(fieldStats)
 		}
+		_ = reader.Close()
 	}
+
 	return result, nil
 }
 

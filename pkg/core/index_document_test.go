@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
 	"github.com/zincsearch/zincsearch/pkg/bluge/aggregation"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )

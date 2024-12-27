@@ -16,10 +16,14 @@
 package directory
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"path"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
+	"github.com/rs/zerolog/log"
 )
 
 // GetDiskConfig returns a bluge config that will store index data in local disk
@@ -31,6 +35,7 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 		fs := index.NewFileSystemDirectory(path.Join(rootPath, indexName))
 		return &fileSystemDirectory{
 			FileSystemDirectory: *fs,
+			path:                path.Join(rootPath, indexName),
 		}
 	}
 	config = config.WithPersisterNapTimeMSec(50)
@@ -48,6 +53,7 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 // In the case of loading many indexes, many lock operations will take more time.
 type fileSystemDirectory struct {
 	index.FileSystemDirectory
+	path string
 }
 
 func (d *fileSystemDirectory) Lock() error {
@@ -56,4 +62,36 @@ func (d *fileSystemDirectory) Lock() error {
 
 func (d *fileSystemDirectory) Unlock() error {
 	return nil
+}
+
+var ErrPathNotExists = errors.New("setup err: readOnly, directory does not exist")
+
+func (d *fileSystemDirectory) Setup(readOnly bool) error {
+	dirExists, err := dirExists(d.path)
+	if err != nil {
+		log.Error().Err(err).Msgf("Setup %s err: check dir exists err: ", d.path)
+		return fmt.Errorf("setup err: error checking if directory exists '%s': %w", d.path, err)
+	}
+	if !dirExists {
+		if readOnly {
+			return ErrPathNotExists
+		}
+		err = os.MkdirAll(d.path, 0777)
+		if err != nil {
+			log.Error().Err(err).Msgf("Setup %s err: create dir err: ", d.path)
+			return fmt.Errorf("setup err: error creating directory '%s': %w", d.path, err)
+		}
+	}
+	return nil
+}
+
+func dirExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, err
 }

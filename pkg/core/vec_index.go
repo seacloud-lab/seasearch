@@ -29,6 +29,8 @@ type VectorIndex interface {
 	ATime() time.Time
 	Free()
 	Recall(count int, k int64, nprobe int) (float32, error)
+
+	ListSegment() []*VecSegment
 }
 
 type baseIndex struct {
@@ -166,6 +168,18 @@ func (f *FlatIndex) Search(vec []float32, k int64, _ int) (map[string]float32, e
 func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	log.Warn().Msgf("Recall should not be called on flat index %s.", f.name)
 	return 1, nil
+}
+
+func (f *FlatIndex) ListSegment() []*VecSegment {
+	f.lock.RLock()
+	seg := f.seg
+	f.lock.RUnlock()
+	if seg == nil {
+		return nil
+	}
+	res := make([]*VecSegment, 1)
+	res[0] = seg
+	return res
 }
 
 // IvfPqIndex has multiple segments, each contains at most 100K vectors.
@@ -473,6 +487,19 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 		result[res.id] = res.dis
 	}
 	return result, nil
+}
+
+func (v *IvfPqIndex) ListSegment() []*VecSegment {
+	v.lock.RLock()
+	defer v.lock.RUnlock()
+
+	res := make([]*VecSegment, 0, len(v.segments))
+	for _, seg := range v.segments {
+		if seg != nil {
+			res = append(res, seg)
+		}
+	}
+	return res
 }
 
 type vecSearchHeap struct {

@@ -123,7 +123,21 @@ func OssExists(indexName string) (bool, error) {
 }
 
 func (b *OssBackend) Setup(readOnly bool) error {
-	return b.cache.Setup(b.path, readOnly)
+	if readOnly {
+		// read only, check if there are any objects here.
+		list, err := b.Client.List(context.Background(), b.prefix)
+		if err != nil {
+			log.Error().Err(err).Msgf("Setup index %s err: ", b.prefix)
+			return fmt.Errorf("setup backend err: %w", err)
+		}
+		// there are not any objects, that's a brand new index,
+		// so it cannot be opened with readOnly = true
+		if len(list) <= 0 {
+			return ErrPathNotExists
+		}
+	}
+	// make sure local cache is ready for this.
+	return b.cache.Setup(b.path)
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {
@@ -212,6 +226,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 		_, err = w.WriteTo(writer, closeCh)
 		if err != nil {
 			ch <- fmt.Errorf("write to file error: %w", err)
+			_ = writer.Close()
 			return
 		}
 

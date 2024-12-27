@@ -19,38 +19,26 @@ import (
 	"context"
 	"time"
 
-	"github.com/blugelabs/bluge/search"
-	"github.com/blugelabs/bluge/search/highlight"
-	"github.com/rs/zerolog/log"
-
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
-	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
-	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 )
 
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
 	mappings := index.GetMappings()
 	analyzers := index.GetAnalyzers()
-	_, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
 	if err != nil {
 		return nil, err
 	}
 
 	timeMin, timeMax := timerange.Query(query.Query)
-	readers, err := index.GetReaders(timeMin, timeMax)
-	if err != nil {
-		log.Printf("index.SearchV2: error accessing reader: %s", err.Error())
-		return nil, err
-	}
-	defer func() {
-		for _, reader := range readers {
-			reader.Close()
-		}
-	}()
-
+	searchers := index.GetSearchers(timeMin, timeMax)
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if query.Timeout > 0 {
@@ -59,114 +47,5 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	dmi, err := zincsearch.MultiSearch(ctx, query, mappings, analyzers, ToSearcher(readers)...)
-	if err != nil {
-		log.Printf("index.SearchV2: error executing search: %s", err.Error())
-		if err == context.DeadlineExceeded {
-			return &meta.SearchResponse{
-				TimedOut: true,
-				Error:    err.Error(),
-				Hits:     meta.Hits{Hits: []meta.Hit{}},
-			}, nil
-		}
-		return nil, err
-	}
-
-	return searchV2(index.GetAllShardNum(), int64(len(readers)), dmi, query, mappings)
-}
-
-func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query *meta.ZincQuery, mappings *meta.Mappings) (*meta.SearchResponse, error) {
-	resp := &meta.SearchResponse{
-		Hits: meta.Hits{Hits: []meta.Hit{}},
-	}
-
-	// highlight
-	var highlighter *highlight.SimpleHighlighter
-	if query.Highlight != nil {
-		if len(query.Highlight.PreTags) > 0 && len(query.Highlight.PostTags) > 0 {
-			highlighter = highlight.NewHTMLHighlighterTags(query.Highlight.PreTags[0], query.Highlight.PostTags[0])
-		} else {
-			highlighter = highlight.NewHTMLHighlighter()
-		}
-	}
-
-	Hits := make([]meta.Hit, 0)
-	next, err := dmi.Next()
-	for err == nil && next != nil {
-		var id string
-		var indexName string
-
-		var sourceData map[string]interface{}
-		var fieldsData map[string]interface{}
-		var highlightData map[string]interface{}
-		if query.Highlight != nil {
-			highlightData = make(map[string]interface{})
-		}
-		err = next.VisitStoredFields(func(field string, value []byte) bool {
-			switch field {
-			case "_id":
-				id = string(value)
-			case "_index":
-				indexName = string(value)
-			case "_source":
-				sourceData = source.Response(query.Source.(*meta.Source), value)
-				if query.Fields != nil {
-					fieldsData = fields.Response(query.Fields.([]*meta.Field), value, mappings)
-				}
-			default:
-				// highlight
-				if query.Highlight != nil && query.Highlight.Fields != nil {
-					if options, ok := query.Highlight.Fields[field]; ok {
-						if v, ok := next.Locations[field]; ok {
-							if len(options.PreTags) > 0 && len(options.PostTags) > 0 {
-								highlighter := highlight.NewHTMLHighlighterTags(options.PreTags[0], options.PostTags[0])
-								highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
-							} else {
-								highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
-							}
-						}
-					}
-				}
-			}
-
-			return true
-		})
-		if err != nil {
-			log.Printf("core.SearchV2: error accessing stored fields: %s", err.Error())
-			continue
-		}
-
-		hit := meta.Hit{
-			Index:     indexName,
-			Type:      "_doc",
-			ID:        id,
-			Score:     next.Score,
-			Source:    sourceData,
-			Fields:    fieldsData,
-			Highlight: highlightData,
-		}
-		if query.Explain {
-			hit.Explain = next.Explanation
-		}
-		Hits = append(Hits, hit)
-
-		next, err = dmi.Next()
-	}
-	if err != nil {
-		log.Printf("core.SearchV2: error iterating results: %s", err.Error())
-	}
-
-	resp.Took = int(dmi.Aggregations().Duration().Milliseconds())
-	resp.Shards = meta.Shards{Total: shardNum, Successful: readerNum, Skipped: shardNum - readerNum}
-	resp.Hits = meta.Hits{
-		Total:    meta.Total{Value: int(dmi.Aggregations().Count())},
-		MaxScore: dmi.Aggregations().Metric("max_score"),
-		Hits:     Hits,
-	}
-
-	if err := uquery.FormatResponse(resp, query, dmi.Aggregations()); err != nil {
-		log.Printf("core.SearchV2: error format response: %s", err.Error())
-	}
-
-	return resp, nil
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
 }

@@ -19,7 +19,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"golang.org/x/sync/errgroup"
@@ -269,19 +268,18 @@ func (index *Index) GetWALSize() uint64 {
 	return size
 }
 
-// GetReaders return all shard readers
-func (index *Index) GetReaders(timeMin, timeMax int64) ([]*bluge.Reader, error) {
-	readers := make([]*bluge.Reader, 0)
+// GetSearchers
+// When opening the reader, bluge will directly load the underlying resources.
+// So we return a SimpleSearcher, and it will load the reader when it's really needed for searching.
+func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
+	readers := make([]*SimpleSearcher, 0)
 	for _, shard := range index.shards {
-		rs, err := shard.GetReaders(timeMin, timeMax)
-		if err != nil {
-			return nil, err
-		}
+		rs := shard.GetSearchers(timeMin, timeMax)
 		if len(rs) > 0 {
 			readers = append(readers, rs...)
 		}
 	}
-	return readers, nil
+	return readers
 }
 
 // UpdateMetadata update index metadata, mainly docNum and storageSize

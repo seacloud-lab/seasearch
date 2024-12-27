@@ -75,6 +75,8 @@ func InitVecIndexManager() {
 	go backgroundSealCheck()
 
 	go backgroundSeal()
+
+	go lazyCloseSegmentWriter()
 }
 
 func CloseVecIndexManager() {
@@ -145,6 +147,34 @@ func execGC() (bool, error) {
 	vecIdxManager.lock.Unlock()
 
 	return true, nil
+}
+
+func lazyCloseSegmentWriter() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		closeList := make([]*VecSegment, 0)
+		vecIdxManager.lock.Lock()
+		for _, vec := range vecIdxManager.cache {
+			closeList = append(closeList, vec.ListSegment()...)
+		}
+		vecIdxManager.lock.Unlock()
+
+		for _, segment := range closeList {
+			segment.writerLock.RLock()
+			w := segment.vecStoreWriter
+			refCount := segment.writerRefCount
+			closeTime := segment.closeTime
+			segment.writerLock.RUnlock()
+
+			if refCount == 0 && time.Since(closeTime) > 5*time.Minute && w != nil {
+				segment.writerLock.Lock()
+				segment.vecStoreWriter = nil
+				segment.writerLock.Unlock()
+				_ = w.Close()
+				log.Debug().Msgf("lazy close vec index segment writer %s", segment.getName())
+			}
+		}
+	}
 }
 
 // GetVectorIndex

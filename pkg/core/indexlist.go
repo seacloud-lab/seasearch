@@ -59,6 +59,7 @@ func init() {
 	ZINC_INDEX_LIST.gcCloser = z.NewCloser(1)
 
 	go ZINC_INDEX_LIST.StartGC()
+	go LazyCloseSecondIndexShardWriters()
 
 	// in cluster mode, we load metadata later when assigns ready
 	if config.Global.ServerMode != config.ServerModeCluster {
@@ -251,6 +252,46 @@ func (t *IndexList) GC() error {
 		}
 	}
 	return nil
+}
+
+// LazyCloseSecondIndexShardWriters
+// We close all unused indexSecondShard writers in a delayed manner,
+// which is to ensure that the finishing work inside the writer can proceed normally,
+// and to ensure that the underlying resources can be released.
+func LazyCloseSecondIndexShardWriters() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		secondShardList := make([]*tempSecondShd, 0)
+		for _, idx := range ZINC_INDEX_LIST.List() {
+			for _, shd := range idx.shards {
+				shd.lock.RLock()
+				for _, secondShd := range shd.shards {
+					secondShardList = append(secondShardList, &tempSecondShd{
+						secondShard: secondShd,
+						indexShard:  shd,
+					})
+				}
+				shd.lock.RUnlock()
+			}
+		}
+
+		for _, temp := range secondShardList {
+			shard := temp.secondShard
+			shard.lock.RLock()
+			w := shard.writer
+			refCount := shard.writerRefcount
+			closeTime := shard.closeTime
+			shard.lock.RUnlock()
+
+			if refCount == 0 && time.Since(closeTime) > 5*time.Minute && w != nil {
+				shard.lock.Lock()
+				shard.writer = nil
+				shard.lock.Unlock()
+				_ = w.Close()
+				log.Debug().Msgf("lazy close second shard %s %d", temp.indexShard.name, shard.ref.ID)
+			}
+		}
+	}
 }
 
 func InitIndexList() {
