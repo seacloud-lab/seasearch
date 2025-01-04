@@ -24,9 +24,8 @@ type ClusterManagerConfig struct {
 }
 
 type GeneralConfig struct {
-	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
-	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
-	LogDir           string `env:"SS_CLUSTER_MANAGER_LOG_DIR,default=./log"`
+	LogToStd bool   `env:"SS_LOG_TO_STDOUT"`
+	LogDir   string `env:"SS_CLUSTER_MANAGER_LOG_DIR,default=./log"`
 }
 
 type ManagerConfig struct {

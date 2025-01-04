@@ -17,7 +17,7 @@ import (
 func main() {
 	initConfig()
 
-	log.Logger = zutils.SetupMainLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "zinc-cluster-manager.log", conf.General.LogDir)
+	log.Logger = zutils.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir)
 
 	app := gin.New()
 	SetupHttp(app)
