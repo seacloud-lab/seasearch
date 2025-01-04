@@ -83,10 +83,9 @@ type config struct {
 }
 
 type logConfig struct {
-	SeafileLogToStd  bool   `env:"SEAFILE_LOG_TO_STDOUT"`
-	SeatableLogToStd bool   `env:"SEATABLE_LOG_TO_STDOUT"`
-	LogDir           string `env:"SS_LOG_DIR,default=./log"`
-	LogLevel         string `env:"SS_LOG_LEVEL,default=debug"`
+	LogToStd bool   `env:"SS_LOG_TO_STDOUT"`
+	LogDir   string `env:"SS_LOG_DIR,default=./log"`
+	LogLevel string `env:"SS_LOG_LEVEL,default=debug"`
 }
 
 type objCache struct {
