@@ -22,8 +22,8 @@ var (
 
 func main() {
 	initConfig()
-	log.Logger = zutils.SetupMainLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "seasearch-proxy.log", conf.General.LogDir)
-	accessLog = zutils.SetupAccessLog(conf.General.SeafileLogToStd || conf.General.SeatableLogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
+	log.Logger = zutils.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir)
+	accessLog = zutils.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
 	StartProxy()
 
 	app := gin.New()

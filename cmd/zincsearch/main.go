@@ -67,7 +67,7 @@ func main() {
 		os.Exit(0)
 	}
 	// setup main logger
-	log.Logger = zutils.SetupMainLog(config.Global.LogConfig.SeafileLogToStd || config.Global.LogConfig.SeatableLogToStd, "seasearch.log", config.Global.LogConfig.LogDir)
+	log.Logger = zutils.SetupMainLog(config.Global.LogConfig.LogToStd, "seasearch.log", config.Global.LogConfig.LogDir)
 
 	log.Info().Msgf("Starting Zinc %s", meta.Version)
 	// Initialize telemetry

@@ -26,7 +26,7 @@ import (
 )
 
 func AccessLog(app *gin.Engine) {
-	var accessLogger = zutils.SetupAccessLog(config.Global.LogConfig.SeafileLogToStd || config.Global.LogConfig.SeatableLogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
+	var accessLogger = zutils.SetupAccessLog(config.Global.LogConfig.LogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
 	app.Use(func(c *gin.Context) {
 		timeStart := time.Now()
 		c.Writer.Header().Set("Zinc", meta.Version)
