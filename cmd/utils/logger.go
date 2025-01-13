@@ -1,4 +1,4 @@
-package zutils
+package utils
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 type LogOuter struct {
@@ -71,7 +70,7 @@ func SetupAccessLog(logToStdout bool, name, logDir string) zerolog.Logger {
 	return zerolog.New(writer).With().Timestamp().Logger()
 }
 
-func SetupMainLog(logToStdout bool, name, logDir string) zerolog.Logger {
+func SetupMainLog(logToStdout bool, name, logDir, level string) zerolog.Logger {
 	var out *LogOuter
 	if logToStdout {
 		out = &LogOuter{Out: os.Stdout, LogToStdout: true}
@@ -92,7 +91,7 @@ func SetupMainLog(logToStdout bool, name, logDir string) zerolog.Logger {
 		out = &LogOuter{Out: file, LogToStdout: false}
 	}
 
-	lv, err := zerolog.ParseLevel(config.Global.LogConfig.LogLevel)
+	lv, err := zerolog.ParseLevel(level)
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid log level")
 	}
