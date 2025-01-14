@@ -12,8 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/cmd/utils"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 )
 
 var (
@@ -22,8 +22,8 @@ var (
 
 func main() {
 	initConfig()
-	log.Logger = utils.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir, conf.General.LogLevel)
-	accessLog = utils.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
+	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir, conf.General.LogLevel)
+	accessLog = logger.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
 	StartProxy()
 
 	app := gin.New()

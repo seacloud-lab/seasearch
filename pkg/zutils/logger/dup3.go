@@ -1,6 +1,6 @@
 //go:build linux && arm64
 
-package utils
+package logger
 
 import (
 	"syscall"
