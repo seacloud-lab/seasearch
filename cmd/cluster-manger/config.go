@@ -26,6 +26,7 @@ type ClusterManagerConfig struct {
 type GeneralConfig struct {
 	LogToStd bool   `env:"SS_LOG_TO_STDOUT"`
 	LogDir   string `env:"SS_CLUSTER_MANAGER_LOG_DIR,default=./log"`
+	LogLevel string `env:"SS_CLUSTER_MANAGER_LOG_LEVEL,default=INFO"`
 }
 
 type ManagerConfig struct {
@@ -39,10 +40,8 @@ type ClusterConfig struct {
 }
 
 func initConfig() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Print(err.Error())
-	}
+	// support .env file for config
+	_ = godotenv.Load()
 	loadConfig(reflect.ValueOf(conf).Elem())
 
 	gin.SetMode(gin.ReleaseMode)

@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 )
 
 const (
@@ -167,11 +168,11 @@ type vectorConfig struct {
 var Global = new(config)
 
 func init() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Print(err.Error())
-	}
+	// support .env file for config
+	_ = godotenv.Load()
 	initConfig(Global)
+	// setup main logger
+	log.Logger = logger.SetupMainLog(Global.LogConfig.LogToStd, "seasearch.log", Global.LogConfig.LogDir, Global.LogConfig.LogLevel)
 }
 
 func initConfig(c *config) {
@@ -185,10 +186,10 @@ func initConfig(c *config) {
 	// check data path
 	testPath := path.Join(c.DataPath, "_test_")
 	if err := os.MkdirAll(testPath, 0755); err != nil {
-		log.Fatal().Err(err).Msg("ZINC_DATA_PATH is not writable")
+		log.Fatal().Err(err).Msg("SS_DATA_PATH is not writable")
 	}
 	if err := os.Remove(testPath); err != nil {
-		log.Fatal().Err(err).Msg("ZINC_DATA_PATH is not writable")
+		log.Fatal().Err(err).Msg("SS_DATA_PATH is not writable")
 	}
 
 	// configure ice compress algorithm

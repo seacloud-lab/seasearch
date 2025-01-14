@@ -1,6 +1,6 @@
 //go:build linux && arm64
 
-package zutils
+package logger
 
 import (
 	"syscall"

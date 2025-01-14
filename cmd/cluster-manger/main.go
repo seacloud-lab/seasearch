@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
+
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func main() {
 	initConfig()
 
-	log.Logger = zutils.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir)
+	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir, conf.General.LogLevel)
 
 	app := gin.New()
 	SetupHttp(app)

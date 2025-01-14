@@ -29,10 +29,8 @@ import (
 
 	"github.com/grafana/pyroscope-go"
 	"github.com/zincsearch/zincsearch/pkg/auth"
-	"github.com/zincsearch/zincsearch/pkg/lru_cache"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-
 	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/wal"
 
 	"github.com/getsentry/sentry-go"
@@ -66,9 +64,6 @@ func main() {
 		fmt.Printf("zinc version %s\n", meta.Version)
 		os.Exit(0)
 	}
-	// setup main logger
-	log.Logger = zutils.SetupMainLog(config.Global.LogConfig.LogToStd, "seasearch.log", config.Global.LogConfig.LogDir)
-
 	log.Info().Msgf("Starting Zinc %s", meta.Version)
 	// Initialize telemetry
 	telemetry()

@@ -19,14 +19,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 )
 
 func AccessLog(app *gin.Engine) {
-	var accessLogger = zutils.SetupAccessLog(config.Global.LogConfig.LogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
+	var accessLogger = logger.SetupAccessLog(config.Global.LogConfig.LogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
 	app.Use(func(c *gin.Context) {
 		timeStart := time.Now()
 		c.Writer.Header().Set("Zinc", meta.Version)
