@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,7 +34,7 @@ func SetupHttp(r *gin.Engine) {
 		start := time.Now()
 		c.Next()
 		duration := time.Since(start).Seconds()
-		accessLog.Print(fmt.Sprintf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), duration))
+		accessLog.Info().Msgf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), duration)
 	})
 
 	// cluster manager

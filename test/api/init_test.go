@@ -17,12 +17,23 @@ package api
 
 import (
 	"io"
+
+	"os"
+	"testing"
+
 	"net/http"
 	"net/http/httptest"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/zincsearch/zincsearch/pkg/auth"
+	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/ider"
+	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
 )
 
@@ -99,4 +110,23 @@ func request(method, api string, body io.Reader) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	server().ServeHTTP(w, req)
 	return w
+}
+
+func TestMain(m *testing.M) {
+	os.Setenv("ZINC_FIRST_ADMIN_USER", username)
+	os.Setenv("ZINC_FIRST_ADMIN_PASSWORD", password)
+
+	config.InitConfig()
+	ider.InitIder()
+	metadata.InitMetaStorage()
+	auth.InitFirstUser()
+	chs.InitGse()
+	core.InitWalList()
+	// init lruCache
+	lru_cache.Init()
+	// init assign watch
+	core.InitIndexList()
+	// init vector index
+	core.InitVecIndexManager()
+	os.Exit(m.Run())
 }

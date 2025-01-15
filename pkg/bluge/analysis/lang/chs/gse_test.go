@@ -27,6 +27,7 @@ import (
 )
 
 func TestLoadDict(t *testing.T) {
+	InitGse()
 	type args struct {
 		enable     bool
 		enableStop bool

@@ -12,26 +12,29 @@ import (
 )
 
 type LogOuter struct {
-	LogToStdout bool
-	Out         io.Writer
+	LogToStdout   bool
+	Out           io.Writer
+	componentName string
 }
 
-const componentName = "[seasearch] "
+const ComponentSeaSearch = "[seasearch] "
+const ComponentSeaSearchProxy = "[seasearch-proxy] "
+const ComponentSeaSearchClusterManager = "[seasearch-cluster-manager] "
 
 func (l *LogOuter) Write(data []byte) (n int, err error) {
 	if l.LogToStdout {
-		buf := make([]byte, 0, len(componentName)+len(data))
-		buf = append(buf, []byte(componentName)...)
+		buf := make([]byte, 0, len(l.componentName)+len(data))
+		buf = append(buf, []byte(l.componentName)...)
 		_, err := l.Out.Write(append(buf, data...))
 		return len(data), err
 	}
 	return l.Out.Write(data)
 }
 
-func SetupAccessLog(logToStdout bool, name, logDir string) zerolog.Logger {
+func SetupAccessLog(logToStdout bool, name, logDir, componentName string) zerolog.Logger {
 	var out *LogOuter
 	if logToStdout {
-		out = &LogOuter{Out: os.Stdout, LogToStdout: true}
+		out = &LogOuter{Out: os.Stdout, LogToStdout: true, componentName: componentName}
 	} else {
 		err := os.MkdirAll(logDir, os.ModePerm)
 		if err != nil {
@@ -41,7 +44,7 @@ func SetupAccessLog(logToStdout bool, name, logDir string) zerolog.Logger {
 		if err != nil {
 			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
 		}
-		out = &LogOuter{Out: file, LogToStdout: false}
+		out = &LogOuter{Out: file, LogToStdout: false, componentName: componentName}
 	}
 
 	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
@@ -70,10 +73,10 @@ func SetupAccessLog(logToStdout bool, name, logDir string) zerolog.Logger {
 	return zerolog.New(writer).With().Timestamp().Logger()
 }
 
-func SetupMainLog(logToStdout bool, name, logDir, level string) zerolog.Logger {
+func SetupMainLog(logToStdout bool, name, logDir, level, componentName string) zerolog.Logger {
 	var out *LogOuter
 	if logToStdout {
-		out = &LogOuter{Out: os.Stdout, LogToStdout: true}
+		out = &LogOuter{Out: os.Stdout, LogToStdout: true, componentName: componentName}
 	} else {
 		err := os.MkdirAll(logDir, os.ModePerm)
 		if err != nil {
@@ -88,7 +91,7 @@ func SetupMainLog(logToStdout bool, name, logDir, level string) zerolog.Logger {
 		if err != nil {
 			log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
 		}
-		out = &LogOuter{Out: file, LogToStdout: false}
+		out = &LogOuter{Out: file, LogToStdout: false, componentName: componentName}
 	}
 
 	lv, err := zerolog.ParseLevel(level)

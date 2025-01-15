@@ -31,7 +31,7 @@ type ClusterProxyConfig struct {
 	Port               int    `env:"SS_CLUSTER_PROXY_PORT,default=4082"`
 }
 
-func initConfig() {
+func initProxyConfig() {
 	// support .env file for config
 	_ = godotenv.Load()
 	loadConfig(reflect.ValueOf(conf).Elem())

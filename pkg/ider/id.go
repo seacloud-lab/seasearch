@@ -29,7 +29,7 @@ type Node struct {
 
 var local *Node
 
-func init() {
+func InitIder() {
 	var err error
 	local, err = NewNode(config.Global.Cluster.NodeId)
 	if err != nil {

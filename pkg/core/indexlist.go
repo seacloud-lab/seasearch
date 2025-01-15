@@ -45,7 +45,7 @@ type IndexList struct {
 	gcCloser *z.Closer
 }
 
-func init() {
+func InitIndexList() {
 	// check version
 	version, _ = metadata.KV.Get("version")
 	if version == nil {
@@ -61,12 +61,9 @@ func init() {
 	go ZINC_INDEX_LIST.StartGC()
 	go LazyCloseSecondIndexShardWriters()
 
-	// in cluster mode, we load metadata later when assigns ready
-	if config.Global.ServerMode != config.ServerModeCluster {
-		err := LoadZincIndexesFromMetadata(string(version))
-		if err != nil {
-			log.Fatal().Err(err).Msg("Error loading index")
-		}
+	err := LoadZincIndexesFromMetadata(string(version))
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error loading index")
 	}
 
 	// update version
@@ -76,11 +73,17 @@ func init() {
 			log.Error().Err(err).Msg("Error set version")
 		}
 	}
-	var err error
+
 	ZINC_INDEX_ALIAS_LIST.Aliases, err = metadata.Alias.Get()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error loading alias")
 	}
+
+	if config.Global.ServerMode != config.ServerModeCluster {
+		return
+	}
+
+	go watchIndexUpdate()
 }
 
 func (t *IndexList) Add(index *Index) {
@@ -292,17 +295,6 @@ func LazyCloseSecondIndexShardWriters() {
 			}
 		}
 	}
-}
-
-func InitIndexList() {
-	if config.Global.ServerMode != config.ServerModeCluster {
-		return
-	}
-	err := LoadZincIndexesFromMetadata(string(version))
-	if err != nil {
-		log.Fatal().Err(err).Msg("init assign error")
-	}
-	go watchIndexUpdate()
 }
 
 func CloseIndexList() {

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 var l *Log
@@ -28,6 +29,7 @@ var l *Log
 const name = "walTest"
 
 func TestMain(m *testing.M) {
+	config.InitConfig()
 	var err error
 	l, err = Open(name)
 	if err != nil {

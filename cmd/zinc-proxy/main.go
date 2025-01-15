@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 )
@@ -21,9 +23,15 @@ var (
 )
 
 func main() {
-	initConfig()
-	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir, conf.General.LogLevel)
-	accessLog = logger.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir)
+	config.InitConfig()
+	initProxyConfig()
+
+	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir, conf.General.LogLevel, logger.ComponentSeaSearchProxy)
+	accessLog = logger.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir, logger.ComponentSeaSearchProxy)
+
+	metadata.InitMetaStorage()
+	ider.InitIder()
+	InitProxy()
 	StartProxy()
 
 	app := gin.New()

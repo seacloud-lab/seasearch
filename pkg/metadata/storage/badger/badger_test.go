@@ -19,9 +19,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 func Test_badgerStorage_List(t *testing.T) {
+	config.InitConfig()
+
 	type args struct {
 		prefix string
 		in1    int

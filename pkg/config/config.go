@@ -28,7 +28,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 )
 
 const (
@@ -167,12 +166,10 @@ type vectorConfig struct {
 
 var Global = new(config)
 
-func init() {
+func InitConfig() {
 	// support .env file for config
 	_ = godotenv.Load()
 	initConfig(Global)
-	// setup main logger
-	log.Logger = logger.SetupMainLog(Global.LogConfig.LogToStd, "seasearch.log", Global.LogConfig.LogDir, Global.LogConfig.LogLevel)
 }
 
 func initConfig(c *config) {
