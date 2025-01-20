@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -74,6 +75,28 @@ func GetAddrByIndex(indexName string) (string, error) {
 	}
 
 	return addr, nil
+}
+
+type nodeInfo struct {
+	Id   int
+	addr string
+}
+
+func GetNodeList() []nodeInfo {
+	nodeMap.mutex.RLock()
+	defer nodeMap.mutex.RUnlock()
+	res := make([]nodeInfo, 0, len(nodeMap.mp))
+
+	for id, addr := range nodeMap.mp {
+		res = append(res, nodeInfo{
+			Id:   id,
+			addr: addr,
+		})
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Id < res[j].Id
+	})
+	return res
 }
 
 func getAssignNodeByIndex(indexName string) (int, bool) {

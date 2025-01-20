@@ -20,9 +20,10 @@ type ProxyConfig struct {
 }
 
 type GeneralConfig struct {
-	LogToStd bool   `env:"SS_LOG_TO_STDOUT"`
-	LogDir   string `env:"SS_CLUSTER_PROXY_LOG_DIR,default=./log"`
-	LogLevel string `env:"SS_CLUSTER_PROXY_LOG_LEVEL,default=INFO"`
+	LogToStd                   bool   `env:"SS_LOG_TO_STDOUT"`
+	LogDir                     string `env:"SS_CLUSTER_PROXY_LOG_DIR,default=./log"`
+	LogLevel                   string `env:"SS_CLUSTER_PROXY_LOG_LEVEL,default=INFO"`
+	IndexPartialQueryThreshold int    `env:"SS_INDEX_PARTIAL_QUERY_THRESHOLD,default=3"`
 }
 
 type ClusterProxyConfig struct {

@@ -282,6 +282,23 @@ func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	return readers
 }
 
+// GetPartialSearchers
+// Get partial second shards for different query nodes to collaborate on the search,
+// the second shard ids are assigned by the SeaSearch-proxy.
+func (index *Index) GetPartialSearchers(timeMin, timeMax int64, secondShardIds ...int) []*SimpleSearcher {
+	if len(secondShardIds) == 0 {
+		return make([]*SimpleSearcher, 0)
+	}
+	result := make([]*SimpleSearcher, 0)
+	for _, shard := range index.shards {
+		rs := shard.GetPartialSearchers(timeMin, timeMax, secondShardIds...)
+		if len(rs) > 0 {
+			result = append(result, rs...)
+		}
+	}
+	return result
+}
+
 // UpdateMetadata update index metadata, mainly docNum and storageSize
 // need merge from all first layer shards
 func (index *Index) UpdateMetadata() error {

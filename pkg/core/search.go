@@ -19,6 +19,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
@@ -48,4 +49,28 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
+}
+
+func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery) (*meta.SearchResponse, error) {
+	mappings := index.GetMappings()
+	analyzers := index.GetAnalyzers()
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+
+	timeMin, timeMax := timerange.Query(query.Query)
+	searchers := index.GetPartialSearchers(timeMin, timeMax, secondShardIds...)
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if query.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(query.Timeout)*time.Second)
+		defer cancel()
+	}
+	log.Debug().Msgf("exec partial query %s got second shard ids: %v", index.GetName(), secondShardIds)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, int64(len(searchers)), simpleSearchersToSearcher(searchers)...)
 }
