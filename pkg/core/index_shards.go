@@ -18,6 +18,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -282,15 +283,23 @@ func (s *IndexShard) openReader(shardID int64) (*bluge.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	r, err := bluge.OpenReader(cfg)
-	if err != nil {
-		// it's a new empty index, without any document
-		if errors.Is(err, directory.ErrPathNotExists) {
-			return nil, nil
+	var r *bluge.Reader
+	for i := 0; i < 2; i++ {
+		r, err = bluge.OpenReader(cfg)
+		if err != nil {
+			// it's a new empty index, without any document
+			if errors.Is(err, directory.ErrPathNotExists) {
+				return nil, nil
+			}
+			if strings.Contains(err.Error(), "unable to find a usable snapshot") {
+				log.Warn().Msgf("failed to open reader for %s %s: %v retrying", s.root.GetName(), s.GetID(), err)
+				continue
+			}
+			return nil, fmt.Errorf("open %s %s err: %w", s.root.GetName(), s.GetID(), err)
 		}
-		return nil, fmt.Errorf("open %s %s err: %w", s.root.GetName(), s.GetID(), err)
+		return r, nil
 	}
-	return r, nil
+	return r, err
 }
 
 func (s *IndexShard) Close() error {
