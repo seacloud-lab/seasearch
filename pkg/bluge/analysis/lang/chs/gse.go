@@ -50,7 +50,7 @@ func NewGseStopTokenFilter() analysis.TokenFilter {
 
 var seg *gse.Segmenter
 
-func init() {
+func InitGse() {
 	seg = new(gse.Segmenter)
 	enable := config.Global.Plugin.GSE.Enable         // true / false
 	enableStop := config.Global.Plugin.GSE.EnableStop // true / false

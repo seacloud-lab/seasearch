@@ -25,6 +25,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	config.InitConfig()
 	if config.Global.Etcd.Endpoints == nil {
 		os.Exit(0)
 		return

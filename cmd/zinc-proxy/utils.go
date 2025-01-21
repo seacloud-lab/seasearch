@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,13 +13,15 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
 var proxyPool *ProxyPool
 var accessLog zerolog.Logger
 
-func init() {
+func InitProxy() {
 	proxyPool = &ProxyPool{
 		pool: make(map[string]*httputil.ReverseProxy),
 	}
@@ -96,6 +100,12 @@ func (pp *ProxyPool) Get(url *url.URL) *httputil.ReverseProxy {
 	p, ok := pp.pool[url.Host]
 	if !ok {
 		rp := httputil.NewSingleHostReverseProxy(url)
+		rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			if !errors.Is(err, context.Canceled) {
+				log.Error().Msgf("http: proxy error: %v", err)
+				w.WriteHeader(http.StatusBadGateway)
+			}
+		}
 		pp.pool[url.Host] = rp
 		p = rp
 	}

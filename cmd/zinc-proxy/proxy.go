@@ -23,7 +23,6 @@ var (
 )
 
 func StartProxy() {
-
 	cluster.InitEtcd(config.Global.Etcd.Prefix, config.Global.Etcd.Endpoints)
 	nodeMap = &NodeMap{
 		mp: make(map[int]string),

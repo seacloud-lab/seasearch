@@ -18,7 +18,7 @@ import (
 func main() {
 	initConfig()
 
-	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir, conf.General.LogLevel)
+	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir, conf.General.LogLevel, logger.ComponentSeaSearchClusterManager)
 
 	app := gin.New()
 	SetupHttp(app)

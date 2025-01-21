@@ -29,9 +29,12 @@ import (
 
 	"github.com/grafana/pyroscope-go"
 	"github.com/zincsearch/zincsearch/pkg/auth"
+	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/wal"
+	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
@@ -61,10 +64,24 @@ import (
 func main() {
 	// Version
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("zinc version %s\n", meta.Version)
+		fmt.Printf("SeaSearch version %s\n", "0.9.0")
 		os.Exit(0)
 	}
-	log.Info().Msgf("Starting Zinc %s", meta.Version)
+	// The underlying components need to be initialized first.
+	// Initialize the config, Ider, metadata storage, and first user in order.
+	config.InitConfig()
+	// setup main logger
+	log.Logger = logger.SetupMainLog(config.Global.LogConfig.LogToStd, "seasearch.log", config.Global.LogConfig.LogDir, config.Global.LogConfig.LogLevel, logger.ComponentSeaSearch)
+	log.Info().Msgf("Starting SeaSearch %s", "0.9.0")
+	// init id generator
+	ider.InitIder()
+	// init metadata storage
+	metadata.InitMetaStorage()
+	// init first user after id generator and metadata ready.
+	auth.InitFirstUser()
+	// init gse plugin
+	chs.InitGse()
+
 	// Initialize telemetry
 	telemetry()
 	// Initialize sentry
@@ -79,12 +96,13 @@ func main() {
 	core.InitIndexList()
 	// init vector index
 	core.InitVecIndexManager()
-	// init auth wath
+	// init listen auth and role
 	auth.Init()
 	// init async metadata update
 	core.InitAsyncMetaDataUpdate()
 	// Initialize WAL
 	if config.Global.EnableWal {
+		core.InitWalList()
 		wal.Init()
 	}
 

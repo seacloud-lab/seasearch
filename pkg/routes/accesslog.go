@@ -26,7 +26,7 @@ import (
 )
 
 func AccessLog(app *gin.Engine) {
-	var accessLogger = logger.SetupAccessLog(config.Global.LogConfig.LogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir)
+	var accessLogger = logger.SetupAccessLog(config.Global.LogConfig.LogToStd, "seasearch-access.log", config.Global.LogConfig.LogDir, logger.ComponentSeaSearch)
 	app.Use(func(c *gin.Context) {
 		timeStart := time.Now()
 		c.Writer.Header().Set("Zinc", meta.Version)
@@ -34,6 +34,6 @@ func AccessLog(app *gin.Engine) {
 		c.Next()
 
 		took := time.Since(timeStart).Seconds()
-		accessLogger.Printf("- %q - %q -%q - %d - %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took)
+		accessLogger.Info().Msgf("%q %q %d %.3f", c.Request.Method, c.Request.RequestURI, c.Writer.Status(), took)
 	})
 }

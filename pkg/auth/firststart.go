@@ -22,7 +22,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func init() {
+func InitFirstUser() {
 	// init first start
 	firstStart, err := isFirstStart()
 	if err != nil {

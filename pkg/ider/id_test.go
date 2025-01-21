@@ -21,6 +21,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestMain(m *testing.M) {
+	InitIder()
+}
+
 func TestGenerate(t *testing.T) {
 	got := Generate()
 	assert.NotEmpty(t, got)

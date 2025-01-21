@@ -34,7 +34,7 @@ type IndexShardWALList struct {
 	lock   sync.RWMutex
 }
 
-func init() {
+func InitWalList() {
 	ZINC_INDEX_SHARD_WAL_LIST.Shards = make(map[string]*IndexShard)
 	if !config.Global.EnableWal {
 		return
