@@ -2,10 +2,12 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,11 +92,28 @@ func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
 		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
 	}
 
-	reader, err := bluge.OpenReader(cfg)
-	if err != nil {
-		return nil, err
+	var err error
+	var r *bluge.Reader
+	for i := 0; i < 3; i++ {
+		r, err = bluge.OpenReader(cfg)
+		if err != nil {
+			// it's a new empty index, without any document
+			if errors.Is(err, directory.ErrPathNotExists) {
+				return nil, nil
+			}
+			// When opening the reader, the writer may be writing and generating new snapshots concurrently.
+			// The snapshots listed by the reader may have expired and been cleaned up at this time.
+			// In this case, we should try to get the latest snapshot again.
+			if strings.Contains(err.Error(), "unable to find a usable snapshot") {
+				log.Warn().Msgf("failed to open reader for %s: %v retrying", s.getName(), err)
+				time.Sleep(time.Duration(zutils.RandInt(100, 300)) * time.Millisecond)
+				continue
+			}
+			return nil, fmt.Errorf("open %s err: %w", s.getName(), err)
+		}
+		return r, nil
 	}
-	return reader, nil
+	return r, err
 }
 
 func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
@@ -262,6 +281,9 @@ func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r == nil {
+		return []int64{}, nil
+	}
 	defer func() {
 		_ = r.Close()
 	}()
@@ -304,6 +326,9 @@ func (s *VecSegment) save() error {
 		r, err := s.openVecStoreReader()
 		if err != nil {
 			return err
+		}
+		if r == nil {
+			return nil
 		}
 		defer func() {
 			_ = r.Close()
@@ -585,6 +610,9 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 	reader, err := s.openVecStoreReader()
 	if err != nil {
 		return nil, nil, err
+	}
+	if reader == nil {
+		return []float32{}, []int64{}, nil
 	}
 	defer func() {
 		_ = reader.Close()
