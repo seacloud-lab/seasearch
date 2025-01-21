@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func TestConfig(t *testing.T) {
@@ -112,7 +113,7 @@ func TestConfig(t *testing.T) {
 			os.Setenv("ZINC_MAX_DOCUMENT_SIZE", v.value)
 
 			c := new(config)
-			loadConfig(reflect.ValueOf(c).Elem())
+			zutils.LoadConfig(reflect.ValueOf(c).Elem())
 			assert.Equal(t, c.MaxDocumentSize, v.expect)
 		}
 
@@ -141,7 +142,7 @@ func TestConfig(t *testing.T) {
 			os.Setenv("ZINC_WAL_SYNC_INTERVAL", v.value)
 
 			c := new(config)
-			loadConfig(reflect.ValueOf(c).Elem())
+			zutils.LoadConfig(reflect.ValueOf(c).Elem())
 			assert.Equal(t, c.WalSyncInterval, v.expect)
 		}
 
@@ -182,7 +183,7 @@ func TestSentryDSNOverride(t *testing.T) {
 
 	t.Run("check", func(t *testing.T) {
 		c := new(config)
-		loadConfig(reflect.ValueOf(c).Elem())
+		zutils.LoadConfig(reflect.ValueOf(c).Elem())
 
 		assert.Equal(t, customDSN, c.SentryDSN)
 	})

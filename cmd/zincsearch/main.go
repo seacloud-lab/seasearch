@@ -64,13 +64,15 @@ import (
 func main() {
 	// Version
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("zinc version %s\n", meta.Version)
+		fmt.Printf("SeaSearch version %s\n", "0.9.0")
 		os.Exit(0)
 	}
-	// init config first
+	// The underlying components need to be initialized first.
+	// Initialize the config, Ider, metadata storage, and first user in order.
 	config.InitConfig()
 	// setup main logger
 	log.Logger = logger.SetupMainLog(config.Global.LogConfig.LogToStd, "seasearch.log", config.Global.LogConfig.LogDir, config.Global.LogConfig.LogLevel, logger.ComponentSeaSearch)
+	log.Info().Msgf("Starting SeaSearch %s", "0.9.0")
 	// init id generator
 	ider.InitIder()
 	// init metadata storage
@@ -115,8 +117,6 @@ func main() {
 		Addr:    ADDRESS + ":" + PORT,
 		Handler: app,
 	}
-
-	log.Info().Msgf("Starting Zinc %s", meta.Version)
 
 	done := shutdown(func(grace bool, done chan<- struct{}) {
 		// close http server

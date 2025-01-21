@@ -34,6 +34,6 @@ func AccessLog(app *gin.Engine) {
 		c.Next()
 
 		took := time.Since(timeStart).Seconds()
-		accessLogger.Info().Msgf("\"%s %s %s\" %d %f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took)
+		accessLogger.Info().Msgf("\"%s %s %s\" %d %.3f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), took)
 	})
 }

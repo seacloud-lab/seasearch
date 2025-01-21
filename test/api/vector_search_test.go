@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -154,7 +153,6 @@ func TestVectorSearch(t *testing.T) {
 	}()
 	lru_cache.Init()
 	defer lru_cache.ShutDown()
-	core.InitVecIndexManager()
 
 	t.Run("init metaData for vectorSearch", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
