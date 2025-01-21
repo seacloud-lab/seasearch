@@ -34,7 +34,7 @@ func SetupHttp(r *gin.Engine) {
 		start := time.Now()
 		c.Next()
 		duration := time.Since(start).Seconds()
-		accessLog.Info().Msgf("\"%s %s %s\" %d %.3f", c.Request.Method, c.Request.RequestURI, c.Request.Proto, c.Writer.Status(), duration)
+		accessLog.Info().Msgf("%q %q %d %.3f", c.Request.Method, c.Request.RequestURI, c.Writer.Status(), duration)
 	})
 
 	// cluster manager
