@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"io"
+	stdlog "log"
 	"os"
 	"path"
 	"strings"
@@ -73,6 +74,18 @@ func SetupAccessLog(logToStdout bool, name, logDir, componentName string) zerolo
 	return zerolog.New(writer).With().Timestamp().Logger()
 }
 
+type stdLogAdapter struct {
+	out zerolog.Logger
+}
+
+func (s *stdLogAdapter) Write(data []byte) (int, error) {
+	if len(data) > 0 && data[len(data)-1] == '\n' {
+		data = data[:len(data)-1]
+	}
+	s.out.Error().Msg(string(data))
+	return len(data), nil
+}
+
 func SetupMainLog(logToStdout bool, name, logDir, level, componentName string) zerolog.Logger {
 	var out *LogOuter
 	if logToStdout {
@@ -123,5 +136,10 @@ func SetupMainLog(logToStdout bool, name, logDir, level, componentName string) z
 		return fmt.Sprintf("%s", i)
 	}
 
-	return zerolog.New(writer).With().Timestamp().Logger()
+	zeroLogger := zerolog.New(writer).With().Timestamp().Logger()
+
+	// we adjust stdlog to unify all output log formats
+	stdlog.SetFlags(0)
+	stdlog.SetOutput(&stdLogAdapter{out: zeroLogger})
+	return zeroLogger
 }

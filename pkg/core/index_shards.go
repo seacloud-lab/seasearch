@@ -27,6 +27,7 @@ import (
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -284,15 +285,19 @@ func (s *IndexShard) openReader(shardID int64) (*bluge.Reader, error) {
 		return nil, err
 	}
 	var r *bluge.Reader
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		r, err = bluge.OpenReader(cfg)
 		if err != nil {
 			// it's a new empty index, without any document
 			if errors.Is(err, directory.ErrPathNotExists) {
 				return nil, nil
 			}
+			// When opening the reader, the writer may be writing and generating new snapshots concurrently.
+			// The snapshots listed by the reader may have expired and been cleaned up at this time.
+			// In this case, we should try to get the latest snapshot again.
 			if strings.Contains(err.Error(), "unable to find a usable snapshot") {
 				log.Warn().Msgf("failed to open reader for %s %s: %v retrying", s.root.GetName(), s.GetID(), err)
+				time.Sleep(time.Duration(zutils.RandInt(100, 300)) * time.Millisecond)
 				continue
 			}
 			return nil, fmt.Errorf("open %s %s err: %w", s.root.GetName(), s.GetID(), err)
