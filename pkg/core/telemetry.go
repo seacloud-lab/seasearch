@@ -35,13 +35,17 @@ import (
 )
 
 // Telemetry instance
-var Telemetry = newTelemetry()
+var Telemetry *telemetry
 
 type telemetry struct {
 	instanceID   string
 	events       chan analytics.Track
 	baseInfo     map[string]interface{}
 	baseInfoOnce sync.Once
+}
+
+func InitTelemetry() {
+	Telemetry = newTelemetry()
 }
 
 func newTelemetry() *telemetry {

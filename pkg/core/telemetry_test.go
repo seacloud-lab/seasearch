@@ -22,6 +22,7 @@ import (
 )
 
 func TestTelemetry(t *testing.T) {
+	InitTelemetry()
 	indexName := "TestTelemetry.index_1"
 	t.Run("prepare", func(t *testing.T) {
 		index, err := NewIndex(indexName, "disk", 1)
