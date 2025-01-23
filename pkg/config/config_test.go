@@ -45,7 +45,7 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, "./data", c.DataPath)
 		assert.Equal(t, true, c.SentryEnable)
 		assert.Equal(t, "https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942", c.SentryDSN) // Add check for default value
-		assert.Equal(t, true, c.TelemetryEnable)
+		assert.Equal(t, false, c.TelemetryEnable)
 		assert.Equal(t, false, c.PrometheusEnable)
 		assert.Equal(t, 1000000, c.MaxDocumentSize)
 

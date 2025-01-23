@@ -202,6 +202,7 @@ func main() {
 }
 
 func telemetry() {
+	core.InitTelemetry()
 	core.Telemetry.Instance()
 	core.Telemetry.Event("server_start", nil)
 	core.Telemetry.Cron()

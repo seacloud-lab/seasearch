@@ -56,7 +56,7 @@ type config struct {
 	ProfilerServer            string        `env:"ZINC_PROFILER_SERVER,default=https://pyroscope.dev.zincsearch.com"`
 	ProfilerAPIKey            string        `env:"ZINC_PROFILER_API_KEY,default=psx-AfPbC5Bh6gI4dHkCMpoxM2Qd7Xblsqhip5nlwvHdhAE1"`
 	ProfilerFriendlyProfileID string        `env:"ZINC_PROFILER_FRIENDLY_PROFILE_ID"`
-	TelemetryEnable           bool          `env:"ZINC_TELEMETRY,default=true"`
+	TelemetryEnable           bool          `env:"ZINC_TELEMETRY,default=false"`
 	PrometheusEnable          bool          `env:"ZINC_PROMETHEUS_ENABLE,default=false"`
 	EnableTextKeywordMapping  bool          `env:"ZINC_ENABLE_TEXT_KEYWORD_MAPPING,default=false"`
 	BatchSize                 int           `env:"ZINC_BATCH_SIZE,default=1024"`
