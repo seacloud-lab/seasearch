@@ -68,7 +68,7 @@ func SetRoutes(r *gin.Engine) {
 	// internal API
 	r.POST("/api/internal/get_stats", AuthMiddleware("search.internal.GetStats"), search.QueryStats)
 	r.POST("/api/internal/unify_search", AuthMiddleware("search.internal.UnifySearch"), search.MultiSearchWithStatistics)
-	r.POST("/api/internal/partial_query", AuthMiddleware("search.internal.PartialQuery"), search.PartialSearchSingleIndex)
+	r.POST("/api/internal/partial_query", AuthMiddleware("search.internal.ParallelQuery"), search.PartialSearchSingleIndex)
 	// UI
 	HTTPCacheForUI(r)
 	r.StaticFS("/ui/", http.FS(front))

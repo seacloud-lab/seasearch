@@ -268,8 +268,7 @@ func (index *Index) GetWALSize() uint64 {
 	return size
 }
 
-// GetSearchers
-// When opening the reader, bluge will directly load the underlying resources.
+// GetSearchers when opening the reader, bluge will directly load the underlying resources.
 // So we return a SimpleSearcher, and it will load the reader when it's really needed for searching.
 func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	readers := make([]*SimpleSearcher, 0)
@@ -282,10 +281,9 @@ func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	return readers
 }
 
-// GetPartialSearchers
-// Get partial second shards for different query nodes to collaborate on the search,
-// the second shard ids are assigned by the SeaSearch-proxy.
-func (index *Index) GetPartialSearchers(timeMin, timeMax int64, secondShardIds ...int) []*SimpleSearcher {
+// GetSearchersByID gets partial second shards for different query nodes to collaborate on the search.
+// The second shard ids are assigned by the SeaSearch-proxy.
+func (index *Index) GetSearchersByID(timeMin, timeMax int64, secondShardIds ...int) []*SimpleSearcher {
 	if len(secondShardIds) == 0 {
 		return make([]*SimpleSearcher, 0)
 	}

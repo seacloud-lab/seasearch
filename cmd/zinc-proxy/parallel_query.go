@@ -17,10 +17,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Check if the partial search is applicable,
+// Check if the parallel search is applicable,
 // if the index second shard count is less than threshold,
 // the request will be forwarded directly to the corresponding node.
-func CheckAndDoPartialQuery(c *gin.Context, index string, body io.ReadCloser, query *meta.ZincQuery) {
+func checkAndDoParallelQuery(c *gin.Context, index string, body io.ReadCloser, query *meta.ZincQuery) {
 	indexMeta, err := metadata.Index.Get(index)
 	if err != nil {
 		if errors.Is(err, errors.ErrKeyNotFound) {
@@ -46,7 +46,7 @@ func CheckAndDoPartialQuery(c *gin.Context, index string, body io.ReadCloser, qu
 	}
 
 	// directly forward
-	if len(secondShardList) < conf.General.IndexPartialQueryThreshold {
+	if len(secondShardList) < conf.General.IndexParallelQueryThreshold {
 		// rewind body
 		c.Request.Body = body
 		directForwarding(c)
@@ -80,7 +80,7 @@ func CheckAndDoPartialQuery(c *gin.Context, index string, body io.ReadCloser, qu
 	}
 
 	var clientErr *HttpClientError
-	result, err := ExecPartialQuery(index, partialQueryMap, query, auth)
+	result, err := execParallelQuery(index, partialQueryMap, query, auth)
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
 		return
@@ -92,7 +92,7 @@ func CheckAndDoPartialQuery(c *gin.Context, index string, body io.ReadCloser, qu
 	zutils.GinRenderJSON(c, http.StatusOK, result)
 }
 
-func ExecPartialQuery(index string, secondShardQueryMap map[string][]int, query *meta.ZincQuery, auth string) (*meta.SearchResponse, error) {
+func execParallelQuery(index string, secondShardQueryMap map[string][]int, query *meta.ZincQuery, auth string) (*meta.SearchResponse, error) {
 	var eg errgroup.Group
 	eg.SetLimit(6)
 
@@ -106,7 +106,7 @@ func ExecPartialQuery(index string, secondShardQueryMap map[string][]int, query 
 		secondShardIds := secondShardIds
 		eg.Go(
 			func() error {
-				req := search.PartialQueryRequest{
+				req := search.ParallelQueryRequest{
 					Index:          index,
 					SecondShardIds: secondShardIds,
 					Query:          query,

@@ -64,7 +64,7 @@ func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery) (
 	}
 
 	timeMin, timeMax := timerange.Query(query.Query)
-	searchers := index.GetPartialSearchers(timeMin, timeMax, secondShardIds...)
+	searchers := index.GetSearchersByID(timeMin, timeMax, secondShardIds...)
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if query.Timeout > 0 {

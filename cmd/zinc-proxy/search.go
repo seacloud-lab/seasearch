@@ -64,7 +64,7 @@ func SearchDSL(c *gin.Context) {
 	}
 
 	if len(indexNameList) == 1 {
-		CheckAndDoPartialQuery(c, indexName, body, query)
+		checkAndDoParallelQuery(c, indexName, body, query)
 		return
 	}
 

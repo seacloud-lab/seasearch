@@ -263,14 +263,14 @@ func MultiSearchWithStatistics(c *gin.Context) {
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
 }
 
-type PartialQueryRequest struct {
+type ParallelQueryRequest struct {
 	Index          string          `json:"index"`
 	SecondShardIds []int           `json:"second_shards"`
 	Query          *meta.ZincQuery `json:"query"`
 }
 
 func PartialSearchSingleIndex(c *gin.Context) {
-	var request PartialQueryRequest
+	var request ParallelQueryRequest
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Err(err).Msg("read request body err:")
@@ -279,11 +279,16 @@ func PartialSearchSingleIndex(c *gin.Context) {
 	}
 	_ = json.Unmarshal(body, &request)
 	index, err := core.GetZincIndexFromMetadata(request.Index)
-	if errors.Is(err, errors.ErrKeyNotFound) {
+	if err != nil {
+		if errors.Is(err, errors.ErrKeyNotFound) {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
 		log.Err(err).Msgf("get index %s from metadata err:", request.Index)
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+
 	resp, err := index.PartialSearch(request.SecondShardIds, request.Query)
 	if err != nil {
 		log.Err(err).Msgf("partial search index for %s ids %v err:", request.Index, request.SecondShardIds)
