@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"errors"
+
 	"fmt"
 	"io"
 	"math"
@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/handlers/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -25,8 +26,16 @@ import (
 
 func SearchDSL(c *gin.Context) {
 	indexName := c.Param("target")
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	body := io.NopCloser(bytes.NewBuffer(bodyBytes))
+	_ = c.Request.Body.Close()
+
 	query := &meta.ZincQuery{Size: 10}
-	if err := zutils.GinBindJSON(c, query); err != nil {
+	if err := json.Unmarshal(bodyBytes, query); err != nil {
 		log.Printf("handlers.search.searchDSL: %s", err.Error())
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -49,18 +58,13 @@ func SearchDSL(c *gin.Context) {
 
 	// we don't support multi index aggregations
 	if len(indexNameList) > 1 && len(query.Aggregations) > 0 {
-		err := errors.New("invalid multi index aggregations")
+		err := errors.New(errors.ErrorTypeInvalidArgument, "invalid multi index aggregations")
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 
-	bodyBytes, _ := json.Marshal(query)
-	body := io.NopCloser(bytes.NewBuffer(bodyBytes))
-
 	if len(indexNameList) == 1 {
-		// rewind body
-		c.Request.Body = body
-		directForwarding(c)
+		checkAndDoParallelQuery(c, indexName, body, query)
 		return
 	}
 
@@ -111,7 +115,7 @@ func SearchDSL(c *gin.Context) {
 			return nil
 		})
 	}
-	err := eg.Wait()
+	err = eg.Wait()
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
 		return

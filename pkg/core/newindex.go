@@ -18,9 +18,10 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"regexp"
 	"strings"
+
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"

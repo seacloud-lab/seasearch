@@ -248,6 +248,36 @@ func (s *IndexShard) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	return rs
 }
 
+func (s *IndexShard) GetPartialSearchers(timeMin, timeMax int64, secondShardIds ...int) []*SimpleSearcher {
+	rs := make([]*SimpleSearcher, 0, 1)
+
+	for _, id := range secondShardIds {
+		if id >= len(s.shards) || id < 0 {
+			// invalid second shard id
+			log.Warn().Msgf("try get index [%s %s] searcher with invalid partial id: %d", s.root.GetName(), s.GetID(), id)
+			continue
+		}
+
+		s.lock.RLock()
+		secondShard := s.shards[id]
+		s.lock.RUnlock()
+		sMin := atomic.LoadInt64(&secondShard.ref.Stats.DocTimeMin)
+		sMax := atomic.LoadInt64(&secondShard.ref.Stats.DocTimeMax)
+		if (timeMin > 0 && sMax > 0 && sMax < timeMin) ||
+			(timeMax > 0 && sMin > 0 && sMin > timeMax) {
+			continue
+		}
+		rs = append(rs, &SimpleSearcher{
+			shard:         s,
+			secondShardID: secondShard.ref.ID,
+		})
+		if sMin > 0 && sMin < timeMin {
+			break
+		}
+	}
+	return rs
+}
+
 func (s *IndexShard) openWriter(shardID int64) error {
 	var defaultSearchAnalyzer *analysis.Analyzer
 	analyzers := s.root.GetAnalyzers()

@@ -268,9 +268,8 @@ func (index *Index) GetWALSize() uint64 {
 	return size
 }
 
-// GetSearchers
-// When opening the reader, bluge will directly load the underlying resources.
-// So we return a SimpleSearcher, and it will load the reader when it's really needed for searching.
+// GetSearchers returns the searchers.
+// When the searcher opens the Bluge reader, Bluge directly loads the underlying resources.
 func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	readers := make([]*SimpleSearcher, 0)
 	for _, shard := range index.shards {
@@ -280,6 +279,22 @@ func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 		}
 	}
 	return readers
+}
+
+// GetSearchersByID gets partial second shards for different query nodes to collaborate on the search.
+// The second shard ids are assigned by the SeaSearch-proxy.
+func (index *Index) GetSearchersByID(timeMin, timeMax int64, secondShardIds ...int) []*SimpleSearcher {
+	if len(secondShardIds) == 0 {
+		return make([]*SimpleSearcher, 0)
+	}
+	result := make([]*SimpleSearcher, 0)
+	for _, shard := range index.shards {
+		rs := shard.GetPartialSearchers(timeMin, timeMax, secondShardIds...)
+		if len(rs) > 0 {
+			result = append(result, rs...)
+		}
+	}
+	return result
 }
 
 // UpdateMetadata update index metadata, mainly docNum and storageSize
