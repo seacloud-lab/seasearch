@@ -268,8 +268,8 @@ func (index *Index) GetWALSize() uint64 {
 	return size
 }
 
-// GetSearchers when opening the reader, bluge will directly load the underlying resources.
-// So we return a SimpleSearcher, and it will load the reader when it's really needed for searching.
+// GetSearchers returns the searchers.
+// When the searcher opens the Bluge reader, Bluge directly loads the underlying resources.
 func (index *Index) GetSearchers(timeMin, timeMax int64) []*SimpleSearcher {
 	readers := make([]*SimpleSearcher, 0)
 	for _, shard := range index.shards {
