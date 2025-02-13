@@ -51,7 +51,7 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
 }
 
-func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery) (*meta.SearchResponse, error) {
+func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
 	mappings := index.GetMappings()
 	analyzers := index.GetAnalyzers()
 	err := uquery.NormalizeQuery(query, mappings, analyzers)
@@ -72,5 +72,8 @@ func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery) (
 		defer cancel()
 	}
 	log.Debug().Msgf("exec partial query %s got second shard ids: %v", index.GetName(), secondShardIds)
+	if stats != nil {
+		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, int64(len(searchers)), simpleSearchersToUnifiedSearcher(stats, searchers)...)
+	}
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, int64(len(searchers)), simpleSearchersToSearcher(searchers)...)
 }

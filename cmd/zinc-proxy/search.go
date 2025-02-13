@@ -195,10 +195,30 @@ func MultiSearch(c *gin.Context) {
 		}
 	}
 
+	// filter out indexes for parallel search
+	indexList := make([]string, 0, len(indexQueryMap))
+	for index := range indexQueryMap {
+		indexList = append(indexList, index)
+	}
+	parallelNodeMap, parallelIndexSet, err := checkMultiIndexParallelQuery(indexList)
+	if err != nil {
+		if errors.Is(err, errors.ErrKeyNotFound) {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
 	// addr -> []index
 	addrIndexMap := make(map[string][]string)
 
 	for index := range indexQueryMap {
+		// skip parallel search index
+		if _, ok := parallelIndexSet[index]; ok {
+			continue
+		}
+
 		addr, err := GetAddrByIndex(index)
 		if err != nil {
 			zutils.GinRenderJSON(c, http.StatusOK, &meta.HTTPResponseError{Error: err.Error()})
@@ -214,7 +234,7 @@ func MultiSearch(c *gin.Context) {
 	}
 
 	if unifyScore {
-		unifiedMultiSearch(c, addrIndexMap, indexQueryMap)
+		unifiedMultiSearch(c, addrIndexMap, indexQueryMap, parallelNodeMap)
 		return
 	}
 
@@ -225,8 +245,21 @@ func MultiSearch(c *gin.Context) {
 		responses = make([]interface{}, 0)
 	)
 
+	// execute parallel query first
+	resp, err := execMultiParallelQuery(auth, parallelNodeMap, indexQueryMap, nil)
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	// got parallel query result
+	responses = append(responses, resp...)
+
 	var eg errgroup.Group
 	eg.SetLimit(6)
+	// normal multi query
 	for addr, indexList := range addrIndexMap {
 		host := addr
 		indexes := indexList
@@ -275,7 +308,7 @@ func MultiSearch(c *gin.Context) {
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
 }
 
-func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQueryMap map[string][]*meta.ZincQuery) {
+func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQueryMap map[string][]*meta.ZincQuery, parallelNodeMap map[string]map[string][]int) {
 	var (
 		mutex     sync.Mutex
 		clientErr *HttpClientError
@@ -286,7 +319,18 @@ func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQ
 		}
 	)
 
-	// get stats info
+	// parallel get stats info
+	parallelStats, err := parallelGetStatsInfo(auth, parallelNodeMap, indexQueryMap)
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	stats.Merge(parallelStats)
+
+	// get normal stats info
 	var eg errgroup.Group
 	eg.SetLimit(6)
 	for addr, indexList := range addrIndexMap {
@@ -322,7 +366,7 @@ func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQ
 			return nil
 		})
 	}
-	err := eg.Wait()
+	err = eg.Wait()
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
 		return
@@ -336,6 +380,17 @@ func unifiedMultiSearch(c *gin.Context, addrIndexMap map[string][]string, indexQ
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+
+	// do parallel search with stats
+	resp, err := execMultiParallelQuery(auth, parallelNodeMap, indexQueryMap, stats)
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	responses = append(responses, resp...)
 
 	// do search
 	for addr, indexList := range addrIndexMap {

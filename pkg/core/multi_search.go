@@ -265,6 +265,75 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 	return result, nil
 }
 
+func QueryStatsInfoWithSecondShardIds(indexInfos map[string][]int, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+	var searchers = make([]*SimpleSearcher, 0)
+	var mappings *meta.Mappings
+	var analyzers map[string]*analysis.Analyzer
+
+	for indexName, shardIds := range indexInfos {
+		index, err := GetZincIndexFromMetadata(indexName)
+		if err != nil {
+			return nil, err
+		}
+		timeMin, timeMax := timerange.Query(query.Query)
+		searchers = append(searchers, index.GetSearchersByID(timeMin, timeMax, shardIds...)...)
+		if mappings == nil {
+			mappings = index.GetMappings()
+			analyzers = index.GetAnalyzers()
+		}
+	}
+
+	if len(searchers) == 0 {
+		return &zincsearch.UnifiedStats{}, nil
+	}
+
+	result := &zincsearch.UnifiedStats{
+		FieldStats: map[string]*zincsearch.FieldStats{},
+	}
+
+	// field -> []terms
+	termMap := make(map[string][]query2.Term)
+	// we assume that all indexes have same mappings and analyzers.
+	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	for _, term := range termList {
+		if tms, ok := termMap[term.Field]; ok {
+			termMap[term.Field] = append(tms, term)
+		} else {
+			termMap[term.Field] = []query2.Term{term}
+		}
+	}
+
+	opened := make([]zincsearch.Searcher, 0)
+	defer func() {
+		for _, s := range opened {
+			_ = s.Close()
+		}
+	}()
+	for _, searcher := range searchers {
+		reader, err := searcher.GetReader()
+		if err != nil {
+			return nil, err
+		}
+		if reader == nil {
+			continue
+		}
+		opened = append(opened, reader)
+		for field, terms := range termMap {
+			fieldStats, err := getFieldStats(reader, field, terms)
+			if err != nil {
+				return nil, err
+			}
+			result.MergeField(fieldStats)
+		}
+		_ = reader.Close()
+	}
+
+	return result, nil
+}
+
 func getFieldStats(reader *bluge.Reader, field string, terms []query2.Term) (*zincsearch.FieldStats, error) {
 	res := &zincsearch.FieldStats{
 		Field:     field,

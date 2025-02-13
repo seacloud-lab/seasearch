@@ -15,7 +15,9 @@
 
 package zutils
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestStringToInt(t *testing.T) {
 	type args struct {
