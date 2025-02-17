@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
@@ -23,13 +22,11 @@ var (
 )
 
 func main() {
-	config.InitConfig()
 	initProxyConfig()
-
 	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "seasearch-proxy.log", conf.General.LogDir, conf.General.LogLevel, logger.ComponentSeaSearchProxy)
 	accessLog = logger.SetupAccessLog(conf.General.LogToStd, "seasearch-proxy-access.log", conf.General.LogDir, logger.ComponentSeaSearchProxy)
 
-	metadata.InitMetaStorage()
+	metadata.InitMetaStorageForProxy(conf.Etcd.Endpoints, conf.Etcd.Username, conf.Etcd.Password, conf.Etcd.Prefix)
 	ider.InitIder()
 	InitProxy()
 	StartProxy()

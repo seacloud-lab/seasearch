@@ -6,18 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/handlers/document"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/handlers/document"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+	"golang.org/x/sync/errgroup"
 )
 
 func Bulk(c *gin.Context) {
@@ -138,7 +138,7 @@ func processBody(target string, body io.Reader) (map[string][]string, error) {
 
 	// Set 1 MB max per line. docs at - https://pkg.go.dev/bufio#pkg-constants
 	// This is the max size of a line in a file that we will process
-	maxCapacityPerLine := config.Global.MaxDocumentSize
+	maxCapacityPerLine := conf.General.MaxDocumentSize
 	buf := make([]byte, maxCapacityPerLine)
 	scanner.Buffer(buf, maxCapacityPerLine)
 

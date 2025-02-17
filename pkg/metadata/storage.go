@@ -33,7 +33,7 @@ var db storage.Storager
 func InitMetaStorage() {
 	if strings.ToLower(config.Global.ServerMode) == config.ServerModeCluster ||
 		strings.ToLower(config.Global.ServerMode) == config.ServerModeProxy {
-		db = etcd.New(config.Global.Etcd.Prefix + "/metadata")
+		db = etcd.New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, config.Global.Etcd.Prefix+"/metadata")
 	} else {
 		switch strings.ToLower(config.Global.MetadataStorage) {
 		case "badger":
@@ -42,6 +42,10 @@ func InitMetaStorage() {
 			db = bolt.New("_metadata.bolt")
 		}
 	}
+}
+
+func InitMetaStorageForProxy(endpoints []string, etcdUsername, etcdPassword, prefix string) {
+	db = etcd.New(endpoints, etcdUsername, etcdPassword, prefix+"/metadata")
 }
 
 func Close() error {

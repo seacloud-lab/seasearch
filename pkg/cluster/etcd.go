@@ -5,15 +5,19 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.uber.org/zap"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"go.etcd.io/etcd/client/pkg/v3/logutil"
 	client "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 const (
@@ -23,18 +27,86 @@ const (
 var (
 	cli    *client.Client
 	prefix string
+
+	// we cannot know whether disconnected with etcd by go-etcd watcher,
+	// so we establish a session so that we can know when there is a problem with the network of etcd.
+	curSession   *concurrency.Session
+	sessionMutex sync.Mutex
+
+	// the NewSession will be blocked and won't return if the connection is unavailable,
+	// so we use a custom context to control the timeout of NewSession.
+	sessionCtx    context.Context
+	sessionCancel context.CancelFunc
 )
 
-func InitEtcd(p string, endpoints []string) {
+func InitEtcd(p string, endpoints []string) error {
 	var err error
+	conf := logutil.DefaultZapLoggerConfig
+	conf.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+
 	cli, err = client.New(client.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
+		LogConfig:   &conf,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msgf("init etcd for failed")
 	}
 	prefix = p
+
+	// We use timer to control timeout cancellation instead of
+	// ContextWithTimeout because the latter will exit the normal session after timeout.
+	sessionCtx, sessionCancel = context.WithCancel(context.Background())
+	timer := time.AfterFunc(DefaultTimeout, func() { sessionCancel() })
+	curSession, err = concurrency.NewSession(
+		cli, concurrency.WithTTL(3), concurrency.WithContext(sessionCtx),
+	)
+	timer.Stop()
+	if err != nil {
+		sessionCancel()
+		if errors.Is(err, context.Canceled) {
+			return fmt.Errorf("failed to establish a session to the etcd: connection timeout: %w", err)
+		}
+		return fmt.Errorf("failed to establish a session to the etcd: %w", err)
+	}
+	go maintainSession()
+	return nil
+}
+
+// maintainSession
+// when the network disconnected, the old session will be invalid,
+// we need to create a new session.
+func maintainSession() {
+	for {
+		<-curSession.Done()
+		// cancel current context
+		sessionCancel()
+		log.Info().Msg("trying to reconnect etcd")
+		_ = curSession.Close()
+
+		// crate new ctx with cancel
+		sessionCtx, sessionCancel = context.WithCancel(context.Background())
+		timer := time.AfterFunc(DefaultTimeout, func() { sessionCancel() })
+		newSession, err := concurrency.NewSession(
+			cli, concurrency.WithTTL(3), concurrency.WithContext(sessionCtx),
+		)
+		timer.Stop()
+
+		if err != nil {
+			sessionCancel()
+			if errors.Is(err, context.Canceled) {
+				log.Err(err).Msg("failed to establish a session to the etcd: connection timeout: ")
+			} else {
+				log.Err(err).Msg("failed to establish a session to the etcd: ")
+			}
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		log.Info().Msg("reconnect etcd success")
+		sessionMutex.Lock()
+		curSession = newSession
+		sessionMutex.Unlock()
+	}
 }
 
 func CloseEtcd() {
@@ -156,7 +228,9 @@ func watchAssigns(ctx context.Context, cancel context.CancelFunc, watcher client
 	}()
 
 	prefix := fmt.Sprintf("%s/cluster/assign/", prefix)
-
+	sessionMutex.Lock()
+	session := curSession
+	sessionMutex.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,6 +262,11 @@ func watchAssigns(ctx context.Context, cancel context.CancelFunc, watcher client
 				assign.Valid = true
 				ch <- &assign
 			}
+		case <-session.Done():
+			var event = AssignEvent{}
+			event.Err = fmt.Errorf("connection to the etcd has been closed")
+			ch <- &event
+			return
 		}
 	}
 }
@@ -239,7 +318,7 @@ type ClusterInfoEvent struct {
 	Err         error
 }
 
-func WatchClusterInfo(ctx context.Context) <-chan *ClusterInfoEvent {
+func WatchClusterNodeInfo(ctx context.Context) <-chan *ClusterInfoEvent {
 	key := fmt.Sprintf("%s/cluster/nodes", prefix)
 	watcher := client.NewWatcher(cli)
 	ctx, cancel := context.WithCancel(ctx)
@@ -260,6 +339,9 @@ func watchClusterInfo(ctx context.Context, cancel context.CancelFunc, watcher cl
 		watcher.Close()
 	}()
 
+	sessionMutex.Lock()
+	session := curSession
+	sessionMutex.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -286,6 +368,11 @@ func watchClusterInfo(ctx context.Context, cancel context.CancelFunc, watcher cl
 				assign.Valid = true
 				ch <- &assign
 			}
+		case <-session.Done():
+			var event = ClusterInfoEvent{}
+			event.Err = fmt.Errorf("connection to the etcd has been closed")
+			ch <- &event
+			return
 		}
 	}
 }
@@ -347,6 +434,10 @@ func watchUserInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 		watcher.Close()
 	}()
 
+	sessionMutex.Lock()
+	session := curSession
+	sessionMutex.Unlock()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -373,6 +464,11 @@ func watchUserInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 				userEvent.Valid = true
 				ch <- &userEvent
 			}
+		case <-session.Done():
+			var event = UserInfoEvent{}
+			event.Err = fmt.Errorf("connection to the etcd has been closed")
+			ch <- &event
+			return
 		}
 	}
 }
@@ -405,6 +501,10 @@ func watchRoleInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 		watcher.Close()
 	}()
 
+	sessionMutex.Lock()
+	session := curSession
+	sessionMutex.Unlock()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -431,6 +531,11 @@ func watchRoleInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 				roleEvent.Valid = true
 				ch <- &roleEvent
 			}
+		case <-session.Done():
+			var event = RoleEvent{}
+			event.Err = fmt.Errorf("connection to the etcd has been closed")
+			ch <- &event
+			return
 		}
 	}
 }

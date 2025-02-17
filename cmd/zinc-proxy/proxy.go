@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/config"
 )
 
 var (
@@ -20,11 +20,27 @@ var (
 	nodeMap *NodeMap
 	// partition -> node id
 	assignMap *AssignMap
-	closer    = z.NewCloser(2)
+	closer    = z.NewCloser(1)
 )
 
+type AssignMap struct {
+	mp    map[string]int
+	mutex sync.RWMutex
+}
+
+type NodeMap struct {
+	mp       map[int]string
+	nodeList []string
+	mutex    sync.RWMutex
+}
+
+type nodeInfo struct {
+	Id   int
+	addr string
+}
+
 func StartProxy() {
-	cluster.InitEtcd(config.Global.Etcd.Prefix, config.Global.Etcd.Endpoints)
+	cluster.InitEtcd(conf.Etcd.Prefix, conf.Etcd.Endpoints)
 	nodeMap = &NodeMap{
 		mp: make(map[int]string),
 	}
@@ -32,6 +48,34 @@ func StartProxy() {
 		mp: make(map[string]int),
 	}
 
+	go syncClusterInfo()
+}
+
+func syncClusterInfo() {
+	defer closer.Done()
+
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("sync cluster info goroutine crashed: %v\n%s", err, debug.Stack())
+		}
+	}()
+
+	for {
+		err := syncCluster()
+		if err != nil {
+			log.Err(err).Msg("failed to sync cluster info: ")
+			log.Info().Msg("clearing cluster map")
+			updateUrl(nil)
+			assignMap.mutex.Lock()
+			assignMap.mp = make(map[string]int)
+			assignMap.mutex.Unlock()
+		}
+
+		time.Sleep(time.Minute)
+	}
+}
+
+func syncCluster() error {
 	infos, err := cluster.GetClusterInfo(closer.Ctx())
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init proxy")
@@ -42,21 +86,63 @@ func StartProxy() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init proxy")
 	}
-	initAssigns(assigns)
 
-	go watchClusterInfo()
+	assignMap.mutex.Lock()
+	for partition, nodeId := range assigns {
+		assignMap.mp[partition] = nodeId
+	}
+	assignMap.mutex.Unlock()
 
-	go watchAssign()
+	assignCh := cluster.WatchAssigns(closer.Ctx())
+	nodeCh := cluster.WatchClusterNodeInfo(closer.Ctx())
+
+	for {
+		select {
+		case event, ok := <-assignCh:
+			if !ok {
+				return nil
+			}
+			if event.Err != nil {
+				return event.Err
+			}
+			if !event.Valid {
+				return fmt.Errorf("invalid assign event")
+			}
+
+			log.Debug().Msgf("update assign")
+			if event.ItemUpdated {
+				assignMap.mutex.Lock()
+				assignMap.mp[event.Assign.Partition] = event.Assign.NodeId
+				assignMap.mutex.Unlock()
+			} else {
+				assignMap.mutex.Lock()
+				delete(assignMap.mp, event.Assign.Partition)
+				assignMap.mutex.Unlock()
+			}
+
+		case event, ok := <-nodeCh:
+			if !ok {
+				return nil
+			}
+			if event.Err != nil {
+				return event.Err
+			}
+			if !event.Valid {
+				return fmt.Errorf("invalid assign event")
+			}
+			log.Debug().Msgf("update nodes")
+
+			if event.ItemUpdated {
+				updateUrl(event.Info)
+			} else {
+				log.Warn().Msg("cluster node was removed")
+			}
+		}
+	}
 }
 
 func ShutDownProxy() {
 	closer.SignalAndWait()
-}
-
-type NodeMap struct {
-	mp       map[int]string
-	nodeList []string
-	mutex    sync.RWMutex
 }
 
 func GetAddrByIndex(indexName string) (string, error) {
@@ -74,11 +160,6 @@ func GetAddrByIndex(indexName string) (string, error) {
 	}
 
 	return addr, nil
-}
-
-type nodeInfo struct {
-	Id   int
-	addr string
 }
 
 func GetNodeList() []nodeInfo {
@@ -110,51 +191,6 @@ func getAssignNodeByIndex(indexName string) (int, bool) {
 	return id, ok
 }
 
-func watchClusterInfo() {
-	defer closer.Done()
-
-	errCount := 0
-	watch := func(ch <-chan *cluster.ClusterInfoEvent) error {
-		for {
-			select {
-			case <-closer.HasBeenClosed():
-				return nil
-			case event, ok := <-ch:
-				if !ok {
-					return fmt.Errorf("watch cluster info goroutine chrashed")
-				}
-				if event.Err != nil {
-					return event.Err
-				}
-				if !event.Valid {
-					return fmt.Errorf("invalid assign event")
-				}
-				errCount = 0
-				if event.ItemUpdated {
-					updateUrl(event.Info)
-				} else {
-					log.Warn().Msg("cluster info was removed")
-				}
-			}
-		}
-	}
-
-	for {
-		if errCount == 3 {
-			log.Fatal().Msg("retry to get assigns too many times")
-		}
-		ch := cluster.WatchClusterInfo(closer.Ctx())
-		err := watch(ch)
-		if err != nil {
-			errCount++
-			log.Error().Err(err).Msg("watch cluster info error, retrying")
-
-			continue
-		}
-		return
-	}
-}
-
 func updateUrl(infos []cluster.NodeInfo) {
 	nodeMap.mutex.Lock()
 	defer nodeMap.mutex.Unlock()
@@ -166,75 +202,4 @@ func updateUrl(infos []cluster.NodeInfo) {
 		nodeMap.mp[info.NodeId] = info.Address
 		nodeMap.nodeList[i] = info.Address
 	}
-}
-
-type AssignMap struct {
-	mp    map[string]int
-	mutex sync.RWMutex
-}
-
-func watchAssign() {
-	defer closer.Done()
-
-	errCount := 0
-	watch := func(ch <-chan *cluster.AssignEvent) error {
-		for {
-			select {
-			case <-closer.HasBeenClosed():
-				return nil
-			case event, ok := <-ch:
-				if !ok {
-					return fmt.Errorf("watch goroutine chrashed")
-				}
-				if event.Err != nil {
-					return event.Err
-				}
-				if !event.Valid {
-					return fmt.Errorf("invalid assign event")
-				}
-				errCount = 0
-				if event.ItemUpdated {
-					setAssign(event.Assign.Partition, event.Assign.NodeId)
-				} else {
-					removeAssign(event.Assign.Partition)
-				}
-			}
-		}
-	}
-
-	for {
-		if errCount == 3 {
-			log.Fatal().Msg("retry to get assigns too many times")
-		}
-		ch := cluster.WatchAssigns(closer.Ctx())
-		err := watch(ch)
-		if err != nil {
-			errCount++
-			log.Error().Err(err).Msg("watch assign error, retrying")
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		return
-	}
-}
-
-func initAssigns(assigns map[string]int) {
-	assignMap.mutex.Lock()
-	defer assignMap.mutex.Unlock()
-
-	for partition, nodeId := range assigns {
-		assignMap.mp[partition] = nodeId
-	}
-}
-
-func setAssign(partition string, nodeId int) {
-	assignMap.mutex.Lock()
-	defer assignMap.mutex.Unlock()
-	assignMap.mp[partition] = nodeId
-}
-
-func removeAssign(partition string) {
-	assignMap.mutex.Lock()
-	defer assignMap.mutex.Unlock()
-	delete(assignMap.mp, partition)
 }
