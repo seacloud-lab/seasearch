@@ -25,7 +25,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
-	"github.com/zincsearch/zincsearch/pkg/uquery/query"
 	query2 "github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 	"golang.org/x/sync/errgroup"
@@ -350,7 +349,7 @@ func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQu
 	return result, nil
 }
 
-func getFieldStats(reader *bluge.Reader, field string, terms []query.Term) (*zincsearch.FieldStats, error) {
+func getFieldStats(reader *bluge.Reader, field string, terms []query2.Term) (*zincsearch.FieldStats, error) {
 	res := &zincsearch.FieldStats{
 		Field:     field,
 		TermStats: map[string]*zincsearch.TermStats{},
