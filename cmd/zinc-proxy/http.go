@@ -84,6 +84,9 @@ func SetupHttp(r *gin.Engine) {
 	// search
 	r.POST("/api/:target/_search", directForwarding)
 
+	// unified search
+	r.POST("/api/unified_search", UnifiedSearch)
+
 	// document
 	// Document Bulk update/insert
 	r.POST("/api/_bulk", Bulk)

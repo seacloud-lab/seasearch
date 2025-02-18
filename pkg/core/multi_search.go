@@ -22,13 +22,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blugelabs/bluge"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/uquery"
+	"github.com/zincsearch/zincsearch/pkg/uquery/query"
 	query2 "github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
@@ -73,7 +75,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 
 	for _, index := range searchIndex {
 		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
-		shardNum += index.GetShardNum()
+		shardNum += int64(len(searchers))
 		if mappings == nil {
 			mappings = index.GetMappings()
 			analyzers = index.GetAnalyzers()
@@ -265,22 +267,36 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 	return result, nil
 }
 
-func QueryStatsInfoWithSecondShardIds(indexInfos map[string][]int, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
-	var searchers = make([]*SimpleSearcher, 0)
+func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
+	var searchers = make([]*SimpleSearcher, 0)
+	timeMin, timeMax := timerange.Query(query.Query)
 
-	for indexName, shardIds := range indexInfos {
-		index, err := GetZincIndexFromMetadata(indexName)
+	for idx, secondIds := range indexes {
+		index, err := GetZincIndexFromMetadata(idx)
 		if err != nil {
 			return nil, err
 		}
-		timeMin, timeMax := timerange.Query(query.Query)
-		searchers = append(searchers, index.GetSearchersByID(timeMin, timeMax, shardIds...)...)
 		if mappings == nil {
 			mappings = index.GetMappings()
 			analyzers = index.GetAnalyzers()
 		}
+		if len(secondIds) == 0 {
+			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		} else {
+			searchers = append(searchers, index.GetSearchersByID(timeMin, timeMax, secondIds...)...)
+		}
+	}
+
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+
+	}
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(searchers) == 0 {
@@ -334,7 +350,7 @@ func QueryStatsInfoWithSecondShardIds(indexInfos map[string][]int, query *meta.Z
 	return result, nil
 }
 
-func getFieldStats(reader *bluge.Reader, field string, terms []query2.Term) (*zincsearch.FieldStats, error) {
+func getFieldStats(reader *bluge.Reader, field string, terms []query.Term) (*zincsearch.FieldStats, error) {
 	res := &zincsearch.FieldStats{
 		Field:     field,
 		TermStats: map[string]*zincsearch.TermStats{},

@@ -3,13 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"math"
 	"net/http"
+	"sort"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
+	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/handlers/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -18,247 +20,133 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Check if the parallel search is applicable,
-// if the index second shard count is less than threshold,
-// the request will be forwarded directly to the corresponding node.
-func checkAndDoParallelQuery(c *gin.Context, index string, body io.ReadCloser, query *meta.ZincQuery) {
-	indexMeta, err := metadata.Index.Get(index)
-	if err != nil {
-		if errors.Is(err, errors.ErrKeyNotFound) {
-			zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+func UnifiedSearch(c *gin.Context) {
+	var req = search.UnifiedSearchRequest{}
+	if err := zutils.GinBindJSON(c, &req); err != nil {
+		log.Printf("handlers.search.unified_search: %s", err.Error())
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	if len(req.IndexQueries) == 0 {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index_list"})
+		return
+	}
+
+	indexList := make([]string, 0, len(req.IndexQueries))
+	indexQueryMap := make(map[string]*meta.ZincQuery)
+	for _, q := range req.IndexQueries {
+		if q.Query == nil {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require query"})
 			return
 		}
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
+		indexQueryMap[q.Index] = q.Query
+		indexList = append(indexList, q.Index)
 	}
-	// only process single shard
-	if indexMeta.ShardNum != 1 {
-		// rewind body
-		c.Request.Body = body
-		directForwarding(c)
-		return
-	}
+	processUnifySearch(c, indexList, indexQueryMap)
+}
 
+// ProcessUnifySearch first determines which nodes each index should be processed by,
+// then obtains statistics from those nodes,
+// and finally performs a query. This can process all indexes, whether or not parallel search is required.
+func processUnifySearch(c *gin.Context, indexes []string, indexQueryMap map[string]*meta.ZincQuery) {
 	auth := c.Request.Header.Get("Authorization")
-
-	secondShardList := make([]*meta.IndexSecondShard, 0)
-	for _, shard := range indexMeta.Shards {
-		secondShardList = append(secondShardList, shard.Shards...)
-	}
-
-	// directly forward
-	if len(secondShardList) < conf.General.IndexParallelQueryThreshold {
-		// rewind body
-		c.Request.Body = body
-		directForwarding(c)
+	parallelNodeMp, err := checkUnifySearchInfo(indexes)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	nodeList := GetNodeList()
-	if len(nodeList) == 0 {
-		zutils.GinRenderJSON(c, http.StatusBadGateway, meta.HTTPResponseError{Error: "there is not available query node"})
-		return
-	}
-
-	if len(nodeList) == 1 {
-		// rewind body
-		c.Request.Body = body
-		directForwarding(c)
-		return
-	}
-
-	// key node addr -> secondShard ids
-	partialQueryMap := make(map[string][]int)
-	for _, secondShard := range secondShardList {
-		remainder := int(secondShard.ID) % len(nodeList)
-		addr := nodeList[remainder].addr
-
-		if ids, ok := partialQueryMap[addr]; ok {
-			ids = append(ids, int(secondShard.ID))
-			partialQueryMap[addr] = ids
-		} else {
-			partialQueryMap[addr] = []int{int(secondShard.ID)}
-		}
+	var query *meta.ZincQuery
+	for _, q := range indexQueryMap {
+		query = q
+		break
 	}
 
 	var clientErr *HttpClientError
-	result, err := execSingleParallelQuery(index, partialQueryMap, query, auth)
+	stats, err := parallelGetStatsInfo(auth, parallelNodeMp, query)
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
-		return
 	} else if err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
 	}
 
-	zutils.GinRenderJSON(c, http.StatusOK, result)
-}
-
-func execSingleParallelQuery(index string, secondShardQueryMap map[string][]int, query *meta.ZincQuery, auth string) (*meta.SearchResponse, error) {
-	var eg errgroup.Group
-	eg.SetLimit(6)
-
-	var (
-		result = &meta.SearchResponse{}
-		mutex  = sync.Mutex{}
-	)
-
-	for addr, secondShardIds := range secondShardQueryMap {
-		addr := addr
-		secondShardIds := secondShardIds
-		eg.Go(
-			func() error {
-				req := search.ParallelQueryRequest{
-					Index:          index,
-					SecondShardIds: secondShardIds,
-					Query:          query,
-				}
-				reqBody, _ := json.Marshal(req)
-				var res *meta.SearchResponse
-				err := fetchHTTP(http.MethodPost, addr, "/api/internal/partial_query", "", bytes.NewBuffer(reqBody), &res, auth, true)
-				if err != nil {
-					return err
-				}
-
-				mutex.Lock()
-				result.Hits.Total.Value += res.Hits.Total.Value
-				result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
-				result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
-				result.Took = res.Took
-				result.Shards.Total += res.Shards.Total
-				result.Shards.Skipped += res.Shards.Skipped
-				result.Shards.Failed += res.Shards.Failed
-				result.Shards.Successful += res.Shards.Successful
-				mutex.Unlock()
-				return nil
-			},
-		)
+	res, err := execMultiParallelQuery(auth, parallelNodeMp, stats, indexQueryMap)
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+	} else if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 	}
-
-	err := eg.Wait()
-	return result, err
+	zutils.GinRenderJSON(c, http.StatusOK, res)
 }
 
-// checkMultiIndexParallelQuery will Filter out the indexes that should execute parallel search,
-// and assign the indexes and second shards according to the query nodes.
-func checkMultiIndexParallelQuery(indexes []string) (map[string]map[string][]int, map[string]struct{}, error) {
+// checkUnifySearchInfo will organize which indexes and second shard searches each node should perform
+// and return the map.
+// If the index needs a index needs to be processed in parallel, it will be sent to multiple nodes,
+// and each node will handle some of the second shards.
+// Otherwise, this node will only be sent to one of the corresponding nodes according to the assign rules.
+func checkUnifySearchInfo(indexes []string) (map[string]core.PartialIndexes, error) {
 	// node -> index -> second ids
-	nodeIndexMap := make(map[string]map[string][]int)
-	parallelIndex := make(map[string]struct{})
+	nodeIndexMap := make(map[string]core.PartialIndexes)
 
 	nodeList := GetNodeList()
 	if len(nodeList) == 0 {
-		return nodeIndexMap, parallelIndex, nil
+		return nodeIndexMap, nil
 	}
 	for _, index := range indexes {
 		indexMeta, err := metadata.Index.Get(index)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		// only process single shard
-		if indexMeta.ShardNum != 1 {
-			continue
-		}
+
 		secondShardList := make([]*meta.IndexSecondShard, 0)
 		for _, shard := range indexMeta.Shards {
 			secondShardList = append(secondShardList, shard.Shards...)
 		}
 
-		if len(secondShardList) < conf.General.IndexParallelQueryThreshold {
+		if indexMeta.ShardNum != 1 || len(secondShardList) < conf.General.IndexParallelQueryThreshold {
+			// the node will process the full index search.
+			addr, err := GetAddrByIndex(index)
+			if err != nil {
+				return nil, err
+			}
+			if partialIndexes, ok := nodeIndexMap[addr]; ok {
+				partialIndexes[index] = []int{}
+			} else {
+				nodeIndexMap[addr] = core.CreatePartialIndexes(index, []int{})
+			}
 			continue
 		}
-		parallelIndex[index] = struct{}{}
 
 		for _, secondShard := range secondShardList {
 			remainder := int(secondShard.ID) % len(nodeList)
 			addr := nodeList[remainder].addr
-
-			if indexMp, ok := nodeIndexMap[addr]; ok {
-				if ids, ok := indexMp[index]; ok {
-					ids = append(ids, int(secondShard.ID))
-					indexMp[index] = ids
-				} else {
-					indexMp[index] = []int{int(secondShard.ID)}
-				}
+			if partialIndexes, ok := nodeIndexMap[addr]; ok {
+				partialIndexes.AddSecondShardId(index, int(secondShard.ID))
 			} else {
-				nodeIndexMap[addr] = map[string][]int{
-					index: {int(secondShard.ID)},
-				}
+				nodeIndexMap[addr] = core.CreatePartialIndexes(index, []int{int(secondShard.ID)})
 			}
 		}
 	}
-
-	return nodeIndexMap, parallelIndex, nil
+	return nodeIndexMap, nil
 }
 
-func execMultiParallelQuery(auth string, parallelNodeMap map[string]map[string][]int, indexQueryMap map[string][]*meta.ZincQuery, stats *zincsearch.UnifiedStats) ([]interface{}, error) {
-	var (
-		mutex     sync.Mutex
-		responses = make([]interface{}, 0)
-	)
-	var eg errgroup.Group
-	eg.SetLimit(6)
-	for addr, indexMap := range parallelNodeMap {
-		host := addr
-		indexMap := indexMap
-		eg.Go(func() error {
-			var req = search.ParallelMultiQueryRequest{
-				Stats: stats,
-			}
-			var queries = make([]search.MultiSearchQuery, 0, len(indexMap))
-			for idx, ids := range indexMap {
-				if queryList, ok := indexQueryMap[idx]; ok {
-					for _, q := range queryList {
-						queries = append(queries, search.MultiSearchQuery{
-							Index:          idx,
-							SecondShardIds: ids,
-							Query:          q,
-						})
-					}
-				}
-			}
-			req.Queries = queries
-
-			reqBody, _ := json.Marshal(req)
-			var res multiSearchRsp
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/partial_multi_query", "", bytes.NewBuffer(reqBody), &res, auth, true)
-			if err != nil {
-				return err
-			}
-			mutex.Lock()
-			responses = append(responses, res.Rsp...)
-			mutex.Unlock()
-			return nil
-		})
-	}
-	err := eg.Wait()
-	return responses, err
-}
-
-func parallelGetStatsInfo(auth string, parallelNodeMap map[string]map[string][]int, indexQueryMap map[string][]*meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+func parallelGetStatsInfo(auth string, parallelNodeMap map[string]core.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
 	var (
 		stats = &zincsearch.UnifiedStats{}
 		mutex = sync.Mutex{}
 	)
 	var eg errgroup.Group
 	eg.SetLimit(6)
-	for addr, indexMap := range parallelNodeMap {
+	for addr, partialIndexes := range parallelNodeMap {
 		host := addr
-		indexMap := indexMap
+		partialIndexes := partialIndexes
 		eg.Go(func() error {
-			var req = search.ParallelQueryStatsInfoRequest{}
-			req.IndexMap = indexMap
-			for index := range indexMap {
-				queries := indexQueryMap[index]
-				// we use first query for stats info
-				if len(queries) > 0 && req.Query == nil {
-					req.Query = queries[0]
-					break
-				}
+			var req = search.InternalQueryStatsRequest{
+				IndexList: partialIndexes,
+				Query:     query,
 			}
-
 			reqBody, _ := json.Marshal(req)
 			var result *zincsearch.UnifiedStats
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/partial_get_stats", "", bytes.NewBuffer(reqBody), &result, auth, true)
+			err := fetchHTTP(http.MethodPost, host, "/api/internal/get_stats", "", bytes.NewBuffer(reqBody), &result, auth, true)
 			if err != nil {
 				return err
 			}
@@ -271,4 +159,69 @@ func parallelGetStatsInfo(auth string, parallelNodeMap map[string]map[string][]i
 	}
 	err := eg.Wait()
 	return stats, err
+}
+
+func execMultiParallelQuery(auth string, parallelNodeMap map[string]core.PartialIndexes, stats *zincsearch.UnifiedStats, indexQueryMap map[string]*meta.ZincQuery) (*meta.SearchResponse, error) {
+	var (
+		mutex sync.Mutex
+	)
+	var eg errgroup.Group
+	var query *meta.ZincQuery
+	for _, q := range indexQueryMap {
+		if query == nil {
+			query = q
+			break
+		}
+	}
+
+	result := &meta.SearchResponse{}
+	eg.SetLimit(6)
+
+	for addr, partialIndexes := range parallelNodeMap {
+		host := addr
+		partialIndexes := partialIndexes
+		eg.Go(func() error {
+			var req = search.InternalUnifySearchRequest{
+				Stats: stats,
+			}
+			for idx, secondIds := range partialIndexes {
+				q := indexQueryMap[idx]
+				req.IndexQueries = append(req.IndexQueries, core.IndexQueryRequest{
+					Index:         idx,
+					SecondShardId: secondIds,
+					Query:         q,
+				})
+			}
+
+			reqBody, _ := json.Marshal(req)
+			var res meta.SearchResponse
+			err := fetchHTTP(http.MethodPost, host, "/api/internal/unify_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
+			if err != nil {
+				return err
+			}
+			mutex.Lock()
+			result.Hits.Total.Value += res.Hits.Total.Value
+			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
+			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
+			result.Took = res.Took
+			result.Shards.Total += res.Shards.Total
+			result.Shards.Skipped += res.Shards.Skipped
+			result.Shards.Failed += res.Shards.Failed
+			result.Shards.Successful += res.Shards.Successful
+			mutex.Unlock()
+
+			return nil
+		})
+	}
+	err := eg.Wait()
+
+	sort.Slice(result.Hits.Hits, func(i, j int) bool {
+		return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
+	})
+
+	if len(result.Hits.Hits) > query.Size {
+		result.Hits.Hits = result.Hits.Hits[:query.Size]
+	}
+
+	return result, err
 }

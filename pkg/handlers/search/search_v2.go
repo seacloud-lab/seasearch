@@ -18,9 +18,11 @@ package search
 import (
 	"bufio"
 	"fmt"
-	"io"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
@@ -105,8 +107,6 @@ func MultipleSearch(c *gin.Context) {
 		defaultIndexNames = strings.Split(indexName, ",")
 	}
 
-	unifyScore := strings.ToUpper(c.Query("unify_score")) == "TRUE"
-
 	responses := make([]interface{}, 0)
 	searches := make([]search, 0)
 	// Prepare to read the entire raw text of the body
@@ -160,214 +160,9 @@ func MultipleSearch(c *gin.Context) {
 		}
 	}
 
-	if unifyScore {
-		responses = append(responses, unifiedMultiSearch(searches)...)
-	} else {
-		responses = append(responses, multiSearchIndex(searches)...)
-	}
+	responses = append(responses, multiSearchIndex(searches)...)
 
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
-}
-
-type PreSearchRequest struct {
-	IndexList []string        `json:"index_list"`
-	Query     *meta.ZincQuery `json:"query"`
-}
-
-func QueryStats(c *gin.Context) {
-	var req *PreSearchRequest
-	if err := zutils.GinBindJSON(c, &req); err != nil {
-		log.Printf("handlers.search.preSearch: %s", err.Error())
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	stats, err := core.QueryStatsInfo(req.IndexList, req.Query)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	zutils.GinRenderJSON(c, http.StatusOK, stats)
-}
-
-type ParallelQueryStatsInfoRequest struct {
-	Query    *meta.ZincQuery  `json:"query"`
-	IndexMap map[string][]int `json:"index_list"`
-}
-
-func PartialQueryStatsInfo(c *gin.Context) {
-	var req *ParallelQueryStatsInfoRequest
-	if err := zutils.GinBindJSON(c, &req); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	stats, err := core.QueryStatsInfoWithSecondShardIds(req.IndexMap, req.Query)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	zutils.GinRenderJSON(c, http.StatusOK, stats)
-}
-
-func MultiSearchWithStatistics(c *gin.Context) {
-	indexName := c.Param("target")
-	defaultIndexNames := make([]string, 0)
-	if indexName != "" {
-		defaultIndexNames = strings.Split(indexName, ",")
-	}
-
-	responses := make([]interface{}, 0)
-	searches := make([]search, 0)
-
-	// Prepare to read the entire raw text of the body
-	scanner := bufio.NewScanner(c.Request.Body)
-	defer c.Request.Body.Close()
-	maxCapacityPerLine := config.Global.MaxDocumentSize
-	buf := make([]byte, maxCapacityPerLine)
-	scanner.Buffer(buf, maxCapacityPerLine)
-
-	indexNames := make([]string, 0)
-	nextLineIsData := false
-
-	// the first line is stats info
-	scanner.Scan()
-	var stats *zincsearch.UnifiedStats
-	if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, gin.H{"error": "invalid stats"})
-		log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
-		return
-	}
-
-	var doc map[string]interface{}
-	var err error
-	for scanner.Scan() { // Read each line
-		if nextLineIsData {
-			nextLineIsData = false
-			query := &meta.ZincQuery{Size: 10}
-			if err = json.Unmarshal(scanner.Bytes(), &query); err != nil {
-				log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
-				responses = append(responses, &meta.SearchResponse{Error: err.Error()})
-				continue
-			}
-			// search query
-			names := make([]string, 0, len(indexNames))
-			names = append(names, indexNames...)
-			searches = append(searches, search{
-				indexNames: names,
-				query:      query,
-			})
-		} else {
-			nextLineIsData = true
-			indexNames = indexNames[:0]
-			if err = json.Unmarshal(scanner.Bytes(), &doc); err != nil {
-				log.Error().Msgf("handlers.search.MultipleSearch.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
-				continue
-			}
-			if v, ok := doc["index"]; ok {
-				switch v := v.(type) {
-				case string:
-					indexNames = append(indexNames, v)
-				case []interface{}:
-					for _, v := range v {
-						indexNames = append(indexNames, v.(string))
-					}
-				}
-			} else {
-				indexNames = append(indexNames, defaultIndexNames...)
-			}
-		}
-	}
-
-	responses = append(responses, unifiedSearchWithStats(searches, stats)...)
-	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": responses})
-}
-
-type ParallelQueryRequest struct {
-	Index          string          `json:"index"`
-	SecondShardIds []int           `json:"second_shards"`
-	Query          *meta.ZincQuery `json:"query"`
-}
-
-func PartialSearchSingleIndex(c *gin.Context) {
-	var request ParallelQueryRequest
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		log.Err(err).Msg("read request body err:")
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	_ = json.Unmarshal(body, &request)
-	index, err := core.GetZincIndexFromMetadata(request.Index)
-	if err != nil {
-		if errors.Is(err, errors.ErrKeyNotFound) {
-			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		log.Err(err).Msgf("get index %s from metadata err:", request.Index)
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	resp, err := index.PartialSearch(request.SecondShardIds, request.Query, nil)
-	if err != nil {
-		log.Err(err).Msgf("partial search index for %s ids %v err:", request.Index, request.SecondShardIds)
-		errors.HandleError(c, err)
-		return
-	}
-	zutils.GinRenderJSON(c, http.StatusOK, resp)
-}
-
-type ParallelMultiQueryRequest struct {
-	Queries []MultiSearchQuery       `json:"queries"`
-	Stats   *zincsearch.UnifiedStats `json:"stats"`
-}
-
-type MultiSearchQuery struct {
-	Index          string          `json:"index"`
-	SecondShardIds []int           `json:"second_shards"`
-	Query          *meta.ZincQuery `json:"query"`
-}
-
-func PartialSearchMultiIndex(c *gin.Context) {
-	var request ParallelMultiQueryRequest
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		log.Err(err).Msg("read request body err:")
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	_ = json.Unmarshal(body, &request)
-
-	var res = make([]interface{}, len(request.Queries))
-	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
-	for i, s := range request.Queries {
-		s := s
-		i := i
-		index, err := core.GetZincIndexFromMetadata(s.Index)
-		if err != nil {
-			if errors.Is(err, errors.ErrKeyNotFound) {
-				zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-				return
-			}
-			log.Err(err).Msgf("get index %s from metadata err:", s.Index)
-			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		eg.Go(func() error {
-			rsp, err := index.PartialSearch(s.SecondShardIds, s.Query, request.Stats)
-			if err != nil {
-				res[i] = &meta.SearchResponse{Error: err.Error()}
-			} else {
-				res[i] = rsp
-			}
-			return nil
-		})
-	}
-	_ = eg.Wait()
-	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"responses": res})
 }
 
 type search struct {
@@ -385,63 +180,6 @@ func multiSearchIndex(searches []search) []interface{} {
 		i := i
 		eg.Go(func() error {
 			rsp, err := searchIndex(s.indexNames, s.query)
-			if err != nil {
-				res[i] = &meta.SearchResponse{Error: err.Error()}
-			} else {
-				res[i] = rsp
-			}
-			return nil
-		})
-	}
-
-	_ = eg.Wait()
-	return res
-}
-
-func unifiedMultiSearch(searches []search) []interface{} {
-	if len(searches) == 0 {
-		return []interface{}{}
-	}
-
-	allNameMap := make(map[string]struct{})
-	for _, search := range searches {
-		indexNames, err := core.GetMatchedIndexNames(search.indexNames)
-		if err != nil {
-			return []interface{}{&meta.SearchResponse{Error: err.Error()}}
-		}
-		for _, idx := range indexNames {
-			allNameMap[idx] = struct{}{}
-		}
-	}
-	allNames := make([]string, 0, len(allNameMap))
-	for key := range allNameMap {
-		allNames = append(allNames, key)
-	}
-	// for multi query, there may be many queries,
-	// we simplify the processing and use only one of them to get the term list, which is sufficient for our scenario.
-	stats, err := core.QueryStatsInfo(allNames, searches[0].query)
-	if err != nil {
-		return []interface{}{&meta.SearchResponse{Error: err.Error()}}
-	}
-
-	return unifiedSearchWithStats(searches, stats)
-}
-
-func unifiedSearchWithStats(searches []search, stats *zincsearch.UnifiedStats) []interface{} {
-	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
-	var res = make([]interface{}, len(searches))
-
-	for i, s := range searches {
-		s := s
-		i := i
-		eg.Go(func() error {
-			searchIndexNames, err := core.GetMatchedIndexNames(s.indexNames)
-			if err != nil {
-				res[i] = &meta.SearchResponse{Error: err.Error()}
-				return nil
-			}
-			rsp, err := core.MultiSearchWithStats(searchIndexNames, stats, s.query)
 			if err != nil {
 				res[i] = &meta.SearchResponse{Error: err.Error()}
 			} else {
@@ -475,4 +213,131 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		resp, err = index.Search(query)
 	}
 	return resp, err
+}
+
+type InternalUnifySearchRequest struct {
+	Stats        *zincsearch.UnifiedStats `json:"stats"`
+	IndexQueries []core.IndexQueryRequest `json:"index_queries"`
+}
+
+func InternalUnifySearch(c *gin.Context) {
+	var request InternalUnifySearchRequest
+	if err := zutils.GinBindJSON(c, &request); err != nil {
+		log.Printf("handlers.search.internal_unify_search: %s", err.Error())
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	s, _ := json.Marshal(request.IndexQueries)
+	log.Printf("%s", s)
+	res, err := core.UnifySearchMultiIndex(request.IndexQueries, request.Stats)
+	if err != nil {
+		if errors.Is(err, errors.ErrKeyNotFound) {
+			zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	zutils.GinRenderJSON(c, http.StatusOK, res)
+}
+
+type InternalQueryStatsRequest struct {
+	IndexList core.PartialIndexes `json:"index_list"`
+	Query     *meta.ZincQuery     `json:"Query"`
+}
+
+func InternalQueryStats(c *gin.Context) {
+	var req *InternalQueryStatsRequest
+	if err := zutils.GinBindJSON(c, &req); err != nil {
+		log.Printf("handlers.search.internal_query_stats: %s", err.Error())
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	stats, err := core.QueryStatsInfoWithSecondShardIds(req.IndexList, req.Query)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, stats)
+}
+
+type UnifiedSearchRequest struct {
+	IndexQueries []IndexQueryRequest `json:"index_queries"`
+}
+
+type IndexQueryRequest struct {
+	Index string          `json:"index"`
+	Query *meta.ZincQuery `json:"query"`
+}
+
+func UnifiedSearch(c *gin.Context) {
+	var req = UnifiedSearchRequest{}
+	if err := zutils.GinBindJSON(c, &req); err != nil {
+		log.Printf("handlers.search.unified_search: %s", err.Error())
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	if len(req.IndexQueries) == 0 {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index_list"})
+		return
+	}
+	IndexList := make([]string, 0, len(req.IndexQueries))
+	var query *meta.ZincQuery
+	for _, q := range req.IndexQueries {
+		if q.Query == nil {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require query"})
+			return
+		}
+		if query == nil {
+			query = q.Query
+		}
+		IndexList = append(IndexList, q.Index)
+	}
+
+	stats, err := core.QueryStatsInfo(IndexList, query)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	var result = &meta.SearchResponse{}
+	var mutex = sync.Mutex{}
+
+	var eg errgroup.Group
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	for _, q := range req.IndexQueries {
+		q := q
+		eg.Go(func() error {
+			res, err := core.MultiSearchWithStats([]string{q.Index}, stats, q.Query)
+			if err != nil {
+				return err
+			}
+			mutex.Lock()
+			result.Hits.Total.Value += res.Hits.Total.Value
+			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
+			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
+			result.Took = res.Took
+			result.Shards.Total += res.Shards.Total
+			result.Shards.Skipped += res.Shards.Skipped
+			result.Shards.Failed += res.Shards.Failed
+			result.Shards.Successful += res.Shards.Successful
+			mutex.Unlock()
+			return nil
+		})
+	}
+
+	err = eg.Wait()
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	sort.Slice(result.Hits.Hits, func(i, j int) bool {
+		return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
+	})
+	if len(result.Hits.Hits) > query.Size {
+		result.Hits.Hits = result.Hits.Hits[:query.Size]
+	}
+
+	zutils.GinRenderJSON(c, http.StatusOK, result)
 }
