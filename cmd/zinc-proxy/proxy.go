@@ -135,6 +135,7 @@ func syncCluster() error {
 			if event.ItemUpdated {
 				updateUrl(event.Info)
 			} else {
+				updateUrl(nil)
 				log.Warn().Msg("cluster node was removed")
 			}
 		}
