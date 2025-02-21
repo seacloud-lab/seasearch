@@ -67,7 +67,7 @@ func SetRoutes(r *gin.Engine) {
 	}
 	// internal API
 	r.POST("/api/internal/get_stats", AuthMiddleware("search.internal.GetStats"), search.InternalQueryStats)
-	r.POST("/api/internal/unify_search", AuthMiddleware("search.internal.UnifySearch"), search.InternalUnifySearch)
+	r.POST("/api/internal/unified_search", AuthMiddleware("search.internal.UnifySearch"), search.InternalUnifiedSearch)
 	r.POST("/api/unified_search", AuthMiddleware("search.unified_search"), search.UnifiedSearch)
 
 	// UI

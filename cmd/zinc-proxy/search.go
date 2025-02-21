@@ -7,7 +7,6 @@ import (
 
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,7 +29,6 @@ func SearchDSL(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	body := io.NopCloser(bytes.NewBuffer(bodyBytes))
 	_ = c.Request.Body.Close()
 
 	query := &meta.ZincQuery{Size: 10}
@@ -40,7 +38,6 @@ func SearchDSL(c *gin.Context) {
 		return
 	}
 
-	var result = &meta.SearchResponse{}
 	var indexNameList []string
 
 	if indexName == "" {
@@ -62,78 +59,11 @@ func SearchDSL(c *gin.Context) {
 		return
 	}
 
-	if len(indexNameList) == 1 {
-		processUnifySearch(c, indexNameList, map[string]*meta.ZincQuery{
-			indexNameList[0]: query,
-		})
-		return
+	indexQueryMap := make(map[string]*meta.ZincQuery)
+	for _, idx := range indexNameList {
+		indexQueryMap[idx] = query
 	}
-
-	// addr -> index names
-	reqMap := make(map[string][]string)
-
-	for _, index := range indexNameList {
-		addr, err := GetAddrByIndex(index)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		if list, ok := reqMap[addr]; ok {
-			list = append(list, index)
-			reqMap[addr] = list
-		} else {
-			reqMap[addr] = []string{index}
-		}
-	}
-
-	var (
-		clientErr *HttpClientError
-		auth      = c.Request.Header.Get("Authorization")
-		mutex     = sync.Mutex{}
-	)
-	var eg errgroup.Group
-	eg.SetLimit(6)
-	for addr, data := range reqMap {
-		host := addr
-		indexes := data
-		eg.Go(func() error {
-			path := fmt.Sprintf("/es/%s/_search", strings.Join(indexes, ","))
-			var res = meta.SearchResponse{}
-			err := fetchHTTP(http.MethodPost, host, path, "", body, &res, auth, true)
-			if err != nil {
-				return err
-			}
-			mutex.Lock()
-			result.Hits.Total.Value += res.Hits.Total.Value
-			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
-			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
-			result.Took = res.Took
-			result.Shards.Total += res.Shards.Total
-			result.Shards.Skipped += res.Shards.Skipped
-			result.Shards.Failed += res.Shards.Failed
-			result.Shards.Successful += res.Shards.Successful
-			mutex.Unlock()
-			return nil
-		})
-	}
-	err = eg.Wait()
-	if errors.As(err, &clientErr) {
-		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
-		return
-	} else if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	sort.Slice(result.Hits.Hits, func(i, j int) bool {
-		return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
-	})
-
-	if len(result.Hits.Hits) > query.Size {
-		result.Hits.Hits = result.Hits.Hits[:query.Size]
-	}
-
-	zutils.GinRenderJSON(c, http.StatusOK, result)
+	processUnifiedSearch(c, indexNameList, indexQueryMap)
 }
 
 type multiSearchRsp struct {

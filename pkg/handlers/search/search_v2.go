@@ -215,26 +215,24 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	return resp, err
 }
 
-type InternalUnifySearchRequest struct {
+type InternalUnifiedSearchRequest struct {
 	Stats        *zincsearch.UnifiedStats `json:"stats"`
 	IndexQueries []core.IndexQueryRequest `json:"index_queries"`
 }
 
-func InternalUnifySearch(c *gin.Context) {
-	var request InternalUnifySearchRequest
+func InternalUnifiedSearch(c *gin.Context) {
+	var request InternalUnifiedSearchRequest
 	if err := zutils.GinBindJSON(c, &request); err != nil {
-		log.Printf("handlers.search.internal_unify_search: %s", err.Error())
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	s, _ := json.Marshal(request.IndexQueries)
-	log.Printf("%s", s)
-	res, err := core.UnifySearchMultiIndex(request.IndexQueries, request.Stats)
+	res, err := core.InternalUnifiedSearchMultiIndex(request.IndexQueries, request.Stats)
 	if err != nil {
 		if errors.Is(err, errors.ErrKeyNotFound) {
 			zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
+		log.Err(err).Msgf("exec local parallel multi search err: ")
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
@@ -250,7 +248,6 @@ type InternalQueryStatsRequest struct {
 func InternalQueryStats(c *gin.Context) {
 	var req *InternalQueryStatsRequest
 	if err := zutils.GinBindJSON(c, &req); err != nil {
-		log.Printf("handlers.search.internal_query_stats: %s", err.Error())
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
@@ -274,12 +271,11 @@ type IndexQueryRequest struct {
 func UnifiedSearch(c *gin.Context) {
 	var req = UnifiedSearchRequest{}
 	if err := zutils.GinBindJSON(c, &req); err != nil {
-		log.Printf("handlers.search.unified_search: %s", err.Error())
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 	if len(req.IndexQueries) == 0 {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index_list"})
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "No index is specified."})
 		return
 	}
 	IndexList := make([]string, 0, len(req.IndexQueries))

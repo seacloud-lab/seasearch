@@ -23,12 +23,11 @@ import (
 func UnifiedSearch(c *gin.Context) {
 	var req = search.UnifiedSearchRequest{}
 	if err := zutils.GinBindJSON(c, &req); err != nil {
-		log.Printf("handlers.search.unified_search: %s", err.Error())
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 	if len(req.IndexQueries) == 0 {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index_list"})
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "No index is specified."})
 		return
 	}
 
@@ -42,48 +41,62 @@ func UnifiedSearch(c *gin.Context) {
 		indexQueryMap[q.Index] = q.Query
 		indexList = append(indexList, q.Index)
 	}
-	processUnifySearch(c, indexList, indexQueryMap)
+	processUnifiedSearch(c, indexList, indexQueryMap)
 }
 
-// ProcessUnifySearch first determines which nodes each index should be processed by,
+// ProcessUnifiedSearch first determines which indexes each node should process
 // then obtains statistics from those nodes,
 // and finally performs a query. This can process all indexes, whether or not parallel search is required.
-func processUnifySearch(c *gin.Context, indexes []string, indexQueryMap map[string]*meta.ZincQuery) {
+func processUnifiedSearch(c *gin.Context, indexes []string, indexQueryMap map[string]*meta.ZincQuery) {
 	auth := c.Request.Header.Get("Authorization")
-	parallelNodeMp, err := checkUnifySearchInfo(indexes)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
+
+	// we only use the first query to get statistics info
 	var query *meta.ZincQuery
 	for _, q := range indexQueryMap {
 		query = q
 		break
 	}
 
-	var clientErr *HttpClientError
-	stats, err := parallelGetStatsInfo(auth, parallelNodeMp, query)
-	if errors.As(err, &clientErr) {
-		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
-	} else if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+	parallelNodeMp, err := calcNodeIndexMap(indexes)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
 	}
 
-	res, err := execMultiParallelQuery(auth, parallelNodeMp, stats, indexQueryMap)
+	var stats *zincsearch.UnifiedStats
+	var clientErr *HttpClientError
+	// more than one query node, we need collect stats info from all nodes.
+	if len(parallelNodeMp) > 1 {
+		stats, err = parallelGetStats(auth, parallelNodeMp, query)
+		if errors.As(err, &clientErr) {
+			zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+			return
+		} else if err != nil {
+			log.Err(err).Msgf("parallel get stats info err: ")
+			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+			return
+		}
+	}
+
+	res, err := execParallelQueries(auth, parallelNodeMp, stats, indexQueryMap)
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
 	} else if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		log.Err(err).Msgf("exec parallel multi search err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
 	}
 	zutils.GinRenderJSON(c, http.StatusOK, res)
 }
 
-// checkUnifySearchInfo will organize which indexes and second shard searches each node should perform
-// and return the map.
-// If the index needs a index needs to be processed in parallel, it will be sent to multiple nodes,
-// and each node will handle some of the second shards.
-// Otherwise, this node will only be sent to one of the corresponding nodes according to the assign rules.
-func checkUnifySearchInfo(indexes []string) (map[string]core.PartialIndexes, error) {
+// calcNodeIndexMap determines which indexes and second shard searches should be assigned to each node
+// and returns the corresponding map.
+// If an index needs to be processed in parallel, it will be distributed across multiple nodes,
+// with each node handling a subset of the second shards.
+// If parallel processing is not needed, the index will be assigned to a single node
+// according to the allocation rules.
+func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) {
 	// node -> index -> second ids
 	nodeIndexMap := make(map[string]core.PartialIndexes)
 
@@ -129,7 +142,7 @@ func checkUnifySearchInfo(indexes []string) (map[string]core.PartialIndexes, err
 	return nodeIndexMap, nil
 }
 
-func parallelGetStatsInfo(auth string, parallelNodeMap map[string]core.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
 	var (
 		stats = &zincsearch.UnifiedStats{}
 		mutex = sync.Mutex{}
@@ -161,7 +174,7 @@ func parallelGetStatsInfo(auth string, parallelNodeMap map[string]core.PartialIn
 	return stats, err
 }
 
-func execMultiParallelQuery(auth string, parallelNodeMap map[string]core.PartialIndexes, stats *zincsearch.UnifiedStats, indexQueryMap map[string]*meta.ZincQuery) (*meta.SearchResponse, error) {
+func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialIndexes, stats *zincsearch.UnifiedStats, indexQueryMap map[string]*meta.ZincQuery) (*meta.SearchResponse, error) {
 	var (
 		mutex sync.Mutex
 	)
@@ -181,7 +194,7 @@ func execMultiParallelQuery(auth string, parallelNodeMap map[string]core.Partial
 		host := addr
 		partialIndexes := partialIndexes
 		eg.Go(func() error {
-			var req = search.InternalUnifySearchRequest{
+			var req = search.InternalUnifiedSearchRequest{
 				Stats: stats,
 			}
 			for idx, secondIds := range partialIndexes {
@@ -195,7 +208,7 @@ func execMultiParallelQuery(auth string, parallelNodeMap map[string]core.Partial
 
 			reqBody, _ := json.Marshal(req)
 			var res meta.SearchResponse
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/unify_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
+			err := fetchHTTP(http.MethodPost, host, "/api/internal/unified_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
 			if err != nil {
 				return err
 			}

@@ -78,11 +78,26 @@ type IndexQueryRequest struct {
 	Query         *meta.ZincQuery `json:"query"`
 }
 
-func UnifySearchMultiIndex(indexes []IndexQueryRequest, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
+func InternalUnifiedSearchMultiIndex(indexes []IndexQueryRequest, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
 	var query *meta.ZincQuery
 	for _, q := range indexes {
 		query = q.Query
 		break
+	}
+
+	// There is no statistical information, it means
+	// the query is only executed on the current node.
+	// We need collect local stats info
+	if stats == nil {
+		var err error
+		indexMp := make(PartialIndexes)
+		for _, idx := range indexes {
+			indexMp[idx.Index] = idx.SecondShardId
+		}
+		stats, err = QueryStatsInfoWithSecondShardIds(indexMp, query)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var result = &meta.SearchResponse{}
