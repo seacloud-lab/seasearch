@@ -22,13 +22,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blugelabs/bluge"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/uquery"
 	query2 "github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
@@ -73,7 +74,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 
 	for _, index := range searchIndex {
 		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
-		shardNum += index.GetShardNum()
+		shardNum += int64(len(searchers))
 		if mappings == nil {
 			mappings = index.GetMappings()
 			analyzers = index.GetAnalyzers()
@@ -182,12 +183,68 @@ func GetMatchedIndexNames(indexNames []string) ([]string, error) {
 	return searchIndex, nil
 }
 
+type PartialIndexes map[string][]int
+
+func (p PartialIndexes) AddSecondShardId(index string, id int) {
+	if ids, ok := p[index]; ok {
+		ids = append(ids, int(id))
+		p[index] = ids
+	} else {
+		p[index] = []int{int(id)}
+	}
+}
+
+func CreatePartialIndexes(index string, ids []int) PartialIndexes {
+	p := make(PartialIndexes)
+	p[index] = ids
+	return p
+}
+
+type IndexQueryRequest struct {
+	Index         string          `json:"index"`
+	SecondShardId []int           `json:"second_shard_ids"`
+	Query         *meta.ZincQuery `json:"query"`
+}
+
+// PartialSearch queries the specified secondary shard with given statistics information.
+// If no secondary shard IDs are provided, it searches the entire index.
+func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
+	mappings := index.GetMappings()
+	analyzers := index.GetAnalyzers()
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+
+	timeMin, timeMax := timerange.Query(query.Query)
+	var searchers []*SimpleSearcher
+	if len(secondShardIds) == 0 {
+		searchers = index.GetSearchers(timeMin, timeMax)
+	} else {
+		searchers = index.GetSearchersByID(timeMin, timeMax, secondShardIds...)
+	}
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if query.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(query.Timeout)*time.Second)
+		defer cancel()
+	}
+
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, int64(len(searchers)), simpleSearchersToUnifiedSearcher(stats, searchers)...)
+}
+
 // QueryStatsInfo get statistics from specified indexes, returns statistics for all index mergers.
 func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
 	hasIndex := false
-	searchIndex := make([]*Index, 0)
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
+	var searchers = make([]*SimpleSearcher, 0)
+
+	timeMin, timeMax := timerange.Query(query.Query)
 
 	for _, indexName := range indexNames {
 		// this index should not handle by this servers
@@ -197,17 +254,11 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		index, ok := ZINC_INDEX_LIST.Get(indexName)
 		if ok {
 			hasIndex = true
-			searchIndex = append(searchIndex, index)
-		}
-	}
-
-	timeMin, timeMax := timerange.Query(query.Query)
-	var searchers = make([]*SimpleSearcher, 0)
-	for _, index := range searchIndex {
-		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
-		if mappings == nil {
-			mappings = index.GetMappings()
-			analyzers = index.GetAnalyzers()
+			if mappings == nil {
+				mappings = index.GetMappings()
+				analyzers = index.GetAnalyzers()
+			}
+			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
 		}
 	}
 
@@ -218,17 +269,69 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		return nil, nil
 	}
 
+	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+
+	return getLocalStatsInfo(searchers, termList)
+}
+
+// QueryStatsInfo retrieves statistics from specified indexes and secondary shards.
+// It returns statistics for all index mergers.
+// If no secondary shard IDs are provided, statistics for the entire index are collected.
+// This is useful in scenarios where both large-scale indexes and smaller indexes
+// are being searched together in a single request.
+func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+	var mappings *meta.Mappings
+	var analyzers map[string]*analysis.Analyzer
+	var searchers = make([]*SimpleSearcher, 0)
+	timeMin, timeMax := timerange.Query(query.Query)
+
+	for idx, secondIds := range indexes {
+		index, err := GetZincIndexFromMetadata(idx)
+		if err != nil {
+			return nil, err
+		}
+		if mappings == nil {
+			mappings = index.GetMappings()
+			analyzers = index.GetAnalyzers()
+		}
+		if len(secondIds) == 0 {
+			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		} else {
+			searchers = append(searchers, index.GetSearchersByID(timeMin, timeMax, secondIds...)...)
+		}
+	}
+
+	err := uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+
+	}
+	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(searchers) == 0 {
+		return &zincsearch.UnifiedStats{}, nil
+	}
+	// we assume that all indexes have same mappings and analyzers.
+	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	return getLocalStatsInfo(searchers, termList)
+}
+
+func getLocalStatsInfo(searchers []*SimpleSearcher, termList []query2.Term) (*zincsearch.UnifiedStats, error) {
 	result := &zincsearch.UnifiedStats{
 		FieldStats: map[string]*zincsearch.FieldStats{},
 	}
 
 	// field -> []terms
 	termMap := make(map[string][]query2.Term)
-	// we assume that all indexes have same mappings and analyzers.
-	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-	}
 	for _, term := range termList {
 		if tms, ok := termMap[term.Field]; ok {
 			termMap[term.Field] = append(tms, term)
