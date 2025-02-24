@@ -226,6 +226,7 @@ type IndexQueryRequest struct {
 
 // UnifiedSearch queries the specified indexes using the provided queries,
 // leveraging the statistics information collected from all indexes.
+// It's only called in single-node mode.
 func UnifiedSearch(c *gin.Context) {
 	var req = UnifiedSearchRequest{}
 	if err := zutils.GinBindJSON(c, &req); err != nil {
@@ -303,7 +304,9 @@ type InternalUnifiedSearchRequest struct {
 
 // InternalUnifiedSearch performs a unified search using the provided statistics information.
 // Each index may execute a different query, but all results will be merged and sorted by score.
-// The caller must ensure that the scoring criteria across all queries are consistent.
+// All the queries must be the same for all indexes,
+// except for the filter conditions in them, which doesn't affect scores.
+// It's called by SeaSearch proxy to implement parallel unified search.
 func InternalUnifiedSearch(c *gin.Context) {
 	var request InternalUnifiedSearchRequest
 	if err := zutils.GinBindJSON(c, &request); err != nil {
@@ -401,6 +404,7 @@ type InternalQueryStatsRequest struct {
 
 // InternalQueryStats collects statistical information from the local node based on the provided query.
 // If the input index does not include any secondary shard IDs, statistics for the entire index are collected.
+// It's called by SeaSearch proxy to implement parallel unified search.
 func InternalQueryStats(c *gin.Context) {
 	var req *InternalQueryStatsRequest
 	if err := zutils.GinBindJSON(c, &req); err != nil {
