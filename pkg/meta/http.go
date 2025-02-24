@@ -31,9 +31,8 @@ type HTTPResponseDocument struct {
 }
 
 type HTTPResponseIndex struct {
-	Message     string `json:"message"`
-	Index       string `json:"index"`
-	StorageType string `json:"storage_type,omitempty"`
+	Message string `json:"message"`
+	Index   string `json:"index"`
 }
 
 type HTTPResponseTemplate struct {

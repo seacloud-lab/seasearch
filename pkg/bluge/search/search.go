@@ -42,7 +42,6 @@ func MultiSearch(
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
-	shardNum int64,
 	searchers ...Searcher,
 ) (*meta.SearchResponse, error) {
 	if len(searchers) == 0 {
@@ -52,13 +51,12 @@ func MultiSearch(
 				Total: meta.Total{
 					Value: 0,
 				}},
-			Took:   0,
-			Shards: meta.Shards{Total: shardNum, Successful: int64(0), Skipped: shardNum - int64(len(searchers))},
+			Took: 0,
 		}, nil
 	}
 	// for single reader, we just get result directly.
 	if len(searchers) == 1 {
-		return getSingleReaderResult(ctx, query, mappings, analyzers, shardNum, searchers[0])
+		return getSingleReaderResult(ctx, query, mappings, analyzers, searchers[0])
 	}
 
 	// for multi-reader we need to use heap sort to combine all the results,
@@ -180,7 +178,6 @@ func MultiSearch(
 		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
 	}
 	resp.Took = int(docList.Aggregations().Duration().Milliseconds())
-	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(len(searchers)), Skipped: shardNum - int64(len(searchers))}
 	resp.Hits.Total = meta.Total{Value: int(docList.Aggregations().Count())}
 	resp.Hits.MaxScore = docList.Aggregations().Metric("max_score")
 	if err := uquery.FormatResponse(resp, query, docList.Aggregations()); err != nil {
@@ -193,7 +190,7 @@ func getSingleReaderResult(ctx context.Context,
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
-	shardNum int64, reader Searcher) (*meta.SearchResponse, error) {
+	reader Searcher) (*meta.SearchResponse, error) {
 	defer func() {
 		_ = reader.Close()
 	}()
@@ -227,7 +224,6 @@ func getSingleReaderResult(ctx context.Context,
 		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
 	}
 	resp.Took = int(dmi.Aggregations().Duration().Milliseconds())
-	resp.Shards = meta.Shards{Total: shardNum, Successful: int64(1), Skipped: shardNum - 1}
 	resp.Hits.Total = meta.Total{Value: int(dmi.Aggregations().Count())}
 	resp.Hits.MaxScore = dmi.Aggregations().Metric("max_score")
 	if err := uquery.FormatResponse(resp, query, dmi.Aggregations()); err != nil {

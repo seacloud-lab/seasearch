@@ -61,10 +61,6 @@ func SearchVector(c *gin.Context) {
 			result.Hits.Total.Value += rsp.Hits.Total.Value
 			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, rsp.Hits.MaxScore)
 			result.Hits.Hits = append(result.Hits.Hits, rsp.Hits.Hits...)
-			result.Shards.Total += rsp.Shards.Total
-			result.Shards.Skipped += rsp.Shards.Skipped
-			result.Shards.Failed += rsp.Shards.Failed
-			result.Shards.Successful += rsp.Shards.Successful
 			mutex.Unlock()
 			return nil
 		})

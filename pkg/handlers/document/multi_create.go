@@ -75,7 +75,7 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 	var doc map[string]interface{}
 	var err error
 	var count int64
-	newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+	newIndex, _, err := core.GetOrCreateIndex(indexName)
 	if err != nil {
 		return count, err
 	}

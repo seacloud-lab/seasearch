@@ -52,7 +52,7 @@ func Test_walMergeDocs_WriteTo(t *testing.T) {
 			docs.AddDocument(d)
 		}
 
-		index, err = NewIndex("Test_walMergeDocs_WriteTo.index_1", "", 2)
+		index, err = NewIndex("Test_walMergeDocs_WriteTo.index_1")
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 

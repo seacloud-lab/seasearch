@@ -31,7 +31,7 @@ func TestIndex(t *testing.T) {
 	t.Run("PUT /api/index", func(t *testing.T) {
 		t.Run("create index with payload", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(fmt.Sprintf(`{"name":"%s","storage_type":"disk"}`, "newindex"))
+			body.WriteString(fmt.Sprintf(`{"name":"%s"}`, "newindex"))
 			resp := request("PUT", "/api/index", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -39,13 +39,12 @@ func TestIndex(t *testing.T) {
 			err := json.Unmarshal(resp.Body.Bytes(), &data)
 			assert.NoError(t, err)
 			assert.Equal(t, data["index"], "newindex")
-			assert.Equal(t, data["storage_type"], "disk")
 			assert.Equal(t, data["message"], "ok")
 		})
 
 		t.Run("create index with error input", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(fmt.Sprintf(`{"name":"%s","storage_type":"disk"}`, ""))
+			body.WriteString(fmt.Sprintf(`{"name":"%s"}`, ""))
 			resp := request("PUT", "/api/index", body)
 			assert.Equal(t, http.StatusBadRequest, resp.Code)
 		})

@@ -96,10 +96,10 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 	}
 
 	if stats != nil {
-		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToUnifiedSearcher(stats, searchers)...)
+		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 	}
 
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, shardNum, simpleSearchersToSearcher(searchers)...)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
 }
 
 func simpleSearchersToSearcher(readers []*SimpleSearcher) []zincsearch.Searcher {

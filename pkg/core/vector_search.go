@@ -77,7 +77,7 @@ func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*m
 			}
 		}
 	}
-	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, zincIndex.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
+	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, simpleSearchersToSearcher(searchers)...)
 	if err != nil {
 		return nil, err
 	}

@@ -51,37 +51,24 @@ func CheckIndexName(name string) error {
 }
 
 // NewIndex creates an instance of a physical zinc index that can be used to store and retrieve data.
-func NewIndex(name, storageType string, shardNum int64) (*Index, error) {
+func NewIndex(name string) (*Index, error) {
 	if err := CheckIndexName(name); err != nil {
 		return nil, err
-	}
-
-	if storageType == "" {
-		storageType = config.Global.StorageType
-	}
-
-	if shardNum <= 0 {
-		shardNum = config.Global.Shard.Num
 	}
 
 	index := new(Index)
 	index.ref = new(meta.Index)
 	index.ref.Name = name
-	index.ref.StorageType = storageType
+	index.ref.StorageType = config.Global.StorageType
 	index.ref.Version = meta.Version
 
 	// use template
 	if err := index.UseTemplate(); err != nil {
 		return nil, err
 	}
-	if index.ref.Settings != nil {
-		if index.ref.Settings.NumberOfShards != 0 {
-			shardNum = index.ref.Settings.NumberOfShards
-		}
-	}
 
-	index.shardNum = shardNum
-	index.ref.ShardNum = shardNum
+	index.shardNum = 1
+	index.ref.ShardNum = 1
 	index.ref.Shards = make(map[string]*meta.IndexShard, index.shardNum)
 	for i := int64(0); i < index.shardNum; i++ {
 		node, err := ider.NewNode(int(i))
@@ -197,9 +184,9 @@ func GetIndex(name string) (*Index, bool) {
 	return ZINC_INDEX_LIST.Get(name)
 }
 
-func GetOrCreateIndex(name, storageType string, shardNum int64) (*Index, bool, error) {
+func GetOrCreateIndex(name string) (*Index, bool, error) {
 	if !cluster.AssignCheck(name) {
 		return nil, false, ErrIndexServerMismatch
 	}
-	return ZINC_INDEX_LIST.GetOrCreate(name, storageType, shardNum)
+	return ZINC_INDEX_LIST.GetOrCreate(name)
 }

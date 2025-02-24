@@ -16,9 +16,10 @@
 package document
 
 import (
+	"net/http"
+
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -74,7 +75,7 @@ func Bulkv2(c *gin.Context) {
 func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 	var err error
 	var count int64
-	newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+	newIndex, _, err := core.GetOrCreateIndex(indexName)
 	if err != nil {
 		return count, err
 	}

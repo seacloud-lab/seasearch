@@ -18,11 +18,9 @@ package index
 import (
 	"errors"
 	"net/http"
-	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
@@ -90,11 +88,7 @@ func SetSettings(c *gin.Context) {
 		return
 	}
 
-	shardsNum := config.Global.Shard.Num
-	if settings.NumberOfShards != 0 {
-		shardsNum = settings.NumberOfShards
-	}
-	index, exists, err := core.GetOrCreateIndex(indexName, "", shardsNum)
+	index, exists, err := core.GetOrCreateIndex(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -104,11 +98,6 @@ func SetSettings(c *gin.Context) {
 		return
 	}
 	if exists {
-		// it can only change settings.NumberOfReplicas when index exists
-		if settings.NumberOfReplicas > 0 {
-			indexSettings := index.GetSettings()
-			atomic.StoreInt64(&indexSettings.NumberOfReplicas, settings.NumberOfReplicas)
-		}
 		if settings.Analysis != nil && len(settings.Analysis.Analyzer) > 0 {
 			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "can't update analyzer for existing index"})
 			return
