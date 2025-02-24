@@ -215,50 +215,6 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	return resp, err
 }
 
-type InternalUnifiedSearchRequest struct {
-	Stats        *zincsearch.UnifiedStats `json:"stats"`
-	IndexQueries []core.IndexQueryRequest `json:"index_queries"`
-}
-
-func InternalUnifiedSearch(c *gin.Context) {
-	var request InternalUnifiedSearchRequest
-	if err := zutils.GinBindJSON(c, &request); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	res, err := core.InternalUnifiedSearchMultiIndex(request.IndexQueries, request.Stats)
-	if err != nil {
-		if errors.Is(err, errors.ErrKeyNotFound) {
-			zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		log.Err(err).Msgf("exec local parallel multi search err: ")
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	zutils.GinRenderJSON(c, http.StatusOK, res)
-}
-
-type InternalQueryStatsRequest struct {
-	IndexList core.PartialIndexes `json:"index_list"`
-	Query     *meta.ZincQuery     `json:"Query"`
-}
-
-func InternalQueryStats(c *gin.Context) {
-	var req *InternalQueryStatsRequest
-	if err := zutils.GinBindJSON(c, &req); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	stats, err := core.QueryStatsInfoWithSecondShardIds(req.IndexList, req.Query)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	zutils.GinRenderJSON(c, http.StatusOK, stats)
-}
-
 type UnifiedSearchRequest struct {
 	IndexQueries []IndexQueryRequest `json:"index_queries"`
 }
@@ -268,6 +224,8 @@ type IndexQueryRequest struct {
 	Query *meta.ZincQuery `json:"query"`
 }
 
+// UnifiedSearch queries the specified indexes using the provided queries,
+// leveraging the statistics information collected from all indexes.
 func UnifiedSearch(c *gin.Context) {
 	var req = UnifiedSearchRequest{}
 	if err := zutils.GinBindJSON(c, &req); err != nil {
@@ -336,4 +294,123 @@ func UnifiedSearch(c *gin.Context) {
 	}
 
 	zutils.GinRenderJSON(c, http.StatusOK, result)
+}
+
+type InternalUnifiedSearchRequest struct {
+	Stats        *zincsearch.UnifiedStats `json:"stats"`
+	IndexQueries []core.IndexQueryRequest `json:"index_queries"`
+}
+
+// InternalUnifiedSearch performs a unified search using the provided statistics information.
+// Each index may execute a different query, but all results will be merged and sorted by score.
+// The caller must ensure that the scoring criteria across all queries are consistent.
+func InternalUnifiedSearch(c *gin.Context) {
+	var request InternalUnifiedSearchRequest
+	if err := zutils.GinBindJSON(c, &request); err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	var query *meta.ZincQuery
+	for _, q := range request.IndexQueries {
+		query = q.Query
+		break
+	}
+
+	// There is no statistical information, it means
+	// the query is only executed on the current node.
+	// We need collect local stats info
+	if request.Stats == nil {
+		var err error
+		indexMp := make(core.PartialIndexes)
+		for _, idx := range request.IndexQueries {
+			indexMp[idx.Index] = idx.SecondShardId
+		}
+		request.Stats, err = core.QueryStatsInfoWithSecondShardIds(indexMp, query)
+		if err != nil {
+			if errors.Is(err, errors.ErrKeyNotFound) {
+				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+				return
+			}
+			log.Err(err).Msgf("get local stats info err: ")
+			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+	}
+
+	var result = &meta.SearchResponse{}
+	var mutex = sync.Mutex{}
+
+	var eg errgroup.Group
+	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	for _, indexReq := range request.IndexQueries {
+		index, err := core.GetZincIndexFromMetadata(indexReq.Index)
+		if err != nil {
+			if errors.Is(err, errors.ErrKeyNotFound) {
+				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+				return
+			}
+			log.Err(err).Msgf("get local index metadata err: ")
+			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+		secondIds := indexReq.SecondShardId
+		q := indexReq.Query
+		eg.Go(func() error {
+			res, err := index.PartialSearch(secondIds, q, request.Stats)
+			if err != nil {
+				return err
+			}
+			mutex.Lock()
+			result.Hits.Total.Value += res.Hits.Total.Value
+			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
+			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
+			result.Took = res.Took
+			result.Shards.Total += res.Shards.Total
+			result.Shards.Skipped += res.Shards.Skipped
+			result.Shards.Failed += res.Shards.Failed
+			result.Shards.Successful += res.Shards.Successful
+			mutex.Unlock()
+			return nil
+		})
+	}
+	err := eg.Wait()
+	if err != nil {
+		if errors.Is(err, errors.ErrKeyNotFound) {
+			zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+		log.Err(err).Msgf("exec local parallel multi search err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	sort.Slice(result.Hits.Hits, func(i, j int) bool {
+		return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
+	})
+	if len(result.Hits.Hits) > query.Size {
+		result.Hits.Hits = result.Hits.Hits[:query.Size]
+	}
+
+	zutils.GinRenderJSON(c, http.StatusOK, result)
+}
+
+type InternalQueryStatsRequest struct {
+	IndexList core.PartialIndexes `json:"index_list"`
+	Query     *meta.ZincQuery     `json:"Query"`
+}
+
+// InternalQueryStats collects statistical information from the local node based on the provided query.
+// If the input index does not include any secondary shard IDs, statistics for the entire index are collected.
+func InternalQueryStats(c *gin.Context) {
+	var req *InternalQueryStatsRequest
+	if err := zutils.GinBindJSON(c, &req); err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	stats, err := core.QueryStatsInfoWithSecondShardIds(req.IndexList, req.Query)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, stats)
 }
