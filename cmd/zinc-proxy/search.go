@@ -13,7 +13,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -89,7 +88,7 @@ func MultiSearch(c *gin.Context) {
 	scanner := bufio.NewScanner(c.Request.Body)
 	defer c.Request.Body.Close()
 
-	maxCapacityPerLine := config.Global.MaxDocumentSize
+	maxCapacityPerLine := conf.General.MaxDocumentSize
 	buf := make([]byte, maxCapacityPerLine)
 	scanner.Buffer(buf, maxCapacityPerLine)
 

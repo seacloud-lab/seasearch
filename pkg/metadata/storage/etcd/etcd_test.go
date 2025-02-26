@@ -63,7 +63,7 @@ func Test_etcdStorage_List(t *testing.T) {
 		},
 	}
 
-	store := New("/zincsearch/test")
+	store := New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, "/zincsearch/test")
 	defer store.Close()
 	t.Run("prepare", func(t *testing.T) {
 		err := store.Set("/test/foo", []byte("bar"))
@@ -110,7 +110,7 @@ func Test_etcdStorage_Get(t *testing.T) {
 		},
 	}
 
-	store := New("/zincsearch/test")
+	store := New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, "/zincsearch/test")
 	defer store.Close()
 	t.Run("prepare", func(t *testing.T) {
 		err := store.Set("/test/foo", []byte("bar"))
@@ -157,7 +157,7 @@ func Test_etcdStorage_Set(t *testing.T) {
 		},
 	}
 
-	store := New("/zincsearch/test")
+	store := New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, "/zincsearch/test")
 	defer store.Close()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -194,7 +194,7 @@ func Test_etcdStorage_Delete(t *testing.T) {
 		},
 	}
 
-	store := New("/zincsearch/test")
+	store := New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, "/zincsearch/test")
 	defer store.Close()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
