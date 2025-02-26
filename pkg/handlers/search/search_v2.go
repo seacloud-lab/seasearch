@@ -272,10 +272,6 @@ func UnifiedSearch(c *gin.Context) {
 			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
 			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
 			result.Took = res.Took
-			result.Shards.Total += res.Shards.Total
-			result.Shards.Skipped += res.Shards.Skipped
-			result.Shards.Failed += res.Shards.Failed
-			result.Shards.Successful += res.Shards.Successful
 			mutex.Unlock()
 			return nil
 		})
@@ -368,10 +364,6 @@ func InternalUnifiedSearch(c *gin.Context) {
 			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
 			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
 			result.Took = res.Took
-			result.Shards.Total += res.Shards.Total
-			result.Shards.Skipped += res.Shards.Skipped
-			result.Shards.Failed += res.Shards.Failed
-			result.Shards.Successful += res.Shards.Successful
 			mutex.Unlock()
 			return nil
 		})

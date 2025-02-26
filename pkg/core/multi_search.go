@@ -234,7 +234,7 @@ func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery, s
 		defer cancel()
 	}
 
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, int64(len(searchers)), simpleSearchersToUnifiedSearcher(stats, searchers)...)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 }
 
 // QueryStatsInfo get statistics from specified indexes, returns statistics for all index mergers.
