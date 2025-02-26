@@ -157,7 +157,6 @@ func AssignCheck(indexName string) bool {
 func watchAssign() {
 	defer closer.Done()
 
-	errCount := 0
 	watch := func(ch <-chan *AssignEvent) error {
 		for {
 			select {
@@ -173,7 +172,6 @@ func watchAssign() {
 				if !event.Valid {
 					return fmt.Errorf("invalid assign event")
 				}
-				errCount = 0
 				// Assignments in etcd are updated in a transaction.
 				// So the events should usually arrive at around the same time.
 				// We only need to update our internal assignment cache when the first event arrives.
@@ -194,20 +192,14 @@ func watchAssign() {
 	}
 
 	for {
-		// It is necessary to ensure that only one node is responsible for reading and writing an index at the same time,
-		// so we exit when we cannot get real-time assign updates from etcd.
-		if errCount == 3 {
-			log.Fatal().Msg("retry to get assigns too many times")
-		}
 		ch := WatchAssigns(closer.Ctx())
 		err := watch(ch)
 		if err != nil {
-			errCount++
 			log.Err(err).Msg("watch assign error, retrying")
 			ClearAssign()
+			time.Sleep(1 * time.Minute)
 			if err = InitAssigns(); err != nil {
 				log.Err(err).Msg("get assigns error")
-				time.Sleep(1 * time.Second)
 			}
 			continue
 		}
@@ -218,12 +210,16 @@ func watchAssign() {
 func watchUser() {
 	defer closer.Done()
 	ch := WatchUserInfo(closer.Ctx())
-
 	for {
 		select {
 		case <-closer.HasBeenClosed():
 			return
-		case <-ch:
+		case ev, ok := <-ch:
+			if !ok || ev.Err != nil {
+				time.Sleep(1 * time.Minute)
+				ch = WatchUserInfo(closer.Ctx())
+				continue
+			}
 			UserChan <- struct{}{}
 		}
 	}
@@ -236,7 +232,12 @@ func watchRole() {
 		select {
 		case <-closer.HasBeenClosed():
 			return
-		case <-ch:
+		case ev, ok := <-ch:
+			if !ok || ev.Err != nil {
+				time.Sleep(1 * time.Minute)
+				ch = WatchRoleInfo(closer.Ctx())
+				continue
+			}
 			RoleChan <- struct{}{}
 		}
 	}

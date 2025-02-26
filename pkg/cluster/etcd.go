@@ -444,7 +444,7 @@ func watchUserInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 			return
 
 		case rsp := <-rspCh:
-			if rsp.Err() != nil || len(rsp.Events) == 0 {
+			if rsp.Err() != nil {
 				ch <- &UserInfoEvent{
 					Err: rsp.Err(),
 				}
@@ -511,7 +511,7 @@ func watchRoleInfo(ctx context.Context, cancel context.CancelFunc, watcher clien
 			return
 
 		case rsp := <-rspCh:
-			if rsp.Err() != nil || len(rsp.Events) == 0 {
+			if rsp.Err() != nil {
 				ch <- &RoleEvent{
 					Err: rsp.Err(),
 				}
