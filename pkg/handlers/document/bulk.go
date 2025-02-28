@@ -172,7 +172,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					})
 				default:
 				}
-				newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+				newIndex, _, err := core.GetOrCreateIndex(indexName)
 				if err != nil {
 					return bulkRes, err
 				}
@@ -234,7 +234,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					}
 
 					if config.Global.EnableWal {
-						newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+						newIndex, _, err := core.GetOrCreateIndex(indexName)
 						if err != nil {
 							return bulkRes, err
 						}
@@ -265,7 +265,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 	if !config.Global.EnableWal {
 		for indexName, ids := range indexDelDocMap {
-			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+			newIndex, _, err := core.GetOrCreateIndex(indexName)
 			if err != nil {
 				return bulkRes, err
 			}
@@ -281,7 +281,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			}
 		}
 		for indexName, ops := range indexDocMap {
-			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
+			newIndex, _, err := core.GetOrCreateIndex(indexName)
 			if err != nil {
 				return bulkRes, err
 			}

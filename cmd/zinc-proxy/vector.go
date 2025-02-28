@@ -4,6 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -11,12 +18,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"golang.org/x/sync/errgroup"
-	"io"
-	"math"
-	"net/http"
-	"sort"
-	"strings"
-	"sync"
 )
 
 func SearchVector(c *gin.Context) {
@@ -90,10 +91,6 @@ func SearchVector(c *gin.Context) {
 			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
 			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
 			result.Took = res.Took
-			result.Shards.Total += res.Shards.Total
-			result.Shards.Skipped += res.Shards.Skipped
-			result.Shards.Failed += res.Shards.Failed
-			result.Shards.Successful += res.Shards.Successful
 			mutex.Unlock()
 			return nil
 		})

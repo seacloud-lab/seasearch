@@ -31,7 +31,7 @@ import (
 
 func TestIndex_Index(t *testing.T) {
 	indexName := "TestIndex_Index.index_1"
-	index, err := NewIndex(indexName, "disk", 2)
+	index, err := NewIndex(indexName)
 	assert.NoError(t, err)
 	assert.NotNil(t, index)
 
@@ -257,7 +257,7 @@ func TestIndex_BuildBlugeDocumentFromJSON(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err = NewIndex(indexName, "disk", 2)
+		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
@@ -309,7 +309,7 @@ func TestIndex_Settings(t *testing.T) {
 	indexName := "TestIndex_Settings.index_1"
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err = NewIndex(indexName, "disk", 2)
+		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
@@ -319,8 +319,6 @@ func TestIndex_Settings(t *testing.T) {
 
 	t.Run("setting", func(t *testing.T) {
 		err := index.SetSettings(&meta.IndexSettings{
-			NumberOfShards:   1,
-			NumberOfReplicas: 0,
 			Analysis: &meta.IndexAnalysis{
 				Analyzer: map[string]*meta.Analyzer{
 					"default": {

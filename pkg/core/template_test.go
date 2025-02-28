@@ -384,9 +384,7 @@ func TestUseTemplate(t *testing.T) {
 			IndexPatterns: []string{"TestUseTemplate-log-error-*"},
 			Priority:      200,
 			Template: meta.TemplateTemplate{
-				Settings: &meta.IndexSettings{
-					NumberOfShards: 3,
-				},
+				Settings: &meta.IndexSettings{},
 				Mappings: &meta.Mappings{
 					Properties: map[string]meta.Property{
 						"name": {
@@ -423,7 +421,7 @@ func TestUseTemplate(t *testing.T) {
 
 			t.Run("new index use template", func(t *testing.T) {
 				indexName := "TestUseTemplate-log-error-2022.02.02"
-				index, err := NewIndex(indexName, "", 1)
+				index, err := NewIndex(indexName)
 				assert.NoError(t, err)
 				assert.NotNil(t, index)
 

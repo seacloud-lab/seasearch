@@ -274,7 +274,7 @@ func TestGetESAliases(t *testing.T) {
 }
 
 func newIndex(t *testing.T, indexName string) (*core.Index, func()) {
-	index, err := core.NewIndex(indexName, "disk", 2)
+	index, err := core.NewIndex(indexName)
 	require.NoError(t, err)
 
 	err = core.StoreIndex(index)

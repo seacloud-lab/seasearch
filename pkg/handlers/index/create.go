@@ -17,12 +17,12 @@ package index
 
 import (
 	"errors"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"net/http"
+
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
@@ -59,9 +59,8 @@ func Create(c *gin.Context) {
 	}
 
 	zutils.GinRenderJSON(c, http.StatusOK, meta.HTTPResponseIndex{
-		Message:     "ok",
-		Index:       newIndex.Name,
-		StorageType: newIndex.StorageType,
+		Message: "ok",
+		Index:   newIndex.Name,
 	})
 }
 
@@ -84,9 +83,6 @@ func CreateES(c *gin.Context) {
 		return
 	}
 
-	if newIndex.StorageType == "" {
-		newIndex.StorageType = config.Global.StorageType
-	}
 	err := CreateIndexWorker(&newIndex, indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
@@ -105,9 +101,6 @@ func CreateES(c *gin.Context) {
 }
 
 func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
-	if newIndex.StorageType == "" {
-		newIndex.StorageType = config.Global.StorageType
-	}
 
 	if newIndex.Name == "" && indexName != "" {
 		newIndex.Name = indexName
@@ -137,15 +130,7 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 		return errors.New(err.Error())
 	}
 
-	if newIndex.Settings != nil && newIndex.Settings.NumberOfShards != 0 {
-		if newIndex.ShardNum == 0 {
-			newIndex.ShardNum = newIndex.Settings.NumberOfShards
-		}
-	}
-	if newIndex.ShardNum == 0 {
-		newIndex.ShardNum = config.Global.Shard.Num
-	}
-	index, err := core.NewIndex(newIndex.Name, newIndex.StorageType, newIndex.ShardNum)
+	index, err := core.NewIndex(newIndex.Name)
 	if err != nil {
 		return errors.New(err.Error())
 	}

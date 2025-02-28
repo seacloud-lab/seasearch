@@ -68,17 +68,13 @@ type IndexStat struct {
 }
 
 type IndexSimple struct {
-	Name        string                 `json:"name"`
-	StorageType string                 `json:"storage_type"`
-	ShardNum    int64                  `json:"shard_num"`
-	Settings    *IndexSettings         `json:"settings,omitempty"`
-	Mappings    map[string]interface{} `json:"mappings,omitempty"`
+	Name     string                 `json:"name"`
+	Settings *IndexSettings         `json:"settings,omitempty"`
+	Mappings map[string]interface{} `json:"mappings,omitempty"`
 }
 
 type IndexSettings struct {
-	NumberOfShards   int64          `json:"number_of_shards,omitempty"`
-	NumberOfReplicas int64          `json:"number_of_replicas,omitempty"`
-	Analysis         *IndexAnalysis `json:"analysis,omitempty"`
+	Analysis *IndexAnalysis `json:"analysis,omitempty"`
 }
 
 type IndexAnalysis struct {

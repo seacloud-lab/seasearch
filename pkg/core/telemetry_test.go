@@ -25,7 +25,7 @@ func TestTelemetry(t *testing.T) {
 	InitTelemetry()
 	indexName := "TestTelemetry.index_1"
 	t.Run("prepare", func(t *testing.T) {
-		index, err := NewIndex(indexName, "disk", 1)
+		index, err := NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 

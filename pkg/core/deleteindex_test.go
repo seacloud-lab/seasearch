@@ -48,7 +48,7 @@ func TestDeleteIndex(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := NewIndex(indexName, "disk", 2)
+		index, err := NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 		err = StoreIndex(index)

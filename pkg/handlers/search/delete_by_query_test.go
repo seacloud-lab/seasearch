@@ -111,7 +111,7 @@ func TestDeleteByQuery(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			index, err := core.NewIndex("TestDeleteByQuery.index", "disk", 2)
+			index, err := core.NewIndex("TestDeleteByQuery.index")
 			assert.NoError(t, err)
 			assert.NoError(t, core.StoreIndex(index))
 			id := ider.Generate()

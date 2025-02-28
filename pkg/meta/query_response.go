@@ -23,18 +23,10 @@ import (
 type SearchResponse struct {
 	Took         int                            `json:"took"` // Time it took to generate the response
 	TimedOut     bool                           `json:"timed_out"`
-	Shards       Shards                         `json:"_shards"`
 	Hits         Hits                           `json:"hits"`
 	Aggregations map[string]AggregationResponse `json:"aggregations,omitempty"`
 	Error        string                         `json:"error,omitempty"`
 	Order        int                            `json:"-"`
-}
-
-type Shards struct {
-	Total      int64 `json:"total"`
-	Successful int64 `json:"successful"`
-	Skipped    int64 `json:"skipped"`
-	Failed     int64 `json:"failed"`
 }
 
 type Hits struct {

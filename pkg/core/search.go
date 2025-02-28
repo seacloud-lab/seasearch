@@ -47,5 +47,5 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, index.GetAllShardNum(), simpleSearchersToSearcher(searchers)...)
+	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
 }

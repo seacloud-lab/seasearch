@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -43,7 +44,7 @@ func TestSearchDSL(t *testing.T) {
 				code:   http.StatusOK,
 				data:   `{"query":{"match_all":{}},"size":10}`,
 				params: map[string]string{"target": indexName},
-				result: "successful",
+				result: "_id",
 			},
 		},
 		{
@@ -51,7 +52,7 @@ func TestSearchDSL(t *testing.T) {
 			args: args{
 				code:   http.StatusOK,
 				data:   `{"query":{"match_all":{}},"size":10}`,
-				result: "successful",
+				result: "_id",
 			},
 		},
 		{
@@ -75,11 +76,15 @@ func TestSearchDSL(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName, "disk", 2)
+		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 		err = core.StoreIndex(index)
 		assert.NoError(t, err)
+		id := ider.Generate()
+		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
+			"name": "zinc",
+		}, false))
 	})
 
 	for _, tt := range tests {
@@ -118,7 +123,7 @@ func TestMultipleSearch(t *testing.T) {
 				data: `{"index":"` + indexName + `"}
 {"query":{"match_all":{}},"size":10}`,
 				params: map[string]string{"target": indexName},
-				result: "successful",
+				result: "_id",
 			},
 		},
 		{
@@ -127,7 +132,7 @@ func TestMultipleSearch(t *testing.T) {
 				code: http.StatusOK,
 				data: `{"index":["` + indexName + `"]}
 {"query":{"match_all":{}},"size":10}`,
-				result: "successful",
+				result: "_id",
 			},
 		},
 		{
@@ -142,11 +147,15 @@ func TestMultipleSearch(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName, "disk", 2)
+		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 		err = core.StoreIndex(index)
 		assert.NoError(t, err)
+		id := ider.Generate()
+		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
+			"name": "zinc",
+		}, false))
 	})
 
 	for _, tt := range tests {

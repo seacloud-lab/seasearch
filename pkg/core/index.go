@@ -138,12 +138,6 @@ func (index *Index) SetSettings(settings *meta.IndexSettings) error {
 	if index.ref.Settings == nil {
 		index.ref.Settings = new(meta.IndexSettings)
 	}
-	if settings.NumberOfReplicas > 0 {
-		index.ref.Settings.NumberOfReplicas = settings.NumberOfReplicas
-	}
-	if settings.NumberOfShards > 0 && index.ref.Settings.NumberOfShards == 0 {
-		index.ref.Settings.NumberOfShards = settings.NumberOfShards
-	}
 	if settings.Analysis != nil {
 		if index.ref.Settings.Analysis == nil {
 			index.ref.Settings.Analysis = new(meta.IndexAnalysis)

@@ -103,7 +103,7 @@ func (t *IndexList) Get(name string) (*Index, bool) {
 	return idx, ok
 }
 
-func (t *IndexList) GetOrCreate(name, storageType string, shardNum int64) (*Index, bool, error) {
+func (t *IndexList) GetOrCreate(name string) (*Index, bool, error) {
 	t.lock.RLock()
 	idx, ok := t.Indexes[name]
 	t.lock.RUnlock()
@@ -119,7 +119,7 @@ func (t *IndexList) GetOrCreate(name, storageType string, shardNum int64) (*Inde
 		return idx, true, nil
 	}
 	// okay, let's create new index
-	idx, err := NewIndex(name, storageType, shardNum)
+	idx, err := NewIndex(name)
 	if err != nil {
 		return nil, false, err
 	}
