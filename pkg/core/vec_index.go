@@ -20,6 +20,9 @@ import (
 type VectorIndex interface {
 	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
 	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
+	// PartialSearch is used for parallel search. The proxy assigns specific segments to each node,
+	// and the local node performs the search based on the assigned segment IDs.
+	PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error)
 	Name() string
 	Meta() *meta.VecIndex
 	SealSeg() error
@@ -165,6 +168,11 @@ func (f *FlatIndex) Search(vec []float32, k int64, _ int) (map[string]float32, e
 	return f.seg.Search(vec, k, 0)
 }
 
+func (f *FlatIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
+	log.Warn().Msgf("ParallelSearch should not be called on flat index %s.", f.name)
+	return f.Search(vec, k, nprobe)
+}
+
 func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	log.Warn().Msgf("Recall should not be called on flat index %s.", f.name)
 	return 1, nil
@@ -279,10 +287,18 @@ func (v *IvfPqIndex) copySegments() ([]*VecSegment, error) {
 	return res, nil
 }
 
+func (v *IvfPqIndex) copySegmentsWithIds(ids []int) ([]*VecSegment, error) {
+	segments, err := v.loadSegments(ids)
+	return segments, err
+}
+
 func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
 	res := make([]*VecSegment, 0, len(ids))
 	for _, id := range ids {
 		// already loaded
+		if id > len(v.segments) || id < 0 {
+			return nil, fmt.Errorf("invalid segment id: %d, current segments length is %d", id, len(v.segments))
+		}
 		seg := v.segments[id]
 		if seg != nil {
 			res = append(res, seg)
@@ -439,7 +455,21 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 	if err != nil {
 		return nil, err
 	}
+	return searchSegments(vec, segs, k, nprobe)
+}
 
+func (v *IvfPqIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
+	v.lock.Lock()
+	segs, err := v.copySegmentsWithIds(segments)
+	v.lock.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	return searchSegments(vec, segs, k, nprobe)
+}
+
+func searchSegments(vec []float32, segs []*VecSegment, k int64, nprobe int) (map[string]float32, error) {
 	searchHeap := &vecSearchHeap{}
 	heap.Init(searchHeap)
 
@@ -470,7 +500,7 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 		})
 	}
 
-	err = searchEg.Wait()
+	err := searchEg.Wait()
 	close(docCh)
 	heapWait.Wait()
 	if err != nil {

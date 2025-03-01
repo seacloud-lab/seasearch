@@ -150,7 +150,10 @@ func GetZincIndexesFromMetadata() ([]*Index, error) {
 	result := make([]*Index, len(indexes))
 	for i := range indexes {
 		readIndex := indexes[i]
-		index := formatIndex(readIndex)
+		index, err := formatIndex(readIndex)
+		if err != nil {
+			return nil, err
+		}
 		result[i] = index
 	}
 
@@ -164,12 +167,11 @@ func GetZincIndexFromMetadata(name string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := formatIndex(readIndex)
 
-	return result, nil
+	return formatIndex(readIndex)
 }
 
-func formatIndex(readIndex *meta.Index) *Index {
+func formatIndex(readIndex *meta.Index) (*Index, error) {
 	index := new(Index)
 	index.ref = new(meta.Index)
 	index.ref.Name = readIndex.Name
@@ -215,5 +217,16 @@ func formatIndex(readIndex *meta.Index) *Index {
 		}
 	}
 
-	return index
+	// load index analysis
+	if index.ref.Settings != nil && index.ref.Settings.Analysis != nil {
+		if index.ref.Settings != nil && index.ref.Settings.Analysis != nil {
+			var err error
+			index.analyzers, err = zincanalysis.RequestAnalyzer(index.ref.Settings.Analysis)
+			if err != nil {
+				return nil, errors.New(errors.ErrorTypeRuntimeException, "parse stored analysis error").Cause(err)
+			}
+		}
+	}
+
+	return index, nil
 }

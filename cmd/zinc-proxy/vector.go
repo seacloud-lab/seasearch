@@ -2,21 +2,21 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,88 +27,175 @@ func SearchVector(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-
-	var result = &meta.SearchResponse{}
-	var indexNameList []string
-
-	if indexName == "" {
-		// search all indexes
-		var err error
-		indexNameList, err = metadata.Index.ListNames(0, 0)
-		if err != nil {
-			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-	} else {
-		indexNameList = strings.Split(indexName, ",")
+	auth := c.Request.Header.Get("Authorization")
+	var clientErr *HttpClientError
+	zincIndex, err := core.GetZincIndexFromMetadata(indexName)
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		log.Err(err).Msgf("get zinc index metadata err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
 	}
 
-	bodyBytes, _ := json.Marshal(query)
-	body := io.NopCloser(bytes.NewBuffer(bodyBytes))
-	if len(indexNameList) == 1 {
+	zincIndex.GetMappings()
+	mappings := zincIndex.GetMappings()
+	prop, ok := mappings.Properties[query.QueryField]
+	if !ok {
+		err := fmt.Errorf("vector search error: field %s not found in mapping", query.QueryField)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	if prop.Type != "vector" {
+		err := fmt.Errorf("vector search error: field %s is not vector field", query.QueryField)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	if prop.Dims != len(query.Vector) {
+		err := fmt.Errorf("vector search error: invalid query vector, the dims should be %d", prop.Dims)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	vecIndexMeta, ok := zincIndex.GetVecIndex(query.QueryField)
+	if !ok {
+		err := fmt.Errorf("vector search error: vector index %s not found", query.QueryField)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	nodeSegmentsMap, needParallelSearch := calcNodeSegmentsMap(indexName, vecIndexMeta)
+	if !needParallelSearch {
+		bodyBytes, _ := json.Marshal(query)
+		body := io.NopCloser(bytes.NewBuffer(bodyBytes))
 		// rewind body
 		c.Request.Body = body
 		directForwarding(c)
 		return
 	}
 
-	// addr -> index names
-	reqMap := make(map[string][]string)
+	vecResult := make(map[string]float32)
+	mutex := sync.Mutex{}
 
-	for _, index := range indexNameList {
-		addr, err := GetAddrByIndex(index)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		if list, ok := reqMap[addr]; ok {
-			list = append(list, index)
-			reqMap[addr] = list
-		} else {
-			reqMap[addr] = []string{index}
-		}
-	}
-
-	var (
-		clientErr *HttpClientError
-		auth      = c.Request.Header.Get("Authorization")
-		mutex     = sync.Mutex{}
-	)
-	var eg errgroup.Group
+	eg := errgroup.Group{}
 	eg.SetLimit(6)
-	for addr, data := range reqMap {
+	for addr, segments := range nodeSegmentsMap {
 		host := addr
-		indexes := data
+		segments := segments
 		eg.Go(func() error {
-			path := fmt.Sprintf("/api/%s/_search/vector", strings.Join(indexes, ","))
-			var res = meta.SearchResponse{}
-			err := fetchHTTP(http.MethodPost, host, path, "", body, &res, auth, true)
+			var req = core.InternalVectorQuery{
+				Index:      indexName,
+				QueryField: query.QueryField,
+				K:          query.K,
+				Vector:     query.Vector,
+				Nprobe:     query.Nprobe,
+				Segments:   segments,
+			}
+
+			reqBody, _ := json.Marshal(req)
+			var res core.InternalVectorSearchResponse
+			err := fetchHTTP(http.MethodPost, host, "/api/internal/vector_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
 			if err != nil {
 				return err
 			}
 			mutex.Lock()
-			result.Hits.Total.Value += res.Hits.Total.Value
-			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, res.Hits.MaxScore)
-			result.Hits.Hits = append(result.Hits.Hits, res.Hits.Hits...)
-			result.Took = res.Took
+			for docId, distance := range res.MatchedIds {
+				vecResult[docId] = distance
+			}
 			mutex.Unlock()
 			return nil
 		})
 	}
-	err := eg.Wait()
+
+	err = eg.Wait()
 	if errors.As(err, &clientErr) {
 		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
 		return
 	} else if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		log.Err(err).Msgf("exec parallel vector search err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
 		return
 	}
-	if len(reqMap) > 1 {
-		sort.Slice(result.Hits.Hits, func(i, j int) bool {
-			return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
-		})
+
+	// get original document by ids
+	docIdSlice := make([]string, len(vecResult))
+	i := 0
+	for docId := range vecResult {
+		docIdSlice[i] = docId
+		i++
 	}
 
-	zutils.GinRenderJSON(c, http.StatusOK, result)
+	// query document by Id
+	idQuery := &meta.ZincQuery{
+		Query: &meta.Query{
+			Ids: &meta.IdsQuery{
+				Values: docIdSlice,
+			},
+		},
+		Size: len(docIdSlice),
+	}
 
+	parallelNodeMp, err := calcNodeIndexMap([]string{indexName})
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	res, err := execParallelQueries(auth, parallelNodeMp, nil, map[string]*meta.ZincQuery{
+		indexName: idQuery,
+	})
+	if errors.As(err, &clientErr) {
+		zutils.GinRenderJSON(c, clientErr.Code, meta.HTTPResponseError{Error: clientErr.Error()})
+		return
+	} else if err != nil {
+		log.Err(err).Msgf("exec parallel multi search err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
+	}
+
+	var maxScore float64 = 0
+	for i := range res.Hits.Hits {
+		h1d, ok := vecResult[res.Hits.Hits[i].ID]
+		if !ok {
+			// that's impassable
+			res.Hits.Hits[i].Score = 0
+			continue
+		}
+		score := float64(1 / (1 + h1d))
+		res.Hits.Hits[i].Score = score
+		maxScore = math.Max(maxScore, score)
+	}
+
+	// sort by score
+	sort.Slice(res.Hits.Hits, func(i, j int) bool {
+		return res.Hits.Hits[i].Score > res.Hits.Hits[j].Score
+	})
+	res.Hits.MaxScore = maxScore
+	if len(res.Hits.Hits) > int(query.K) {
+		res.Hits.Hits = res.Hits.Hits[:query.K]
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, res)
+}
+
+// calcNodeSegmentsMap determines which vector segment searches should be assigned to each node
+// and returns the corresponding map.
+func calcNodeSegmentsMap(indexName string, vecIndex *meta.VecIndex) (map[string][]int, bool) {
+	// node -> segment ids
+	nodeSegmentMap := make(map[string][]int)
+	nodeList := GetNodeList()
+	if len(nodeList) == 0 || vecIndex.TargetType != vector.IvfPQ || len(vecIndex.Segments) < conf.General.IndexParallelQueryThreshold {
+		return nodeSegmentMap, false
+	}
+
+	for _, segment := range vecIndex.Segments {
+		remainder := int(segment.Id) % len(nodeList)
+		addr := nodeList[remainder].addr
+		if segments, ok := nodeSegmentMap[addr]; ok {
+			segments = append(segments, segment.Id)
+			nodeSegmentMap[addr] = segments
+		} else {
+			nodeSegmentMap[addr] = []int{int(segment.Id)}
+		}
+	}
+
+	return nodeSegmentMap, true
 }

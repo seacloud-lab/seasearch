@@ -131,7 +131,7 @@ func listS3VecStoreSegments(prefix string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list folder: %w", err)
 	}
-	res := make([]string, len(objs))
+	res := make([]string, 0, len(objs))
 	for _, obj := range objs {
 		res = append(res, obj.Key)
 	}

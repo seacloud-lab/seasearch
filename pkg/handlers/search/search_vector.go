@@ -2,18 +2,14 @@ package search
 
 import (
 	"fmt"
-	"math"
 	"net/http"
-	"sort"
-	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"golang.org/x/sync/errgroup"
 )
 
 func SearchVector(c *gin.Context) {
@@ -23,59 +19,39 @@ func SearchVector(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	indexNameList := strings.Split(indexName, ",")
-	for _, name := range indexNameList {
-		if !cluster.AssignCheck(name) {
-			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: core.ErrIndexServerMismatch.Error()})
-			return
-		}
-	}
-	eg := &errgroup.Group{}
-	mutex := sync.Mutex{}
 
-	var result = &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}
-	for _, index := range indexNameList {
-		name := index
-		eg.Go(func() error {
-			zincIndex, ok := core.GetIndex(name)
-			if !ok {
-				return fmt.Errorf("vector search error: index %s not found", name)
-			}
-			zincIndex.GetMappings()
-			mappings := zincIndex.GetMappings()
-			prop, ok := mappings.Properties[query.QueryField]
-			if !ok {
-				return fmt.Errorf("vector search error: field %s not found in mapping", query.QueryField)
-			}
-			if prop.Type != "vector" {
-				return fmt.Errorf("vector search error: field %s is not vector field", query.QueryField)
-			}
-			if prop.Dims != len(query.Vector) {
-				return fmt.Errorf("vector search error: invalid query vector, the dims should be %d", prop.Dims)
-			}
-			rsp, err := core.VectorSearch(zincIndex, mappings, query)
-			if err != nil {
-				return err
-			}
-			mutex.Lock()
-			result.Hits.Total.Value += rsp.Hits.Total.Value
-			result.Hits.MaxScore = math.Max(result.Hits.MaxScore, rsp.Hits.MaxScore)
-			result.Hits.Hits = append(result.Hits.Hits, rsp.Hits.Hits...)
-			mutex.Unlock()
-			return nil
-		})
+	zincIndex, ok := core.GetIndex(indexName)
+	if !ok {
+		err := fmt.Errorf("vector search error: index %s not found", indexName)
+		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
+		return
 	}
-	if err := eg.Wait(); err != nil {
+	zincIndex.GetMappings()
+	mappings := zincIndex.GetMappings()
+	prop, ok := mappings.Properties[query.QueryField]
+	if !ok {
+		err := fmt.Errorf("vector search error: field %s not found in mapping", query.QueryField)
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-
-	if len(indexNameList) > 1 {
-		sort.Slice(result.Hits.Hits, func(i, j int) bool {
-			return result.Hits.Hits[i].Score > result.Hits.Hits[j].Score
-		})
+	if prop.Type != "vector" {
+		err := fmt.Errorf("vector search error: field %s is not vector field", query.QueryField)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
 	}
-	zutils.GinRenderJSON(c, http.StatusOK, result)
+	if prop.Dims != len(query.Vector) {
+		err := fmt.Errorf("vector search error: invalid query vector, the dims should be %d", prop.Dims)
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	rsp, err := core.VectorSearch(zincIndex, mappings, query)
+	if err != nil {
+		log.Err(err).Msgf("vector search error:")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
+	}
+
+	zutils.GinRenderJSON(c, http.StatusOK, rsp)
 }
 
 type recallResult struct {
@@ -146,4 +122,23 @@ func VectorRecall(c *gin.Context) {
 	}
 	zutils.GinRenderJSON(c, http.StatusOK, result)
 
+}
+
+// InternalSearchVector queries the specified vector index segments and just returns the matched doc ids and the distances.
+// The proxy needs to perform an additional internal search based on the document IDs,
+// because the assignments of the vector index may differ from the assignments of the full-text index.
+func InternalSearchVector(c *gin.Context) {
+	query := &core.InternalVectorQuery{}
+	if err := zutils.GinBindJSON(c, query); err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	res, err := core.InternalVectorSearch(query)
+	if err != nil {
+		log.Err(err).Msgf("internal vector search error:")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, res)
 }

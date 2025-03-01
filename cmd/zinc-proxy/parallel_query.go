@@ -181,10 +181,9 @@ func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialInd
 	var eg errgroup.Group
 	var query *meta.ZincQuery
 	for _, q := range indexQueryMap {
-		if query == nil {
-			query = q
-			break
-		}
+		query = q
+		break
+
 	}
 
 	result := &meta.SearchResponse{}
