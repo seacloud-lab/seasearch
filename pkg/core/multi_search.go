@@ -102,6 +102,46 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
 }
 
+// QueryStatsInfo get statistics from specified indexes, returns statistics for all index mergers.
+func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+	hasIndex := false
+	var mappings *meta.Mappings
+	var analyzers map[string]*analysis.Analyzer
+	var searchers = make([]*SimpleSearcher, 0)
+
+	timeMin, timeMax := timerange.Query(query.Query)
+
+	for _, indexName := range indexNames {
+		// this index should not handle by this servers
+		if !cluster.AssignCheck(indexName) {
+			return nil, ErrIndexServerMismatch
+		}
+		index, ok := ZINC_INDEX_LIST.Get(indexName)
+		if ok {
+			hasIndex = true
+			if mappings == nil {
+				mappings = index.GetMappings()
+				analyzers = index.GetAnalyzers()
+			}
+			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		}
+	}
+
+	if len(searchers) == 0 {
+		if !hasIndex {
+			return nil, fmt.Errorf("core.UnifySearch: error accessing reader: no index found")
+		}
+		return nil, nil
+	}
+
+	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+
+	return getLocalStatsInfo(searchers, termList)
+}
+
 func simpleSearchersToSearcher(readers []*SimpleSearcher) []zincsearch.Searcher {
 	searchReaders := make([]zincsearch.Searcher, len(readers))
 	for i, r := range readers {
@@ -237,47 +277,7 @@ func (index *Index) PartialSearch(secondShardIds []int, query *meta.ZincQuery, s
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 }
 
-// QueryStatsInfo get statistics from specified indexes, returns statistics for all index mergers.
-func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
-	hasIndex := false
-	var mappings *meta.Mappings
-	var analyzers map[string]*analysis.Analyzer
-	var searchers = make([]*SimpleSearcher, 0)
-
-	timeMin, timeMax := timerange.Query(query.Query)
-
-	for _, indexName := range indexNames {
-		// this index should not handle by this servers
-		if !cluster.AssignCheck(indexName) {
-			return nil, ErrIndexServerMismatch
-		}
-		index, ok := ZINC_INDEX_LIST.Get(indexName)
-		if ok {
-			hasIndex = true
-			if mappings == nil {
-				mappings = index.GetMappings()
-				analyzers = index.GetAnalyzers()
-			}
-			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
-		}
-	}
-
-	if len(searchers) == 0 {
-		if !hasIndex {
-			return nil, fmt.Errorf("core.UnifySearch: error accessing reader: no index found")
-		}
-		return nil, nil
-	}
-
-	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-	}
-
-	return getLocalStatsInfo(searchers, termList)
-}
-
-// QueryStatsInfo retrieves statistics from specified indexes and secondary shards.
+// QueryStatsInfoWithSecondShardIds retrieves statistics from specified indexes and secondary shards.
 // It returns statistics for all index mergers.
 // If no secondary shard IDs are provided, statistics for the entire index are collected.
 // This is useful in scenarios where both large-scale indexes and smaller indexes
@@ -302,16 +302,6 @@ func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQu
 		} else {
 			searchers = append(searchers, index.GetSearchersByID(timeMin, timeMax, secondIds...)...)
 		}
-	}
-
-	err := uquery.NormalizeQuery(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-
-	}
-	_, err = uquery.ParseQueryDSL(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
 	}
 
 	if len(searchers) == 0 {
