@@ -69,6 +69,7 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/api/internal/get_stats", AuthMiddleware("search.internal.GetStats"), search.InternalQueryStats)
 	r.POST("/api/internal/unified_search", AuthMiddleware("search.internal.UnifySearch"), search.InternalUnifiedSearch)
 	r.POST("/api/unified_search", AuthMiddleware("search.unified_search"), search.UnifiedSearch)
+	r.POST("/api/internal/vector_search", AuthMiddleware("search.internal_vector_search"), search.InternalSearchVector)
 
 	// UI
 	HTTPCacheForUI(r)
@@ -128,7 +129,6 @@ func SetRoutes(r *gin.Engine) {
 
 	// vector recall
 	r.POST("/api/:target/_recall", AuthMiddleware("search.vectorRecall"), ClusterMiddleware, search.VectorRecall)
-
 	// document
 	// Document Bulk update/insert
 	r.POST("/api/_bulk", AuthMiddleware("document.Bulk"), document.Bulk)
