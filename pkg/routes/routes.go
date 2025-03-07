@@ -47,6 +47,7 @@ func SetRoutes(r *gin.Engine) {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// r.GET("/", meta.GUI)
 	r.GET("/version", meta.GetVersion)
 	r.GET("/healthz", meta.GetHealthz)
 
@@ -57,11 +58,33 @@ func SetRoutes(r *gin.Engine) {
 		})
 		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
+	// front, err := zincsearch.GetFrontendAssets()
+	// if err != nil {
+	// 	log.Err(err)
+	// }
 
 	// internal API
 	r.POST("/api/internal/get_stats", AuthMiddleware("search.internal.GetStats"), search.InternalQueryStats)
 	r.POST("/api/internal/unified_search", AuthMiddleware("search.internal.UnifySearch"), search.InternalUnifiedSearch)
 	r.POST("/api/unified_search", AuthMiddleware("search.unified_search"), search.UnifiedSearch)
+
+	// UI
+	// HTTPCacheForUI(r)
+	// r.StaticFS("/ui/", http.FS(front))
+	// r.NoRoute(func(c *gin.Context) {
+	// 	log.Error().
+	// 		Str("method", c.Request.Method).
+	// 		Int("code", 404).
+	// 		Int("took", 0).
+	// 		Msg(c.Request.RequestURI)
+
+	// 	if strings.HasPrefix(c.Request.RequestURI, "/ui/") {
+	// 		path := strings.TrimPrefix(c.Request.RequestURI, "/ui/")
+	// 		locationPath := strings.Repeat("../", strings.Count(path, "/"))
+	// 		c.Status(http.StatusFound)
+	// 		c.Writer.Header().Set("Location", "./"+locationPath)
+	// 	}
+	// })
 
 	// auth
 	r.POST("/api/login", auth.Login)
