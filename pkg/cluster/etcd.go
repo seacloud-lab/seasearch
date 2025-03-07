@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 	"go.uber.org/zap"
 
@@ -37,6 +38,7 @@ var (
 	// so we use a custom context to control the timeout of NewSession.
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
+	etcdCloser    = z.NewCloser(1)
 )
 
 func InitEtcd(p string, endpoints []string) error {
@@ -77,39 +79,46 @@ func InitEtcd(p string, endpoints []string) error {
 // when the network disconnected, the old session will be invalid,
 // we need to create a new session.
 func maintainSession() {
+	defer etcdCloser.Done()
 	for {
-		<-curSession.Done()
-		// cancel current context
-		sessionCancel()
-		log.Info().Msg("trying to reconnect etcd")
-		_ = curSession.Close()
-
-		// crate new ctx with cancel
-		sessionCtx, sessionCancel = context.WithCancel(context.Background())
-		timer := time.AfterFunc(DefaultTimeout, func() { sessionCancel() })
-		newSession, err := concurrency.NewSession(
-			cli, concurrency.WithTTL(3), concurrency.WithContext(sessionCtx),
-		)
-		timer.Stop()
-
-		if err != nil {
+		select {
+		case <-etcdCloser.HasBeenClosed():
 			sessionCancel()
-			if errors.Is(err, context.Canceled) {
-				log.Err(err).Msg("failed to establish a session to the etcd: connection timeout: ")
-			} else {
-				log.Err(err).Msg("failed to establish a session to the etcd: ")
+			return
+		case <-curSession.Done():
+			// cancel current context
+			sessionCancel()
+			log.Info().Msg("trying to reconnect etcd")
+			_ = curSession.Close()
+
+			// crate new ctx with cancel
+			sessionCtx, sessionCancel = context.WithCancel(context.Background())
+			timer := time.AfterFunc(DefaultTimeout, func() { sessionCancel() })
+			newSession, err := concurrency.NewSession(
+				cli, concurrency.WithTTL(3), concurrency.WithContext(sessionCtx),
+			)
+			timer.Stop()
+
+			if err != nil {
+				sessionCancel()
+				if errors.Is(err, context.Canceled) {
+					log.Err(err).Msg("failed to establish a session to the etcd: connection timeout: ")
+				} else {
+					log.Err(err).Msg("failed to establish a session to the etcd: ")
+				}
+				time.Sleep(3 * time.Second)
+				continue
 			}
-			time.Sleep(3 * time.Second)
-			continue
+			log.Info().Msg("reconnect etcd success")
+			sessionMutex.Lock()
+			curSession = newSession
+			sessionMutex.Unlock()
 		}
-		log.Info().Msg("reconnect etcd success")
-		sessionMutex.Lock()
-		curSession = newSession
-		sessionMutex.Unlock()
 	}
 }
 
 func CloseEtcd() {
+	etcdCloser.SignalAndWait()
 	err := cli.Close()
 	if err != nil {
 		log.Warn().Err(err).Msgf("close etcd client error")

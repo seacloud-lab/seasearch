@@ -159,7 +159,7 @@ func (s *IndexShard) NewShard() error {
 	if err := storeIndex(s.root); err != nil {
 		return err
 	}
-	return s.openWriter(s.GetLatestShardID())
+	return nil
 }
 
 // GetWriter return the newest shard writer or special shard writer
@@ -431,6 +431,9 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 			}()
 			dmi, err := searcher.Search(ctx, request)
 			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					return nil
+				}
 				log.Error().Err(err).
 					Str("index", s.GetIndexName()).
 					Str("shard", s.GetID()).

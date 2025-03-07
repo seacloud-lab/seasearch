@@ -25,7 +25,8 @@ const (
 )
 
 const (
-	ActionTypeInsert = "insert"
-	ActionTypeUpdate = "update"
-	ActionTypeDelete = "delete"
+	ActionTypeInsert        = "insert"
+	ActionTypeUpdate        = "update"
+	ActionTypeDelete        = "delete"
+	ActionTypeDeleteVecOnly = "delete_vec_only"
 )

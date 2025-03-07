@@ -91,7 +91,15 @@ func (index *Index) CreateDocument(docID string, doc map[string]interface{}, upd
 	shard := index.GetShardByDocID(docID)
 	secondShardID := ShardIDNeedLatest
 	if update {
-		secondShardID = ShardIDNeedUpdate
+		var err error
+		secondShardID, err = shard.FindShardByDocID(docID)
+		if err != nil {
+			if errors.Is(err, errors.ErrorIDNotFound) {
+				update = false
+			} else {
+				return err
+			}
+		}
 	}
 	if config.Global.EnableWal {
 		// check WAL
@@ -122,7 +130,15 @@ func (index *Index) CreateDocuments(ops []DocOperation) error {
 		shard := index.GetShardByDocID(op.DocId)
 		secondShardID := ShardIDNeedLatest
 		if op.Update {
-			secondShardID = ShardIDNeedUpdate
+			var err error
+			secondShardID, err = shard.FindShardByDocID(op.DocId)
+			if err != nil {
+				if errors.Is(err, errors.ErrorIDNotFound) {
+					op.Update = false
+				} else {
+					return err
+				}
+			}
 		}
 		doc, err := shard.CheckDocumentOperation(op.DocId, op.Doc, op.Update, secondShardID)
 		if err != nil {
@@ -201,13 +217,27 @@ func (index *Index) DeleteDocument(docID string) error {
 
 	shard := index.GetShardByDocID(docID)
 	secondShardID, err := shard.FindShardByDocID(docID)
+	deleteVecOnly := false
 	if err != nil {
-		return err
+		if errors.Is(err, errors.ErrorIDNotFound) {
+			if len(index.GetVecIndexes()) > 0 {
+				deleteVecOnly = true
+			} else {
+				// there is no vec index, we just ignore.
+				return errors.ErrorIDNotFound
+			}
+		} else {
+			return err
+		}
+	}
+	action := meta.ActionTypeDelete
+	if deleteVecOnly {
+		action = meta.ActionTypeDeleteVecOnly
 	}
 
 	data := map[string]interface{}{
 		meta.IDFieldName:     docID,
-		meta.ActionFieldName: meta.ActionTypeDelete,
+		meta.ActionFieldName: action,
 		meta.ShardFieldName:  secondShardID,
 	}
 	if config.Global.EnableWal {
@@ -228,25 +258,26 @@ func (index *Index) DeleteDocuments(docIDs []string) error {
 	// shardId -> doc
 	shardMap := make(map[string][]map[string]interface{})
 
+	containsVecIndex := len(index.GetVecIndexes()) > 0
 	for _, docID := range docIDs {
 		shard := index.GetShardByDocID(docID)
 		secondShardID, err := shard.FindShardByDocID(docID)
+		action := meta.ActionTypeDelete
 		if err != nil {
 			if errors.Is(err, errors.ErrorIDNotFound) {
-				log.Debug().Msgf("index %s, shard: %s try to del doc id: %s, but not found specified second shard", index.GetName(), shard.name, docID)
-				// Documents may only be deleted in the bulge, but the vector index still exists,
-				// so we cannot found second shard.
-				// This may be due to the interruption of the last deletion.
-				// At this time, we use ShardIDNeedUpdate to delete all second shards once
-				// to ensure that the vector index data can be deleted.
-				secondShardID = ShardIDNeedUpdate
+				if containsVecIndex {
+					action = meta.ActionTypeDeleteVecOnly
+					secondShardID = ShardIDNeedLatest
+				} else {
+					continue
+				}
 			} else {
 				return fmt.Errorf("index %s find id %s err: %w", index.GetName(), docID, err)
 			}
 		}
 		data := map[string]interface{}{
 			meta.IDFieldName:     docID,
-			meta.ActionFieldName: meta.ActionTypeDelete,
+			meta.ActionFieldName: action,
 			meta.ShardFieldName:  secondShardID,
 		}
 		if list, ok := shardMap[shard.GetID()]; ok {

@@ -467,6 +467,28 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					otherBatch.Delete(bdoc.ID())
 				}
 			}
+		case meta.ActionTypeDeleteVecOnly:
+			if len(doc.actions) == 1 {
+				finalAction = vector.Delete
+			} else {
+				lastAction = doc.actions[len(doc.actions)-1]
+				switch lastAction {
+				case meta.ActionTypeInsert:
+					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeUpdate:
+					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDelete:
+					batch.Delete(bdoc.ID())
+					finalAction = vector.Delete
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
+				}
+			}
 		default:
 			return fmt.Errorf("walMergeDocs: invalid action type [%s]", firstAction)
 		}
