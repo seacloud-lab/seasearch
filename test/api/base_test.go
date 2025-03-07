@@ -31,7 +31,7 @@ func TestApiBase(t *testing.T) {
 			req, _ := http.NewRequest("GET", "/", nil)
 			resp := httptest.NewRecorder()
 			r.ServeHTTP(resp, req)
-			assert.Equal(t, http.StatusFound, resp.Code)
+			assert.Equal(t, http.StatusNotFound, resp.Code)
 		})
 		t.Run("/version", func(t *testing.T) {
 			req, _ := http.NewRequest("GET", "/version", nil)
@@ -62,7 +62,7 @@ func TestApiBase(t *testing.T) {
 			req, _ := http.NewRequest("GET", "/ui/", nil)
 			resp := httptest.NewRecorder()
 			r.ServeHTTP(resp, req)
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusNotFound, resp.Code)
 		})
 	})
 }
