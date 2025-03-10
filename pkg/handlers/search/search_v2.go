@@ -255,7 +255,11 @@ func UnifiedSearch(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	var result = &meta.SearchResponse{}
+	var result = &meta.SearchResponse{
+		Hits: meta.Hits{
+			Hits: []meta.Hit{},
+		},
+	}
 	var mutex = sync.Mutex{}
 
 	var eg errgroup.Group

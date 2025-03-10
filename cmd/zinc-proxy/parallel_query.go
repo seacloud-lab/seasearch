@@ -186,7 +186,11 @@ func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialInd
 
 	}
 
-	result := &meta.SearchResponse{}
+	result := &meta.SearchResponse{
+		Hits: meta.Hits{
+			Hits: []meta.Hit{},
+		},
+	}
 	eg.SetLimit(6)
 
 	for addr, partialIndexes := range parallelNodeMap {
