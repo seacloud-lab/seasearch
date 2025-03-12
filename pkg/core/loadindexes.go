@@ -103,6 +103,7 @@ func formatIndex(readIndex *meta.Index) (*Index, error) {
 	index.ref.Mappings = readIndex.Mappings
 	index.ref.Stats = readIndex.Stats
 	index.ref.VecIndexes = readIndex.VecIndexes
+	index.ref.StoreWithHash = readIndex.StoreWithHash
 
 	// init shards
 	index.ref.ShardNum = readIndex.ShardNum

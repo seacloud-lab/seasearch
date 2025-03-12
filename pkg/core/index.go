@@ -21,6 +21,7 @@ import (
 
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -63,6 +64,13 @@ func (index *Index) GetAllShardNum() int64 {
 }
 
 func (index *Index) GetName() string {
+	return index.ref.Name
+}
+
+func (index *Index) GetBasePath() string {
+	if index.ref.StoreWithHash {
+		return zutils.GetHashHex(index.ref.Name)
+	}
 	return index.ref.Name
 }
 
@@ -235,6 +243,7 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 				continue
 			}
 			index.ref.VecIndexes[field] = &meta.VecIndex{
+				StoreWithHash:    true,
 				TargetType:       prop.VecIndexType,
 				Dims:             prop.Dims,
 				NBits:            prop.NBits,

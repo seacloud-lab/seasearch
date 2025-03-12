@@ -16,6 +16,8 @@
 package zutils
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"unicode"
@@ -43,4 +45,9 @@ func SliceExists(set []string, find string) bool {
 		}
 	}
 	return false
+}
+
+func GetHashHex(str string) string {
+	sum := sha256.Sum256([]byte(str))
+	return hex.EncodeToString(sum[:])
 }

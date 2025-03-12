@@ -118,6 +118,13 @@ func (s *IndexShard) GetIndexName() string {
 	return s.root.GetName()
 }
 
+func (s *IndexShard) GetIndexBasePath() string {
+	if s.root.ref.StoreWithHash {
+		return zutils.GetHashHex(s.root.ref.Name)
+	}
+	return s.root.GetName()
+}
+
 func (s *IndexShard) GetShardName() string {
 	return s.name
 }
@@ -293,7 +300,7 @@ func (s *IndexShard) openWriter(shardID int64) error {
 		return nil
 	}
 	var err error
-	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexName(), s.GetID(), shardID)
+	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexBasePath(), s.GetID(), shardID)
 	secondShard.writer, err = OpenIndexWriter(indexName, s.root.GetStorageType(), defaultSearchAnalyzer, 0, 0)
 	return err
 }
@@ -309,7 +316,7 @@ func (s *IndexShard) openReader(shardID int64) (*bluge.Reader, error) {
 		defaultSearchAnalyzer = analyzers["default"]
 	}
 	var err error
-	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexName(), s.GetID(), shardID)
+	indexName := fmt.Sprintf("%s/%s/%06x", s.GetIndexBasePath(), s.GetID(), shardID)
 	cfg, err := getOpenConfig(indexName, s.root.GetStorageType(), defaultSearchAnalyzer, 0, 0)
 	if err != nil {
 		return nil, err
