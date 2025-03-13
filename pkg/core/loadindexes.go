@@ -103,6 +103,7 @@ func formatIndex(readIndex *meta.Index) (*Index, error) {
 	index.ref.Mappings = readIndex.Mappings
 	index.ref.Stats = readIndex.Stats
 	index.ref.VecIndexes = readIndex.VecIndexes
+	//The new index field from the 9.0.2 version is set to true, and the hash is used as the storage path
 	index.ref.StoreWithHash = readIndex.StoreWithHash
 
 	// init shards

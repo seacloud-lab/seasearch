@@ -16,7 +16,11 @@
 package zutils
 
 import (
+	"crypto/md5"
+	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStringToInt(t *testing.T) {
@@ -140,4 +144,16 @@ func TestSliceExists(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBase62(t *testing.T) {
+	sum := md5.Sum([]byte("index001"))
+	check, ok := new(big.Int).SetString("18679938498730667493431693518629861200", 10)
+	assert.True(t, ok)
+
+	num := new(big.Int).SetBytes(sum[:])
+	assert.Equal(t, 0, num.Cmp(check))
+
+	v := GetHashEncode("index001")
+	assert.Equal(t, "qw7oNfKQMF4q6c2Q2tHTq", v)
 }

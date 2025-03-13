@@ -115,7 +115,7 @@ func testBrandNewFlat(t *testing.T) {
 	err := idx.loadSegment()
 	assert.Nil(t, err)
 	assert.NotNil(t, idx.seg)
-	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.storePath, fmt.Sprintf("%04x", 0), "stored_vec"))
+	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.storeName, fmt.Sprintf("%04x", 0), "stored_vec"))
 	assert.Nil(t, err)
 	assert.True(t, info.IsDir())
 
@@ -231,7 +231,7 @@ func testBandNewIvfPq(t *testing.T) {
 	err := idx.loadAllSegments()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(idx.segments))
-	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.storePath, fmt.Sprintf("%04x", 0), "stored_vec"))
+	info, err := os.Stat(path.Join(config.Global.DataPath, vector.VecPrefix, idx.storeName, fmt.Sprintf("%04x", 0), "stored_vec"))
 	assert.Nil(t, err)
 	assert.True(t, info.IsDir())
 

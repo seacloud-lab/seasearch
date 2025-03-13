@@ -41,8 +41,8 @@ func DeleteIndex(name string) error {
 			return fmt.Errorf("delete vec index err: %w", err)
 		}
 	}
-	// remove vec index folder
-	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetBasePath()))
+	// remove the parent dir containing all vec indexes for this index.
+	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
 	if err != nil {
 		return fmt.Errorf("delete vec index err: %w", err)
 	}
@@ -62,12 +62,12 @@ func DeleteIndex(name string) error {
 func delIndex(index *Index) error {
 	switch index.ref.StorageType {
 	case "oss":
-		return directory.RemoveOssIndex(index.GetBasePath())
+		return directory.RemoveOssIndex(index.GetStoreName())
 	case "s3":
-		return directory.RemoveS3Index(index.GetBasePath())
+		return directory.RemoveS3Index(index.GetStoreName())
 	default:
 		dataPath := config.Global.DataPath
-		err := os.RemoveAll(dataPath + "/" + index.GetBasePath())
+		err := os.RemoveAll(dataPath + "/" + index.GetStoreName())
 		if err != nil {
 			return fmt.Errorf("failed to delete index: %w", err)
 		}

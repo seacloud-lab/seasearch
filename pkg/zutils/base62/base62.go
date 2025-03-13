@@ -17,6 +17,7 @@ package base62
 
 import (
 	"math"
+	"math/big"
 	"strings"
 )
 
@@ -30,6 +31,29 @@ func Encode(num int64) string {
 	}
 	reverse(bytes)
 	return string(bytes)
+}
+
+func EncodeToString(data []byte, grow int) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	num := new(big.Int).SetBytes(data)
+	base := big.NewInt(62)
+	zero := big.NewInt(0)
+
+	if num.Cmp(zero) == 0 {
+		return string(chars[0])
+	}
+
+	buf := make([]byte, 0, grow)
+	remainder := new(big.Int)
+	for num.Cmp(zero) > 0 {
+		num.QuoRem(num, base, remainder)
+		buf = append(buf, chars[remainder.Int64()])
+	}
+	reverse(buf)
+	return string(buf)
 }
 
 func Decode(str string) int64 {

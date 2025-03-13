@@ -25,7 +25,7 @@ type VectorIndex interface {
 	// and the local node performs the search based on the assigned segment IDs.
 	PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error)
 	Name() string
-	StorePath() string
+	StoreName() string
 	Meta() *meta.VecIndex
 	SealSeg() error
 	AddRef()
@@ -42,7 +42,7 @@ type baseIndex struct {
 	// TODO: zincIndex may be closed when using
 	zincIndex *Index
 	name      string
-	storePath string
+	storeName string
 	field     string
 	ref       *meta.VecIndex
 	refCount  int
@@ -75,14 +75,14 @@ func (b *baseIndex) ATime() time.Time {
 	return b.aTime
 }
 
-func (b *baseIndex) StorePath() string {
-	return b.storePath
+func (b *baseIndex) StoreName() string {
+	return b.storeName
 }
 
 func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {
 	var subPath string
 	if vecIndexMeta.StoreWithHash {
-		subPath = zutils.GetHashHex(field)
+		subPath = zutils.GetHashEncode(field)
 	} else {
 		subPath = field
 	}
@@ -91,7 +91,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
 				name:      path.Join(zincIndex.GetName(), field),
-				storePath: path.Join(zincIndex.GetBasePath(), subPath),
+				storeName: path.Join(zincIndex.GetStoreName(), subPath),
 				field:     field,
 				ref:       vecIndexMeta,
 				refCount:  1,
@@ -104,7 +104,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 		baseIndex: baseIndex{
 			zincIndex: zincIndex,
 			name:      path.Join(zincIndex.GetName(), field),
-			storePath: path.Join(zincIndex.GetBasePath(), subPath),
+			storeName: path.Join(zincIndex.GetStoreName(), subPath),
 			field:     field,
 			ref:       vecIndexMeta,
 			refCount:  1,

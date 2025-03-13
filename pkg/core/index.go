@@ -16,6 +16,7 @@
 package core
 
 import (
+	"path"
 	"sync"
 	"sync/atomic"
 
@@ -67,9 +68,12 @@ func (index *Index) GetName() string {
 	return index.ref.Name
 }
 
-func (index *Index) GetBasePath() string {
+// GetStoreName returns the hashed index name as the storage path if StoreWithHash is true.
+// Otherwise, it returns the plain index name for compatibility.
+func (index *Index) GetStoreName() string {
 	if index.ref.StoreWithHash {
-		return zutils.GetHashHex(index.ref.Name)
+		val := zutils.GetHashEncode(index.ref.Name)
+		return path.Join(val[:2], val[2:])
 	}
 	return index.ref.Name
 }
