@@ -16,20 +16,23 @@
 package meta
 
 type Index struct {
-	ShardNum    int64                  `json:"shard_num"`
-	Name        string                 `json:"name"`
-	StorageType string                 `json:"storage_type"`
-	Settings    *IndexSettings         `json:"settings,omitempty"`
-	Mappings    *Mappings              `json:"mappings,omitempty"`
-	Shards      map[string]*IndexShard `json:"shards"`
-	Stats       IndexStat              `json:"stats"`
-	Version     string                 `json:"version"`
-	VecIndexes  map[string]*VecIndex   `json:"vec_indexes"`
+	ShardNum int64  `json:"shard_num"`
+	Name     string `json:"name"`
+	// We use this flag to determine how to access the underlying storage data.
+	StoreWithHash bool                   `json:"store_with_hash"`
+	StorageType   string                 `json:"storage_type"`
+	Settings      *IndexSettings         `json:"settings,omitempty"`
+	Mappings      *Mappings              `json:"mappings,omitempty"`
+	Shards        map[string]*IndexShard `json:"shards"`
+	Stats         IndexStat              `json:"stats"`
+	Version       string                 `json:"version"`
+	VecIndexes    map[string]*VecIndex   `json:"vec_indexes"`
 }
 
 type VecIndex struct {
 	// the final vec index type
 	TargetType       string           `json:"target_type"`
+	StoreWithHash    bool             `json:"store_with_hash"`
 	Dims             int              `json:"dims"`
 	NBits            int              `json:"nbits"`
 	NList            int              `json:"nlist"`

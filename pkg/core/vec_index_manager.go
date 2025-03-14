@@ -295,10 +295,11 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 	} else if !errors.Is(err, ErrVecIndexNotExists) && !errors.Is(err, ErrVecIndexCorruption) {
 		return fmt.Errorf("failed to get vector index %s/%s: %w", indexName, fieldName, err)
 	}
-	err = vecIdxManager.storage.Remove(path.Join(indexName, fieldName))
+	err = vecIdxManager.storage.Remove(vecIndex.StoreName())
 	if err != nil {
 		return fmt.Errorf("failed to remove index %s/%s: %w", indexName, fieldName, err)
 	}
+
 	return nil
 }
 

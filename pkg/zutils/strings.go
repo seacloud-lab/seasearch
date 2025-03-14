@@ -16,9 +16,12 @@
 package zutils
 
 import (
+	"crypto/md5"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 )
 
 func StringToInt(s string) int {
@@ -43,4 +46,9 @@ func SliceExists(set []string, find string) bool {
 		}
 	}
 	return false
+}
+
+func GetHashEncode(str string) string {
+	sum := md5.Sum([]byte(str))
+	return base62.EncodeToString(sum[:], 22) // for md5, the encode result length is 22
 }

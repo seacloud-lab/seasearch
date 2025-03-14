@@ -16,11 +16,13 @@
 package core
 
 import (
+	"path"
 	"sync"
 	"sync/atomic"
 
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -63,6 +65,16 @@ func (index *Index) GetAllShardNum() int64 {
 }
 
 func (index *Index) GetName() string {
+	return index.ref.Name
+}
+
+// GetStoreName returns the hashed index name as the storage path if StoreWithHash is true.
+// Otherwise, it returns the plain index name for compatibility.
+func (index *Index) GetStoreName() string {
+	if index.ref.StoreWithHash {
+		val := zutils.GetHashEncode(index.ref.Name)
+		return path.Join(val[:2], val[2:])
+	}
 	return index.ref.Name
 }
 
@@ -235,6 +247,7 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 				continue
 			}
 			index.ref.VecIndexes[field] = &meta.VecIndex{
+				StoreWithHash:    true,
 				TargetType:       prop.VecIndexType,
 				Dims:             prop.Dims,
 				NBits:            prop.NBits,

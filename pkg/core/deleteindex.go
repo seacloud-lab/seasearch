@@ -19,9 +19,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 )
 
@@ -39,8 +41,14 @@ func DeleteIndex(name string) error {
 			return fmt.Errorf("delete vec index err: %w", err)
 		}
 	}
+	// remove the parent dir containing all vec indexes for this index.
+	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
+	if err != nil {
+		return fmt.Errorf("delete vec index err: %w", err)
+	}
+
 	// 2. Physically delete the index
-	err := delIndex(index)
+	err = delIndex(index)
 	if err != nil {
 		return fmt.Errorf("delete index err: %w", err)
 	}
@@ -54,12 +62,12 @@ func DeleteIndex(name string) error {
 func delIndex(index *Index) error {
 	switch index.ref.StorageType {
 	case "oss":
-		return directory.RemoveOssIndex(index.GetName())
+		return directory.RemoveOssIndex(index.GetStoreName())
 	case "s3":
-		return directory.RemoveS3Index(index.GetName())
+		return directory.RemoveS3Index(index.GetStoreName())
 	default:
 		dataPath := config.Global.DataPath
-		err := os.RemoveAll(dataPath + "/" + index.GetName())
+		err := os.RemoveAll(dataPath + "/" + index.GetStoreName())
 		if err != nil {
 			return fmt.Errorf("failed to delete index: %w", err)
 		}

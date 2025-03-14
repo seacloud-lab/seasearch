@@ -14,6 +14,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -24,6 +25,7 @@ type VectorIndex interface {
 	// and the local node performs the search based on the assigned segment IDs.
 	PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error)
 	Name() string
+	StoreName() string
 	Meta() *meta.VecIndex
 	SealSeg() error
 	AddRef()
@@ -40,6 +42,7 @@ type baseIndex struct {
 	// TODO: zincIndex may be closed when using
 	zincIndex *Index
 	name      string
+	storeName string
 	field     string
 	ref       *meta.VecIndex
 	refCount  int
@@ -72,12 +75,23 @@ func (b *baseIndex) ATime() time.Time {
 	return b.aTime
 }
 
+func (b *baseIndex) StoreName() string {
+	return b.storeName
+}
+
 func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {
+	var subPath string
+	if vecIndexMeta.StoreWithHash {
+		subPath = zutils.GetHashEncode(field)
+	} else {
+		subPath = field
+	}
 	if vecIndexMeta.TargetType == vector.Flat {
 		return &FlatIndex{
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
 				name:      path.Join(zincIndex.GetName(), field),
+				storeName: path.Join(zincIndex.GetStoreName(), subPath),
 				field:     field,
 				ref:       vecIndexMeta,
 				refCount:  1,
@@ -90,6 +104,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 		baseIndex: baseIndex{
 			zincIndex: zincIndex,
 			name:      path.Join(zincIndex.GetName(), field),
+			storeName: path.Join(zincIndex.GetStoreName(), subPath),
 			field:     field,
 			ref:       vecIndexMeta,
 			refCount:  1,

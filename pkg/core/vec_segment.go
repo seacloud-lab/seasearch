@@ -69,7 +69,7 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 }
 
 func (s *VecSegment) initVecStorePath() error {
-	p := path.Join(config.Global.DataPath, path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec"))
+	p := path.Join(config.Global.DataPath, path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec"))
 	err := os.MkdirAll(p, 0777)
 	if err != nil {
 		return fmt.Errorf("init path err: error creating directory '%s': %w", p, err)
@@ -79,7 +79,7 @@ func (s *VecSegment) initVecStorePath() error {
 
 func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
 	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
+	name := path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
 	switch config.Global.StorageType {
 	case "disk":
@@ -126,7 +126,7 @@ func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
 		return w, nil
 	}
 	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
+	name := path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
 	switch config.Global.StorageType {
 	case "disk":
@@ -197,7 +197,7 @@ func (s *VecSegment) loadFaissIndexFile() error {
 }
 
 func (s *VecSegment) getFaissIndexPath() string {
-	return path.Join(s.baseIndex.Name(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
+	return path.Join(s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
 }
 
 func (s *VecSegment) Batch(batch *segBatch) error {

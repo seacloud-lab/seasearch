@@ -61,6 +61,7 @@ func NewIndex(name string) (*Index, error) {
 	index.ref.Name = name
 	index.ref.StorageType = config.Global.StorageType
 	index.ref.Version = meta.Version
+	index.ref.StoreWithHash = true
 
 	// use template
 	if err := index.UseTemplate(); err != nil {
