@@ -41,13 +41,6 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	if err != nil {
 		return nil, err
 	}
-	return MultiSearchWithStats(matchedNames, nil, query)
-}
-
-// MultiSearchWithStats searches multiple indexes with the input query.
-// If stats is not nil, it will use unified stats for score calculation;
-// otherwise each index will use its own stats.
-func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedStats, query *meta.ZincQuery) (*meta.SearchResponse, error) {
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
 	searchers := make([]*SimpleSearcher, 0)
@@ -57,7 +50,7 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 	searchIndex := make([]*Index, 0)
 	timeMin, timeMax := timerange.Query(query.Query)
 
-	for _, indexName := range searchIndexNames {
+	for _, indexName := range matchedNames {
 		// this index should not handle by this servers
 		if !cluster.AssignCheck(indexName) {
 			return nil, ErrIndexServerMismatch
@@ -95,16 +88,11 @@ func MultiSearchWithStats(searchIndexNames []string, stats *zincsearch.UnifiedSt
 		defer cancel()
 	}
 
-	if stats != nil {
-		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
-	}
-
 	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
 }
 
 // QueryStatsInfo get statistics from specified indexes, returns statistics for all index mergers.
 func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
-	hasIndex := false
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
 	var searchers = make([]*SimpleSearcher, 0)
@@ -118,7 +106,6 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		}
 		index, ok := ZINC_INDEX_LIST.Get(indexName)
 		if ok {
-			hasIndex = true
 			if mappings == nil {
 				mappings = index.GetMappings()
 				analyzers = index.GetAnalyzers()
@@ -128,9 +115,6 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 	}
 
 	if len(searchers) == 0 {
-		if !hasIndex {
-			return nil, fmt.Errorf("core.UnifySearch: error accessing reader: no index found")
-		}
 		return nil, nil
 	}
 

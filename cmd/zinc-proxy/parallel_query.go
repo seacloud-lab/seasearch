@@ -107,6 +107,9 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 	for _, index := range indexes {
 		indexMeta, err := metadata.Index.Get(index)
 		if err != nil {
+			if errors.Is(err, errors.ErrKeyNotFound) {
+				continue
+			}
 			return nil, err
 		}
 

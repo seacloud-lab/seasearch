@@ -267,7 +267,12 @@ func UnifiedSearch(c *gin.Context) {
 	for _, q := range req.IndexQueries {
 		q := q
 		eg.Go(func() error {
-			res, err := core.MultiSearchWithStats([]string{q.Index}, stats, q.Query)
+			index, exists := core.GetIndex(q.Index)
+			// some index not exists, we ignore
+			if !exists {
+				return nil
+			}
+			res, err := index.SearchWithStats(q.Query, stats)
 			if err != nil {
 				return err
 			}
