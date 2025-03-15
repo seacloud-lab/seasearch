@@ -26,6 +26,10 @@ import (
 )
 
 func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) {
+	return index.SearchWithStats(query, nil)
+}
+
+func (index *Index) SearchWithStats(query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
 	mappings := index.GetMappings()
 	analyzers := index.GetAnalyzers()
 	err := uquery.NormalizeQuery(query, mappings, analyzers)
@@ -44,6 +48,10 @@ func (index *Index) Search(query *meta.ZincQuery) (*meta.SearchResponse, error) 
 	if query.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(query.Timeout)*time.Second)
 		defer cancel()
+	}
+
+	if stats != nil {
+		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
