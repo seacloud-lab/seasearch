@@ -23,11 +23,9 @@ import (
 	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
 	query2 "github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/uquery/timerange"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
@@ -37,48 +35,23 @@ import (
 )
 
 func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {
-	matchedNames, err := GetMatchedIndexNames(indexNames)
-	if err != nil {
-		return nil, err
+	matchedIndexes := GetMatchedIndexes(indexNames)
+	if len(matchedIndexes) == 0 {
+		return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
 	}
 	var mappings *meta.Mappings
 	var analyzers map[string]*analysis.Analyzer
 	searchers := make([]*SimpleSearcher, 0)
 	var shardNum int64
 
-	hasIndex := false
-	searchIndex := make([]*Index, 0)
 	timeMin, timeMax := timerange.Query(query.Query)
-
-	for _, indexName := range matchedNames {
-		// this index should not handle by this servers
-		if !cluster.AssignCheck(indexName) {
-			return nil, ErrIndexServerMismatch
-		}
-		index, ok := ZINC_INDEX_LIST.Get(indexName)
-		if ok {
-			hasIndex = true
-			searchIndex = append(searchIndex, index)
-		}
-	}
-
-	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
-
-	for _, index := range searchIndex {
+	for _, index := range matchedIndexes {
 		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
 		shardNum += int64(len(searchers))
 		if mappings == nil {
 			mappings = index.GetMappings()
 			analyzers = index.GetAnalyzers()
 		}
-	}
-
-	if len(searchers) == 0 {
-		if !hasIndex {
-			return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
-		}
-		return &meta.SearchResponse{}, nil
 	}
 
 	ctx := context.Background()
@@ -169,42 +142,28 @@ func isMatchIndex(zincIndexName, indexName string) bool {
 	return zincIndexName == indexName
 }
 
-// GetMatchedIndexNames
-// return all matched index names,if input indexNames is empty, we return all indexes
-func GetMatchedIndexNames(indexNames []string) ([]string, error) {
+// GetMatchedIndexes
+// return all matched indexes,if input indexNames is empty, we return all indexes
+func GetMatchedIndexes(indexNames []string) []*Index {
 	if len(indexNames) == 0 {
-		return ZINC_INDEX_LIST.ListName(), nil
+		return ZINC_INDEX_LIST.List()
 	}
-	var needMatchIndexes []string
-	var indexes []string
-	for _, name := range indexNames {
-		if name == "" || strings.HasSuffix(name, "*") || strings.HasPrefix(name, "*") {
-			needMatchIndexes = append(needMatchIndexes, name)
-		} else {
-			indexes = append(indexes, name)
-		}
-	}
-	searchIndex := make([]string, 0)
-	if len(needMatchIndexes) > 0 {
-		for _, index := range ZINC_INDEX_LIST.List() {
-			for _, indexName := range needMatchIndexes {
-				isMatched := isMatchIndex(index.GetName(), indexName)
-				if isMatched {
-					searchIndex = append(searchIndex, index.GetName())
-					break
+	searchIndex := make([]*Index, 0)
+	for _, index := range ZINC_INDEX_LIST.List() {
+		for _, indexName := range indexNames {
+			isMatched := isMatchIndex(index.GetName(), indexName)
+			if isMatched {
+				// this index should not handle by this server
+				if !cluster.AssignCheck(index.GetName()) {
+					continue
 				}
+				searchIndex = append(searchIndex, index)
+				break
 			}
 		}
 	}
 
-	for _, index := range indexes {
-		_, ok := ZINC_INDEX_LIST.Get(index)
-		if ok {
-			searchIndex = append(searchIndex, index)
-		}
-	}
-
-	return searchIndex, nil
+	return searchIndex
 }
 
 type PartialIndexes map[string][]int
