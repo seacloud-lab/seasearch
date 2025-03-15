@@ -421,6 +421,8 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					finalAction = vector.Insert
 				case meta.ActionTypeDelete:
 					// noop
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		case meta.ActionTypeUpdate:
@@ -443,6 +445,8 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					batch.Delete(bdoc.ID())
 					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		case meta.ActionTypeDelete:
@@ -465,6 +469,8 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					batch.Delete(bdoc.ID())
 					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		case meta.ActionTypeDeleteVecOnly:
