@@ -405,8 +405,12 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 }
 
 func (c *LruCache) OpenWriter(filePath string) (io.WriteCloser, error) {
+	err := c.makeRoomForCacheFile()
+	if err != nil {
+		return nil, fmt.Errorf("lru clean cache err: %w", err)
+	}
 	dir, _ := filepath.Split(filePath)
-	err := c.Setup(dir)
+	err = c.Setup(dir)
 	if err != nil {
 		return nil, fmt.Errorf("open cache writer err: %w", err)
 	}
@@ -511,7 +515,6 @@ func (t *tempWriteFile) Write(p []byte) (n int, err error) {
 
 func (t *tempWriteFile) Close() error {
 	_ = t.cf.Close()
-
 	// delete old cache
 	t.cf.ref.lock.Lock()
 	delete(t.cf.ref.caches, t.realPath)

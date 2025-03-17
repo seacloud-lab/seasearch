@@ -421,6 +421,8 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					finalAction = vector.Insert
 				case meta.ActionTypeDelete:
 					// noop
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		case meta.ActionTypeUpdate:
@@ -443,6 +445,8 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					batch.Delete(bdoc.ID())
 					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		case meta.ActionTypeDelete:
@@ -465,6 +469,30 @@ func (w *walMergeDocs) WriteToShard(shard *IndexShard, shardID int64, batch *blu
 					batch.Delete(bdoc.ID())
 					finalAction = vector.Delete
 					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
+				}
+			}
+		case meta.ActionTypeDeleteVecOnly:
+			if len(doc.actions) == 1 {
+				finalAction = vector.Delete
+			} else {
+				lastAction = doc.actions[len(doc.actions)-1]
+				switch lastAction {
+				case meta.ActionTypeInsert:
+					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeUpdate:
+					batch.Update(bdoc.ID(), bdoc)
+					finalAction = vector.Update
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDelete:
+					batch.Delete(bdoc.ID())
+					finalAction = vector.Delete
+					otherBatch.Delete(bdoc.ID())
+				case meta.ActionTypeDeleteVecOnly:
+					finalAction = vector.Delete
 				}
 			}
 		default:
