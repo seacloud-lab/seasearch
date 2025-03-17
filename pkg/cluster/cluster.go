@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -144,7 +144,7 @@ func AssignCheck(indexName string) bool {
 		return true
 	}
 
-	sum := sha256.Sum256([]byte(indexName))
+	sum := md5.Sum([]byte(indexName))
 	str := hex.EncodeToString(sum[:])
 	assign := str[:2]
 

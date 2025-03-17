@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"runtime/debug"
@@ -181,7 +181,7 @@ func GetNodeList() []nodeInfo {
 }
 
 func getAssignNodeByIndex(indexName string) (int, bool) {
-	sum := sha256.Sum256([]byte(indexName))
+	sum := md5.Sum([]byte(indexName))
 	str := hex.EncodeToString(sum[:])
 	assign := str[:2]
 

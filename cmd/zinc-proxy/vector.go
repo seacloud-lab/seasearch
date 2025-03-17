@@ -64,7 +64,12 @@ func SearchVector(c *gin.Context) {
 		return
 	}
 
-	nodeSegmentsMap, needParallelSearch := calcNodeSegmentsMap(indexName, vecIndexMeta)
+	nodeSegmentsMap, needParallelSearch, err := calcNodeSegmentsMap(indexName, vecIndexMeta)
+	if err != nil {
+		log.Err(err).Msgf("exec parallel multi vector search err: ")
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+		return
+	}
 	if !needParallelSearch {
 		bodyBytes, _ := json.Marshal(query)
 		body := io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -178,17 +183,21 @@ func SearchVector(c *gin.Context) {
 
 // calcNodeSegmentsMap determines which vector segment searches should be assigned to each node
 // and returns the corresponding map.
-func calcNodeSegmentsMap(indexName string, vecIndex *meta.VecIndex) (map[string][]int, bool) {
+func calcNodeSegmentsMap(indexName string, vecIndex *meta.VecIndex) (map[string][]int, bool, error) {
 	// node -> segment ids
 	nodeSegmentMap := make(map[string][]int)
 	nodeList := GetNodeList()
 	if len(nodeList) == 0 || vecIndex.TargetType != vector.IvfPQ || len(vecIndex.Segments) < conf.General.IndexParallelQueryThreshold {
-		return nodeSegmentMap, false
+		return nodeSegmentMap, false, nil
+	}
+	nodeNum := min(len(nodeList), conf.General.ParallelQueryNodeLimit)
+	nodes, err := getQueryNodes(nodeList, nodeNum, indexName)
+	if err != nil {
+		return nodeSegmentMap, false, err
 	}
 
 	for _, segment := range vecIndex.Segments {
-		remainder := int(segment.Id) % len(nodeList)
-		addr := nodeList[remainder].addr
+		addr := nodes.Next().addr
 		if segments, ok := nodeSegmentMap[addr]; ok {
 			segments = append(segments, segment.Id)
 			nodeSegmentMap[addr] = segments
@@ -197,5 +206,5 @@ func calcNodeSegmentsMap(indexName string, vecIndex *meta.VecIndex) (map[string]
 		}
 	}
 
-	return nodeSegmentMap, true
+	return nodeSegmentMap, true, nil
 }

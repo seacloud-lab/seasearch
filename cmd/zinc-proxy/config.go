@@ -20,6 +20,7 @@ type GeneralConfig struct {
 	LogDir                      string `env:"SS_CLUSTER_PROXY_LOG_DIR,default=./log"`
 	LogLevel                    string `env:"SS_CLUSTER_PROXY_LOG_LEVEL,default=INFO"`
 	IndexParallelQueryThreshold int    `env:"SS_INDEX_PARALLEL_QUERY_THRESHOLD,default=3"`
+	ParallelQueryNodeLimit      int    `env:"SS_PARALLEL_QUERY_NODE_LIMIT,default=3"`
 	MaxDocumentSize             int    `env:"ZINC_MAX_DOCUMENT_SIZE,default=1m"` // Max size for a single document . Default = 1 MB = 1024 * 1024
 }
 

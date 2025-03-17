@@ -16,7 +16,7 @@
 package core
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -325,7 +325,7 @@ func updateIndexList(removeMap map[string]struct{}) error {
 	// and delete them from the index list
 	curIndexList := ZINC_INDEX_LIST.List()
 	for _, index := range curIndexList {
-		sum := sha256.Sum256([]byte(index.GetName()))
+		sum := md5.Sum([]byte(index.GetName()))
 		str := hex.EncodeToString(sum[:])
 		partition := str[:2]
 
