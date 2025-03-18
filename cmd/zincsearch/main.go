@@ -72,7 +72,7 @@ func main() {
 	config.InitConfig()
 	// setup main logger
 	log.Logger = logger.SetupMainLog(config.Global.LogConfig.LogToStd, "seasearch.log", config.Global.LogConfig.LogDir, config.Global.LogConfig.LogLevel, logger.ComponentSeaSearch)
-	log.Info().Msgf("Starting SeaSearch %s", "0.9.0")
+	log.Info().Msg("Starting SeaSearch")
 	// init id generator
 	ider.InitIder()
 	// init metadata storage
