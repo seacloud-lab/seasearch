@@ -48,9 +48,10 @@ type Property struct {
 	// Dims for vector field
 	Dims int `json:"dims"`
 	// M for vector field, make sure Dims mod M == 0
-	M            int    `json:"m"`
-	NBits        int    `json:"nbits"`
-	VecIndexType string `json:"vec_index_type"`
+	M                int    `json:"m"`
+	NBits            int    `json:"nbits"`
+	VecIndexType     string `json:"vec_index_type"`
+	StoreWithFloat16 bool   `json:"store_with_float16"` // store with float16, this only applies to flat vector index.
 }
 
 func NewMappings() *Mappings {

@@ -34,7 +34,7 @@ type VectorIndex interface {
 	ATime() time.Time
 	Free()
 	Recall(count int, k int64, nprobe int) (float32, error)
-
+	UseFloat16() bool
 	ListSegment() []*VecSegment
 }
 
@@ -77,6 +77,10 @@ func (b *baseIndex) ATime() time.Time {
 
 func (b *baseIndex) StoreName() string {
 	return b.storeName
+}
+
+func (b *baseIndex) UseFloat16() bool {
+	return b.ref.StoreWithFloat16
 }
 
 func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/x448/float16"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
@@ -106,6 +107,8 @@ func TestVecIndex(t *testing.T) {
 	t.Run("TestReOpenIvfPq", testReOpenIvfPq)
 	t.Run("TestRecall", testRecall)
 	t.Run("TestSearchHeap", testSearchHeap)
+
+	t.Run("TestSearchFloat16Flat", testSearch16FlatVectors)
 }
 
 func testBrandNewFlat(t *testing.T) {
@@ -612,4 +615,64 @@ func testSearchHeap(t *testing.T) {
 	itme4 := heap.Pop(list).(vecSearchRes)
 	assert.Equal(t, "A", itme4.id)
 
+}
+
+func makeFlatFloat16ForTest(t *testing.T) *FlatIndex {
+	testFlatIndex := &Index{
+		ref: &meta.Index{
+			Name: testIdxName,
+			VecIndexes: map[string]*meta.VecIndex{
+				testFieldName: {
+					TargetType:       vector.Flat,
+					Dims:             4,
+					StoreWithFloat16: true,
+					Count:            0,
+					CurrentSegmentId: 0,
+					Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
+				},
+			},
+		},
+	}
+	index, err := MakeVecIndex(testFlatIndex, testFieldName, testFlatIndex.ref.VecIndexes[testFieldName])
+
+	assert.Nil(t, err)
+	idx := index.(*FlatIndex)
+	return idx
+}
+
+func testSearch16FlatVectors(t *testing.T) {
+	defer clean()
+	idx := makeFlatFloat16ForTest(t)
+	defer idx.Free()
+
+	xq := make([][]float32, 4)
+	xq[0] = []float32{0.1, 0.2, 0.3, 0.4}
+	xq[1] = []float32{0.1, 0.3, 0.2, 0.3}
+	xq[2] = []float32{0.1, 0.2, 0.6, 0.4}
+	xq[3] = []float32{0.1, 0.2, 0.3, 0.9}
+	ids := []int64{1, 2, 3, 4}
+	err := idx.Batch(xq, ids, nil)
+	assert.Nil(t, err)
+
+	q := []float32{0.1, 0.1, 0.2, 0.3}
+	res, err := idx.Search(q, 2, 0)
+	assert.Nil(t, err)
+	assert.EqualValues(t, 2, len(res))
+
+	assert.Contains(t, res, base62.Encode(1))
+	assert.Contains(t, res, base62.Encode(2))
+
+	checkQ0 := make([]float32, len(xq[0]))
+	for i, f := range xq[0] {
+		checkQ0[i] = float16.Fromfloat32(f).Float32()
+	}
+	d1, _ := L2Distance(checkQ0, q)
+	assert.EqualValues(t, d1, res[base62.Encode(1)])
+
+	checkQ1 := make([]float32, len(xq[1]))
+	for i, f := range xq[1] {
+		checkQ1[i] = float16.Fromfloat32(f).Float32()
+	}
+	d2, _ := L2Distance(checkQ1, q)
+	assert.EqualValues(t, d2, res[base62.Encode(2)])
 }

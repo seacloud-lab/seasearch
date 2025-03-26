@@ -17,8 +17,9 @@ package mappings
 
 import (
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"strings"
+
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
 	"github.com/blugelabs/bluge/analysis"
 
@@ -163,6 +164,12 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				}
 			case "vec_index_type":
 				newProp.VecIndexType = v.(string)
+			case "store_with_float16":
+				var err error
+				newProp.StoreWithFloat16, err = zutils.ToBool(v)
+				if err != nil {
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s store_with_float16 parse err %s", field, err.Error()))
+				}
 			default:
 				// ignore unknown options
 				// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] properties [%s] unknown option [%s]", field, k))
@@ -191,6 +198,8 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				if newProp.Dims%newProp.M != 0 {
 					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
 				}
+				// ivf_pq doesn't need store with float16.
+				newProp.StoreWithFloat16 = false
 			}
 			if newProp.VecIndexType != vector.Flat && newProp.VecIndexType != vector.IvfPQ {
 				return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s vec_index_type parse err invalid vec type", field))

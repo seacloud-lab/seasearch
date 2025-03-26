@@ -253,6 +253,7 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 				NBits:            prop.NBits,
 				M:                prop.M,
 				CurrentSegmentId: 0,
+				StoreWithFloat16: prop.StoreWithFloat16,
 				LayoutVersion:    vector.CurLayoutVersion,
 				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
 			}

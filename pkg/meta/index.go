@@ -33,6 +33,7 @@ type VecIndex struct {
 	// the final vec index type
 	TargetType       string           `json:"target_type"`
 	StoreWithHash    bool             `json:"store_with_hash"`
+	StoreWithFloat16 bool             `json:"store_with_float16"`
 	Dims             int              `json:"dims"`
 	NBits            int              `json:"nbits"`
 	NList            int              `json:"nlist"`
