@@ -106,7 +106,6 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 		return nodeIndexMap, nil
 	}
 
-	nodeNum := min(len(nodeList), conf.General.ParallelQueryNodeLimit)
 	for _, index := range indexes {
 		indexMeta, err := metadata.Index.Get(index)
 		if err != nil {
@@ -118,7 +117,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			secondShardList = append(secondShardList, shard.Shards...)
 		}
 
-		if indexMeta.ShardNum != 1 || len(secondShardList) < conf.General.IndexParallelQueryThreshold {
+		if indexMeta.ShardNum != 1 || len(secondShardList) < conf.General.ParallelQueryThreshold {
 			// the node will process the full index search.
 			addr, err := GetAddrByIndex(index)
 			if err != nil {
@@ -131,7 +130,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			}
 			continue
 		}
-		nodes, err := getQueryNodes(nodeList, nodeNum, index)
+		nodes, err := getQueryNodes(nodeList, index)
 		if err != nil {
 			return nil, err
 		}
@@ -147,12 +146,12 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 	return nodeIndexMap, nil
 }
 
-type tempQueryNode struct {
+type queryNodes struct {
 	addrs []nodeInfo
 	cur   int
 }
 
-func (t *tempQueryNode) Next() nodeInfo {
+func (t *queryNodes) Next() nodeInfo {
 	res := t.addrs[t.cur]
 	if t.cur+1 == len(t.addrs) {
 		t.cur = 0
@@ -164,15 +163,17 @@ func (t *tempQueryNode) Next() nodeInfo {
 
 // getQueryNodes return a circular linked list for query nodes.
 // The caller should traverses the list and assigns the request to the current node
-func getQueryNodes(nodeList []nodeInfo, nodeNum int, indexName string) (tempQueryNode, error) {
-	var res = tempQueryNode{}
+func getQueryNodes(nodeList []nodeInfo, indexName string) (queryNodes, error) {
+	nodeNum := min(len(nodeList), conf.General.ParallelQueryNodeLimit)
+
+	var res = queryNodes{}
 	nodeId, ok := getAssignNodeByIndex(indexName)
 	if !ok {
-		return tempQueryNode{}, fmt.Errorf("cannot find assign node for %s", indexName)
+		return queryNodes{}, fmt.Errorf("cannot find assign node for %s", indexName)
 	}
 	var i int
 	for idx, n := range nodeList {
-		if n.Id == nodeId {
+		if n.id == nodeId {
 			i = idx
 			break
 		}

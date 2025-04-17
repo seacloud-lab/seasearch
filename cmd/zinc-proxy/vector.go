@@ -187,11 +187,11 @@ func calcNodeSegmentsMap(indexName string, vecIndex *meta.VecIndex) (map[string]
 	// node -> segment ids
 	nodeSegmentMap := make(map[string][]int)
 	nodeList := GetNodeList()
-	if len(nodeList) == 0 || vecIndex.TargetType != vector.IvfPQ || len(vecIndex.Segments) < conf.General.IndexParallelQueryThreshold {
+	if len(nodeList) == 0 || vecIndex.TargetType != vector.IvfPQ || len(vecIndex.Segments) < conf.General.ParallelQueryThreshold {
 		return nodeSegmentMap, false, nil
 	}
-	nodeNum := min(len(nodeList), conf.General.ParallelQueryNodeLimit)
-	nodes, err := getQueryNodes(nodeList, nodeNum, indexName)
+
+	nodes, err := getQueryNodes(nodeList, indexName)
 	if err != nil {
 		return nodeSegmentMap, false, err
 	}

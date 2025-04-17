@@ -17,54 +17,58 @@ func TestMain(m *testing.M) {
 }
 
 func TestQueryNodes(t *testing.T) {
-	nodes := []nodeInfo{{Id: 0}, {Id: 1}, {Id: 2}}
+	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}}
 	assignMap.mp["0c"] = 1
 
-	list, err := getQueryNodes(nodes, 2, "test_index")
+	conf.General.ParallelQueryNodeLimit = 2
+	list, err := getQueryNodes(nodes, "test_index")
 	assert.NoError(t, err)
 
 	// first node is 1
-	assert.Equal(t, 1, list.Next().Id)
-	assert.Equal(t, 2, list.Next().Id)
-	assert.Equal(t, 1, list.Next().Id)
-	assert.Equal(t, 2, list.Next().Id)
+	assert.Equal(t, 1, list.Next().id)
+	assert.Equal(t, 2, list.Next().id)
+	assert.Equal(t, 1, list.Next().id)
+	assert.Equal(t, 2, list.Next().id)
 }
 
 func TestQueryNodes2(t *testing.T) {
-	nodes := []nodeInfo{{Id: 0}, {Id: 1}, {Id: 2}, {Id: 3}, {Id: 4}}
+	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}, {id: 3}, {id: 4}}
 	assignMap.mp["0c"] = 2
 
-	list, err := getQueryNodes(nodes, 6, "test_index")
+	conf.General.ParallelQueryNodeLimit = 6
+	list, err := getQueryNodes(nodes, "test_index")
 	assert.NoError(t, err)
 
 	// first node is 2
-	assert.Equal(t, 2, list.Next().Id)
-	assert.Equal(t, 3, list.Next().Id)
-	assert.Equal(t, 4, list.Next().Id)
-	assert.Equal(t, 0, list.Next().Id)
-	assert.Equal(t, 1, list.Next().Id)
-	assert.Equal(t, 2, list.Next().Id)
+	assert.Equal(t, 2, list.Next().id)
+	assert.Equal(t, 3, list.Next().id)
+	assert.Equal(t, 4, list.Next().id)
+	assert.Equal(t, 0, list.Next().id)
+	assert.Equal(t, 1, list.Next().id)
+	assert.Equal(t, 2, list.Next().id)
 }
 
 func TestQueryNodes3(t *testing.T) {
-	nodes := []nodeInfo{{Id: 0}, {Id: 1}, {Id: 2}, {Id: 3}, {Id: 4}}
+	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}, {id: 3}, {id: 4}}
 	assignMap.mp["0c"] = 2
 
-	list, err := getQueryNodes(nodes, 3, "test_index")
+	conf.General.ParallelQueryNodeLimit = 3
+	list, err := getQueryNodes(nodes, "test_index")
 	assert.NoError(t, err)
 
 	// first node is 2
-	assert.Equal(t, 2, list.Next().Id)
-	assert.Equal(t, 3, list.Next().Id)
-	assert.Equal(t, 4, list.Next().Id)
-	assert.Equal(t, 2, list.Next().Id)
-	assert.Equal(t, 3, list.Next().Id)
-	assert.Equal(t, 4, list.Next().Id)
+	assert.Equal(t, 2, list.Next().id)
+	assert.Equal(t, 3, list.Next().id)
+	assert.Equal(t, 4, list.Next().id)
+	assert.Equal(t, 2, list.Next().id)
+	assert.Equal(t, 3, list.Next().id)
+	assert.Equal(t, 4, list.Next().id)
 }
 
 func BenchmarkGenQueryNodes(b *testing.B) {
-	nodes := []nodeInfo{{Id: 0}, {Id: 1}, {Id: 2}, {Id: 3}, {Id: 4}}
+	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}, {id: 3}, {id: 4}}
+	conf.General.ParallelQueryNodeLimit = 3
 	for range b.N {
-		getQueryNodes(nodes, 3, "test_index")
+		getQueryNodes(nodes, "test_index")
 	}
 }

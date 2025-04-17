@@ -30,12 +30,12 @@ type AssignMap struct {
 
 type NodeMap struct {
 	mp       map[int]string
-	nodeList []string
+	nodeList []nodeInfo
 	mutex    sync.RWMutex
 }
 
 type nodeInfo struct {
-	Id   int
+	id   int
 	addr string
 }
 
@@ -65,10 +65,7 @@ func syncClusterInfo() {
 		if err != nil {
 			log.Err(err).Msg("failed to sync cluster info: ")
 			log.Info().Msg("clearing cluster map")
-			updateUrl(nil)
-			assignMap.mutex.Lock()
-			assignMap.mp = make(map[string]int)
-			assignMap.mutex.Unlock()
+			updateClusterInfo(nil)
 		}
 
 		time.Sleep(time.Minute)
@@ -80,7 +77,7 @@ func syncCluster() error {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init proxy")
 	}
-	updateUrl(infos)
+	updateClusterInfo(infos)
 
 	assigns, err := cluster.ListAssigns(closer.Ctx())
 	if err != nil {
@@ -133,9 +130,9 @@ func syncCluster() error {
 			log.Debug().Msgf("update nodes")
 
 			if event.ItemUpdated {
-				updateUrl(event.Info)
+				updateClusterInfo(event.Info)
 			} else {
-				updateUrl(nil)
+				updateClusterInfo(nil)
 				log.Warn().Msg("cluster node was removed")
 			}
 		}
@@ -166,17 +163,13 @@ func GetAddrByIndex(indexName string) (string, error) {
 func GetNodeList() []nodeInfo {
 	nodeMap.mutex.RLock()
 	defer nodeMap.mutex.RUnlock()
-	res := make([]nodeInfo, 0, len(nodeMap.mp))
-
-	for id, addr := range nodeMap.mp {
+	res := make([]nodeInfo, 0, len(nodeMap.nodeList))
+	for _, item := range nodeMap.nodeList {
 		res = append(res, nodeInfo{
-			Id:   id,
-			addr: addr,
+			id:   item.id,
+			addr: item.addr,
 		})
 	}
-	sort.Slice(res, func(i, j int) bool {
-		return res[i].Id < res[j].Id
-	})
 	return res
 }
 
@@ -192,15 +185,21 @@ func getAssignNodeByIndex(indexName string) (int, bool) {
 	return id, ok
 }
 
-func updateUrl(infos []cluster.NodeInfo) {
+func updateClusterInfo(infos []cluster.NodeInfo) {
 	nodeMap.mutex.Lock()
 	defer nodeMap.mutex.Unlock()
 
 	nodeMap.mp = make(map[int]string)
-	nodeMap.nodeList = make([]string, len(infos))
+	nodeMap.nodeList = make([]nodeInfo, len(infos))
 
 	for i, info := range infos {
 		nodeMap.mp[info.NodeId] = info.Address
-		nodeMap.nodeList[i] = info.Address
+		nodeMap.nodeList[i] = nodeInfo{
+			id:   info.NodeId,
+			addr: info.Address,
+		}
 	}
+	sort.Slice(nodeMap.nodeList, func(i, j int) bool {
+		return nodeMap.nodeList[i].id < nodeMap.nodeList[j].id
+	})
 }
