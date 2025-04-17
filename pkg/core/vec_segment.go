@@ -105,7 +105,7 @@ func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
 			// The snapshots listed by the reader may have expired and been cleaned up at this time.
 			// In this case, we should try to get the latest snapshot again.
 			if strings.Contains(err.Error(), "unable to find a usable snapshot") {
-				log.Warn().Msgf("failed to open reader for %s: %v retrying", s.getName(), err)
+				log.Warn().Msgf("failed to open reader for %s: %v, retrying", s.getName(), err)
 				time.Sleep(time.Duration(zutils.RandInt(100, 300)) * time.Millisecond)
 				continue
 			}

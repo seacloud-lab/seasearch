@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -104,6 +105,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 	if len(nodeList) == 0 {
 		return nodeIndexMap, nil
 	}
+
 	for _, index := range indexes {
 		indexMeta, err := metadata.Index.Get(index)
 		if err != nil {
@@ -118,7 +120,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			secondShardList = append(secondShardList, shard.Shards...)
 		}
 
-		if indexMeta.ShardNum != 1 || len(secondShardList) < conf.General.IndexParallelQueryThreshold {
+		if indexMeta.ShardNum != 1 || len(secondShardList) < conf.General.ParallelQueryThreshold {
 			// the node will process the full index search.
 			addr, err := GetAddrByIndex(index)
 			if err != nil {
@@ -131,10 +133,12 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			}
 			continue
 		}
-
+		nodes, err := getQueryNodes(nodeList, index)
+		if err != nil {
+			return nil, err
+		}
 		for _, secondShard := range secondShardList {
-			remainder := int(secondShard.ID) % len(nodeList)
-			addr := nodeList[remainder].addr
+			addr := nodes.Next().addr
 			if partialIndexes, ok := nodeIndexMap[addr]; ok {
 				partialIndexes.AddSecondShardId(index, int(secondShard.ID))
 			} else {
@@ -143,6 +147,50 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 		}
 	}
 	return nodeIndexMap, nil
+}
+
+type queryNodes struct {
+	addrs []nodeInfo
+	cur   int
+}
+
+func (t *queryNodes) Next() nodeInfo {
+	res := t.addrs[t.cur]
+	if t.cur+1 == len(t.addrs) {
+		t.cur = 0
+	} else {
+		t.cur++
+	}
+	return res
+}
+
+// getQueryNodes return a circular linked list for query nodes.
+// The caller should traverses the list and assigns the request to the current node
+func getQueryNodes(nodeList []nodeInfo, indexName string) (queryNodes, error) {
+	nodeNum := min(len(nodeList), conf.General.ParallelQueryNodeLimit)
+
+	var res = queryNodes{}
+	nodeId, ok := getAssignNodeByIndex(indexName)
+	if !ok {
+		return queryNodes{}, fmt.Errorf("cannot find assign node for %s", indexName)
+	}
+	var i int
+	for idx, n := range nodeList {
+		if n.id == nodeId {
+			i = idx
+			break
+		}
+	}
+	for range nodeNum {
+		res.addrs = append(res.addrs, nodeList[i])
+		if i+1 == len(nodeList) {
+			i = 0
+		} else {
+			i++
+		}
+	}
+
+	return res, nil
 }
 
 func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
