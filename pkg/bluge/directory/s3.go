@@ -1,7 +1,6 @@
 package directory
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -204,69 +203,20 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 	fipath := path.Join(b.path, key)
 	backendKey := path.Join(b.prefix, key)
 
-	errCh1 := make(chan error, 1)
-	errCh2 := make(chan error, 1)
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-
-	go func(ch chan error) {
-		defer wg.Done()
-		buffer := bytes.Buffer{}
-		_, err := w.WriteTo(&buffer, closeCh)
-		if err != nil {
-			ch <- err
-			return
-		}
-		err = b.Client.Write(context.Background(), backendKey, &buffer, &objclient.WriteOptions{
-			Size: int64(buffer.Len()),
-		})
-		if err != nil {
-			ch <- err
-			return
-		}
-		close(ch)
-	}(errCh1)
-
-	go func(ch chan error) {
-		defer wg.Done()
-
-		var err error
-		writer, err := b.cache.OpenWriter(fipath)
-		if err != nil {
-			ch <- fmt.Errorf("open writer error: %w", err)
-			return
-		}
-
-		_, err = w.WriteTo(writer, closeCh)
-		if err != nil {
-			ch <- fmt.Errorf("write to file error: %w", err)
-			_ = writer.Close()
-			return
-		}
-
-		err = writer.Close()
-		if err != nil {
-			ch <- fmt.Errorf("close file error: %w", err)
-			return
-		}
-		close(ch)
-	}(errCh2)
-
-	wg.Wait()
-
-	err1, ok := <-errCh1
-	if ok {
-		log.Error().Err(err1).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
+	cacheF, err := b.cache.OpenWriter(fipath)
+	if err != nil {
+		return fmt.Errorf("open cache writer error: %w", err)
 	}
-
-	err2, ok := <-errCh2
-	if ok {
-		log.Error().Err(err2).Msgf("Persist index %s error: persist to fs cache err: ", b.prefix)
-	}
-
-	if err1 != nil {
+	defer cacheF.Close()
+	n, err := w.WriteTo(cacheF, closeCh)
+	if err != nil {
 		_ = b.cache.Remove(fipath)
-		return err1
+		return err
+	}
+	err = b.Client.Write(context.Background(), backendKey, cacheF, &objclient.WriteOptions{Size: n})
+	if err != nil {
+		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
+		return err
 	}
 	return nil
 }
