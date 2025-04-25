@@ -516,6 +516,10 @@ func (t *tempWriteFile) Read(p []byte) (n int, err error) {
 	return t.f.Read(p)
 }
 
+func (t *tempWriteFile) Seek(offset int64, whence int) (ret int64, err error) {
+	return t.f.Seek(offset, whence)
+}
+
 func (t *tempWriteFile) Close() error {
 	_ = t.cf.Close()
 	// delete old cache

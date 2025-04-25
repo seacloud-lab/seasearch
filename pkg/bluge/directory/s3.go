@@ -208,11 +208,18 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 		return fmt.Errorf("open cache writer error: %w", err)
 	}
 	defer cacheF.Close()
-	n, err := w.WriteTo(cacheF, closeCh)
+	_, err = w.WriteTo(cacheF, closeCh)
 	if err != nil {
 		_ = b.cache.Remove(fipath)
 		return err
 	}
+	seeker, _ := cacheF.(io.Seeker)
+	seeker.Seek(0, io.SeekStart)
+	// The return value of WriteTo is not accurate.
+	// So we calculate the real bytes size.
+	n, _ := io.Copy(io.Discard, cacheF)
+	seeker.Seek(0, io.SeekStart)
+
 	err = b.Client.Write(context.Background(), backendKey, cacheF, &objclient.WriteOptions{Size: n})
 	if err != nil {
 		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
