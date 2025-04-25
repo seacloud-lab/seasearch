@@ -200,12 +200,11 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 		_ = b.cache.Remove(fipath)
 		return err
 	}
-	seeker, _ := cacheF.(io.Seeker)
-	seeker.Seek(0, io.SeekStart)
+	stat, _ := cacheF.Stat()
 	// The return value of WriteTo is not accurate.
-	// So we calculate the real bytes size.
-	n, _ := io.Copy(io.Discard, cacheF)
-	seeker.Seek(0, io.SeekStart)
+	// So we need to get the real bytes size.
+	n := stat.Size()
+	cacheF.Seek(0, io.SeekStart)
 
 	err = b.Client.Write(context.Background(), backendKey, cacheF, &objclient.WriteOptions{Size: n})
 	if err != nil {
