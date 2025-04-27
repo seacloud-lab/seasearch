@@ -404,13 +404,7 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 	return c.removeParentIfEmpty(dirPath)
 }
 
-type TempFileForPersist interface {
-	io.ReadWriteCloser
-	io.Seeker
-	fs.File
-}
-
-func (c *LruCache) OpenWriter(filePath string) (TempFileForPersist, error) {
+func (c *LruCache) OpenWriter(filePath string) (*tempWriteFile, error) {
 	err := c.makeRoomForCacheFile()
 	if err != nil {
 		return nil, fmt.Errorf("lru clean cache err: %w", err)
