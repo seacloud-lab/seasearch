@@ -404,7 +404,7 @@ func (c *LruCache) removeParentIfEmpty(p string) error {
 	return c.removeParentIfEmpty(dirPath)
 }
 
-func (c *LruCache) OpenWriter(filePath string) (io.ReadWriteCloser, error) {
+func (c *LruCache) OpenWriter(filePath string) (*tempWriteFile, error) {
 	err := c.makeRoomForCacheFile()
 	if err != nil {
 		return nil, fmt.Errorf("lru clean cache err: %w", err)
@@ -514,6 +514,14 @@ func (t *tempWriteFile) Write(p []byte) (n int, err error) {
 }
 func (t *tempWriteFile) Read(p []byte) (n int, err error) {
 	return t.f.Read(p)
+}
+
+func (t *tempWriteFile) Seek(offset int64, whence int) (ret int64, err error) {
+	return t.f.Seek(offset, whence)
+}
+
+func (t *tempWriteFile) Stat() (os.FileInfo, error) {
+	return t.f.Stat()
 }
 
 func (t *tempWriteFile) Close() error {
