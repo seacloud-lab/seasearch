@@ -195,6 +195,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 	if err != nil {
 		return fmt.Errorf("open cache writer error: %w", err)
 	}
+	defer cacheF.Close()
 	_, err = w.WriteTo(cacheF, closeCh)
 	if err != nil {
 		_ = b.cache.Remove(fipath)
