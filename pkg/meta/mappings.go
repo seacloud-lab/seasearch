@@ -51,7 +51,7 @@ type Property struct {
 	M                int    `json:"m"`
 	NBits            int    `json:"nbits"`
 	VecIndexType     string `json:"vec_index_type"`
-	StoreWithFloat16 bool   `json:"store_with_float16"` // store with float16, this only applies to flat vector index.
+	StoreWithFloat16 bool   `json:"store_with_float16"` // store with float16, this only applies to stored vectors.
 }
 
 func NewMappings() *Mappings {
