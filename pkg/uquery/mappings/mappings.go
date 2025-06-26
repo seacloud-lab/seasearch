@@ -198,8 +198,6 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				if newProp.Dims%newProp.M != 0 {
 					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
 				}
-				// ivf_pq doesn't need store with float16.
-				newProp.StoreWithFloat16 = false
 			}
 			if newProp.VecIndexType != vector.Flat && newProp.VecIndexType != vector.IvfPQ {
 				return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s vec_index_type parse err invalid vec type", field))
