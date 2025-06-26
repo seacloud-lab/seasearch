@@ -17,8 +17,9 @@ package mappings
 
 import (
 	"fmt"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"strings"
+
+	"github.com/zincsearch/zincsearch/pkg/core/vector"
 
 	"github.com/blugelabs/bluge/analysis"
 
@@ -163,6 +164,12 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				}
 			case "vec_index_type":
 				newProp.VecIndexType = v.(string)
+			case "store_with_float16":
+				var err error
+				newProp.StoreWithFloat16, err = zutils.ToBool(v)
+				if err != nil {
+					return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s store_with_float16 parse err %s", field, err.Error()))
+				}
 			default:
 				// ignore unknown options
 				// return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] properties [%s] unknown option [%s]", field, k))

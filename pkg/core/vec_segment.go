@@ -228,7 +228,13 @@ func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 	batch := bluge.NewBatch()
 	for i, vec := range vectors {
 		doc := bluge.NewDocument(base62.Encode(ids[i]))
-		doc.AddField(bluge.NewStoredOnlyField(internalVecField, zutils.VectorToBytes(vec)))
+		var bts []byte
+		if s.baseIndex.UseFloat16() {
+			bts = zutils.VectorToFloat16Bytes(vec)
+		} else {
+			bts = zutils.VectorToBytes(vec)
+		}
+		doc.AddField(bluge.NewStoredOnlyField(internalVecField, bts))
 		batch.Insert(doc)
 	}
 	writer, err := s.openVecStoreWriter()
@@ -634,7 +640,11 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 				return vec == nil
 			}
 			if f == internalVecField {
-				vec = zutils.BytesToVector(value)
+				if s.baseIndex.UseFloat16() {
+					vec = zutils.Float16BytesToVector(value)
+				} else {
+					vec = zutils.BytesToVector(value)
+				}
 				return id == ""
 			}
 			return true
