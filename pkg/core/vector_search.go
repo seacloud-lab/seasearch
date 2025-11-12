@@ -136,7 +136,7 @@ func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, results []vectorR
 type InternalVectorQuery struct {
 	Index      string    `json:"index"`
 	QueryField string    `json:"query_field"`
-	K          int64     `json:"k"`
+	K          int       `json:"k"`
 	Vector     []float32 `json:"vector"`
 	Nprobe     int       `json:"nprobe"`
 	Segments   []int     `json:"segments"`
@@ -165,7 +165,7 @@ func InternalVectorSearch(q *InternalVectorQuery) (*InternalVectorSearchResponse
 	}
 
 	var vecResult map[string]float32
-	vecResult, err = vecIndex.PartialSearch(q.Vector, q.K, q.Nprobe, q.Segments)
+	vecResult, err = vecIndex.PartialSearch(q.Vector, int64(q.K), q.Nprobe, q.Segments)
 	if err != nil {
 		return nil, err
 	}
