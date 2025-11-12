@@ -1,10 +1,10 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"math"
-	"sort"
+	"slices"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
@@ -18,94 +18,125 @@ type VectorQuery struct {
 	ReturnFields interface{} `json:"return_fields"`
 	QueryField   string      `json:"query_field"`
 	Vector       []float32   `json:"vector"`
-	K            int64       `json:"k"`
+	K            int         `json:"k"`
 	// Nprobe only used for ivf_pq index
 	Nprobe int         `json:"nprobe"`
 	Source interface{} `json:"_source"`
 }
 
-func VectorSearch(zincIndex *Index, mappings *meta.Mappings, q *VectorQuery) (*meta.SearchResponse, error) {
-	vecIndex, err := GetVectorIndex(zincIndex.GetName(), q.QueryField, false)
-	if err != nil {
-		if errors.Is(err, ErrVecIndexNotExists) {
-			return &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}, nil
+type vectorResult struct {
+	docID    string
+	distance float32
+}
+
+func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error) {
+	var results []vectorResult
+	for _, index := range indexes {
+		result, err := searchVector(index, q)
+		if err != nil {
+			return nil, err
 		}
+		results = append(results, result...)
+	}
+	if len(results) == 0 {
+		return &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}, nil
+	}
+
+	slices.SortFunc(results, func(a, b vectorResult) int {
+		return cmp.Compare(a.distance, b.distance)
+	})
+	if len(results) > q.K {
+		results = results[:q.K]
+	}
+
+	return retrieveVectorDocuments(indexes, q, results)
+}
+
+func searchVector(index *Index, q *VectorQuery) ([]vectorResult, error) {
+	vecIndex, err := GetVectorIndex(index.GetName(), q.QueryField, false)
+	if errors.Is(err, ErrVecIndexNotExists) {
+		return nil, nil
+	} else if err != nil {
 		return nil, err
 	}
-	defer func() {
-		CloseVectorIndex(vecIndex, false)
-	}()
+	defer CloseVectorIndex(vecIndex, false)
 
 	if vecIndex.Meta().Dims != len(q.Vector) {
 		return nil, fmt.Errorf("invalid query vector, the vector dims should be %d", vecIndex.Meta().Dims)
 	}
-
-	vecResult, err := vecIndex.Search(q.Vector, q.K, q.Nprobe)
-
+	result, err := vecIndex.Search(q.Vector, int64(q.K), q.Nprobe)
 	if err != nil {
 		return nil, err
 	}
-	if len(vecResult) == 0 {
-		return &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}, nil
+	var results []vectorResult
+	for k, v := range result {
+		results = append(results, vectorResult{docID: k, distance: v})
 	}
 
-	docIdSlice := make([]string, len(vecResult))
-	i := 0
-	for docId := range vecResult {
-		docIdSlice[i] = docId
-		i++
-	}
+	return results, nil
+}
 
-	searchers := zincIndex.GetSearchers(0, 0)
-	// query document by Id
+func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, results []vectorResult) (*meta.SearchResponse, error) {
+	var (
+		docIDs    []string
+		err       error
+		searchers []*SimpleSearcher
+	)
+	for _, result := range results {
+		docIDs = append(docIDs, result.docID)
+	}
 	query := &meta.ZincQuery{
 		Query: &meta.Query{
 			Ids: &meta.IdsQuery{
-				Values: docIdSlice,
+				Values: docIDs,
 			},
 		},
-		Size: len(docIdSlice),
+		Size: len(docIDs),
 	}
 	query.Source, err = source.Request(q.Source)
 	if err != nil {
 		return nil, err
 	}
 	if q.ReturnFields != nil {
-		if v, ok := q.ReturnFields.([]interface{}); ok {
+		if v, ok := q.ReturnFields.([]any); ok {
 			if query.Fields, err = fields.Request(v); err != nil {
 				return nil, err
 			}
 		}
 	}
-	resp, err := zincsearch.MultiSearch(context.Background(), query, mappings, nil, simpleSearchersToSearcher(searchers)...)
+	for _, index := range indexes {
+		searchers = append(searchers, index.GetSearchers(0, 0)...)
+	}
+	resp, err := zincsearch.MultiSearch(context.Background(), query, indexes[0].GetMappings(), nil, simpleSearchersToSearcher(searchers)...)
 	if err != nil {
 		return nil, err
 	}
-	// set score by distance
-	var maxScore float64 = 0
-	for i := range resp.Hits.Hits {
-		h1d, ok := vecResult[resp.Hits.Hits[i].ID]
-		if !ok {
-			// that's impassable
-			resp.Hits.Hits[i].Score = 0
+
+	for i, hit := range resp.Hits.Hits {
+		j := slices.IndexFunc(results, func(result vectorResult) bool {
+			return result.docID == hit.ID
+		})
+		if j < 0 {
+			resp.Hits.Hits[i].Score = float64(0)
 			continue
 		}
-		score := float64(1 / (1 + h1d))
+		score := float64(1 / (1 + results[j].distance))
 		resp.Hits.Hits[i].Score = score
-		maxScore = math.Max(maxScore, score)
+		if score > resp.Hits.MaxScore {
+			resp.Hits.MaxScore = score
+		}
 	}
-	// sort by score
-	sort.Slice(resp.Hits.Hits, func(i, j int) bool {
-		return resp.Hits.Hits[i].Score > resp.Hits.Hits[j].Score
+	slices.SortFunc(resp.Hits.Hits, func(a, b meta.Hit) int {
+		return -cmp.Compare(a.Score, b.Score)
 	})
-	resp.Hits.MaxScore = maxScore
+
 	return resp, nil
 }
 
 type InternalVectorQuery struct {
 	Index      string    `json:"index"`
 	QueryField string    `json:"query_field"`
-	K          int64     `json:"k"`
+	K          int       `json:"k"`
 	Vector     []float32 `json:"vector"`
 	Nprobe     int       `json:"nprobe"`
 	Segments   []int     `json:"segments"`
@@ -134,7 +165,7 @@ func InternalVectorSearch(q *InternalVectorQuery) (*InternalVectorSearchResponse
 	}
 
 	var vecResult map[string]float32
-	vecResult, err = vecIndex.PartialSearch(q.Vector, q.K, q.Nprobe, q.Segments)
+	vecResult, err = vecIndex.PartialSearch(q.Vector, int64(q.K), q.Nprobe, q.Segments)
 	if err != nil {
 		return nil, err
 	}
