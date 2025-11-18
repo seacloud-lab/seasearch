@@ -103,9 +103,8 @@ func (index *Index) CreateDocument(docID string, doc map[string]interface{}, upd
 		}
 	}
 	// When creating a new document in a vector index, the document ID must be
-	// a valid base62 string.
-	// if !update && len(index.GetVecIndexes()) > 0 {
-	if len(index.GetVecIndexes()) > 0 {
+	// a valid base62 integer.
+	if !update && len(index.GetVecIndexes()) > 0 {
 		if base62.Encode(base62.Decode(docID)) != docID {
 			return fmt.Errorf("document ID (%v) is not a valid base62 string", docID)
 		}
@@ -150,7 +149,7 @@ func (index *Index) CreateDocuments(ops []DocOperation) error {
 			}
 		}
 		// When creating a new document in a vector index, the document ID must
-		// be a valid base62 string.
+		// be a valid base62 integer.
 		if !op.Update && len(index.GetVecIndexes()) > 0 {
 			if base62.Encode(base62.Decode(op.DocId)) != op.DocId {
 				return fmt.Errorf("document ID (%v) is not a valid base62 string", op.DocId)
