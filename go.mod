@@ -20,6 +20,7 @@ require (
 	github.com/go-ego/gse v0.80.2
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/goccy/go-json v0.10.3
+	github.com/google/btree v1.1.3
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/haiwen/goutils v0.1.2
 	github.com/joho/godotenv v1.4.0
