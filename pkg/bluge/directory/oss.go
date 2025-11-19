@@ -96,6 +96,8 @@ func RemoveOssIndex(indexName string) error {
 			return err
 		}
 	}
+	// remove object key cache
+	objectKeys.Remove(indexName)
 	// remove obj storage
 	for _, obj := range objs {
 		err = o.Remove(context.Background(), obj.Key)
@@ -124,14 +126,14 @@ func OssExists(indexName string) (bool, error) {
 func (b *OssBackend) Setup(readOnly bool) error {
 	if readOnly {
 		// read only, check if there are any objects here.
-		list, err := b.Client.List(context.Background(), b.prefix)
+		keys, err := objectKeys.List(context.Background(), b.Client, b.prefix)
 		if err != nil {
 			log.Error().Err(err).Msgf("Setup index %s err: ", b.prefix)
 			return fmt.Errorf("setup backend err: %w", err)
 		}
 		// there are not any objects, that's a brand new index,
 		// so it cannot be opened with readOnly = true
-		if len(list) <= 0 {
+		if len(keys) == 0 {
 			return ErrPathNotExists
 		}
 	}
@@ -140,18 +142,18 @@ func (b *OssBackend) Setup(readOnly bool) error {
 }
 
 func (b *OssBackend) List(kind string) ([]uint64, error) {
-	list, err := b.Client.List(context.Background(), b.prefix)
+	keys, err := objectKeys.List(context.Background(), b.Client, b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, err
 	}
 	var itemList uint64Slice
 
-	for _, item := range list {
-		if filepath.Ext(item.Key) != kind {
+	for _, key := range keys {
+		if filepath.Ext(key) != kind {
 			continue
 		}
-		stringID := filepath.Base(item.Key)
+		stringID := filepath.Base(key)
 		stringID = stringID[:len(stringID)-len(kind)]
 		parsedID, err := strconv.ParseUint(stringID, 16, 64)
 		if err != nil {
@@ -212,6 +214,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 		return err
 	}
+	objectKeys.Insert(backendKey)
 	return nil
 }
 
@@ -221,6 +224,8 @@ func (b *OssBackend) Remove(kind string, id uint64) error {
 	if err != nil {
 		return err
 	}
+
+	objectKeys.Remove(path.Join(b.prefix, key))
 
 	err = b.Client.Remove(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
