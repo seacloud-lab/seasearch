@@ -28,6 +28,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
@@ -101,6 +102,16 @@ func (index *Index) CreateDocument(docID string, doc map[string]interface{}, upd
 			}
 		}
 	}
+	// When creating a new document in a vector index, the document ID must be
+	// a valid, canonical base62-encoded integer.
+	if len(index.GetVecIndexes()) > 0 {
+		// Decode + re-encode docID; if the result differs, docID is not a
+		// valid canonical base62 representation (invalid chars, wrong case,
+		// leading zeros, etc.).
+		if base62.Encode(base62.Decode(docID)) != docID {
+			return fmt.Errorf("document ID (%v) is not a valid base62 string", docID)
+		}
+	}
 	if config.Global.EnableWal {
 		// check WAL
 		if err := shard.OpenWAL(); err != nil {
@@ -138,6 +149,16 @@ func (index *Index) CreateDocuments(ops []DocOperation) error {
 				} else {
 					return err
 				}
+			}
+		}
+		// When creating a new document in a vector index, the document ID must
+		// be a valid, canonical base62-encoded integer.
+		if len(index.GetVecIndexes()) > 0 {
+			// Decode + re-encode docID; if the result differs, docID is not a
+			// valid canonical base62 representation (invalid chars, wrong
+			// case, leading zeros, etc.).
+			if base62.Encode(base62.Decode(op.DocId)) != op.DocId {
+				return fmt.Errorf("document ID (%v) is not a valid base62 string", op.DocId)
 			}
 		}
 		doc, err := shard.CheckDocumentOperation(op.DocId, op.Doc, op.Update, secondShardID)
