@@ -121,12 +121,6 @@ func SetRoutes(r *gin.Engine) {
 	// search
 	r.POST("/api/:target/_search", AuthMiddleware("search.SearchV1"), ClusterMiddleware, search.SearchV1)
 
-	r.POST("/api/:target/_search/vector", AuthMiddleware("search.SearchVector"), ClusterMiddleware, search.SearchVector)
-
-	r.POST("/api/:target/:field/_seal", AuthMiddleware("search.Seal"), ClusterMiddleware, index.SealVectorIndex)
-
-	// vector recall
-	r.POST("/api/:target/_recall", AuthMiddleware("search.vectorRecall"), ClusterMiddleware, search.VectorRecall)
 	// document
 	// Document Bulk update/insert
 	r.POST("/api/_bulk", AuthMiddleware("document.Bulk"), document.Bulk)
@@ -207,4 +201,9 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/es/:target/_create/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate) // create
 	r.POST("/es/:target/_update/:id", AuthMiddleware("document.Update"), ESMiddleware, ClusterMiddleware, document.Update)             // update part of document
 	r.DELETE("/es/:target/_doc/:id", AuthMiddleware("document.Delete"), ESMiddleware, ClusterMiddleware, document.Delete)              // delete
+
+	// vector search related apis
+	r.POST("/api/:target/_search/vector", AuthMiddleware("search.SearchVector"), ClusterMiddleware, search.SearchVector)
+	r.POST("/api/:target/:field/_seal", AuthMiddleware("search.Seal"), ClusterMiddleware, index.SealVectorIndex)
+	r.POST("/api/:target/_recall", AuthMiddleware("search.vectorRecall"), ClusterMiddleware, search.VectorRecall)
 }
