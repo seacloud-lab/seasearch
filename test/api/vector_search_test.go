@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -16,34 +17,54 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
-var vecIndexName = "paper"
+var (
+	vecIndexName1 = "paper"
+	vecIndexName2 = "paper2"
 
-var vecIndexMeta = `
-{
-	"name":"paper",
-	"mappings":{
-		"properties":{
-			"title-vec":{
-				"type":"vector",
-				"dims": 4, 
-				"vec_index_type":"flat"
-			},
-			"paper-id":{
-				"type":"keyword"
+	vecIndexMeta1 = `
+		{
+			"name":"paper",
+			"mappings":{
+				"properties":{
+					"title-vec":{
+						"type":"vector",
+						"dims": 4,
+						"vec_index_type":"flat"
+					},
+					"paper-id":{
+						"type":"keyword"
+					}
+				}
 			}
-		}
-	}
-}
-`
+		}`
+	vecIndexMeta2 = `
+		{
+			"name":"paper2",
+			"mappings":{
+				"properties":{
+					"title-vec":{
+						"type":"vector",
+						"dims": 4,
+						"vec_index_type":"flat"
+					},
+					"paper-id":{
+						"type":"keyword"
+					}
+				}
+			}
+		}`
+)
 
-var documents = `{ "index" : {"_index" : "paper" } } 
+var documents = `{ "index" : {"_index" : "paper" } }
 {"paper-id": "001","title-vec":[10.2,10.40,9.5,22.2]}
-{ "index" : {"_index" : "paper" } } 
+{ "index" : {"_index" : "paper" } }
 {"paper-id": "002","title-vec":[10.2,11.40,9.5,22.2]}
-{ "index" : {"_index" : "paper" } } 
+{ "index" : {"_index" : "paper" } }
 {"paper-id": "003","title-vec":[10.2,12.40,9.5,22.2]}
 { "index" : {"_index" : "paper" } }
 {"paper-id": "004","title-vec":[10.2,10.39,9.5,22.2]}
+{ "index" : {"_index" : "paper2" } }
+{"paper-id": "005","title-vec":[10.2,10.37,9.5,22.2]}
 `
 
 var searchParam = `
@@ -156,8 +177,12 @@ func TestVectorSearch(t *testing.T) {
 
 	t.Run("init metaData for vectorSearch", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
-		body.WriteString(vecIndexMeta)
-		resp := request("PUT", "/api/index/"+vecIndexName, body)
+		body.WriteString(vecIndexMeta1)
+		resp := request("PUT", "/api/index/"+vecIndexName1, body)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		body.Reset()
+		body.WriteString(vecIndexMeta2)
+		resp = request("PUT", "/api/index/"+vecIndexName2, body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
@@ -171,7 +196,7 @@ func TestVectorSearch(t *testing.T) {
 	t.Run("search for document", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(deleteByQuery)
-		resp := request("POST", "/es/"+vecIndexName+"/_search", body)
+		resp := request("POST", "/es/"+vecIndexName1+"/_search", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}
 		b := resp.Body.Bytes()
@@ -182,7 +207,7 @@ func TestVectorSearch(t *testing.T) {
 	t.Run("search for vector", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(searchParam)
-		resp := request("POST", "/api/"+vecIndexName+"/_search/vector", body)
+		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}
 		b := resp.Body.Bytes()
@@ -196,20 +221,43 @@ func TestVectorSearch(t *testing.T) {
 			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
 		}
+	})
 
+	t.Run("search multi-vector", func(t *testing.T) {
+		uri := fmt.Sprintf("/api/%v,%v/_search/vector", vecIndexName1, vecIndexName2)
+		body := bytes.NewBuffer(nil)
+		body.WriteString(searchParam)
+		resp := request("POST", uri, body)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var result = &meta.SearchResponse{}
+		b := resp.Body.Bytes()
+		_ = json.Unmarshal(b, &result)
+		var ids []string
+		for _, hit := range result.Hits.Hits {
+			v, ok := hit.Fields["paper-id"].([]any)
+			if !ok || len(v) != 1 {
+				continue
+			}
+			id, ok := v[0].(string)
+			if !ok {
+				continue
+			}
+			ids = append(ids, id)
+		}
+		assert.Equal(t, ids, []string{"004", "001", "005"})
 	})
 
 	t.Run("delete by query", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(deleteByQuery)
-		resp := request("POST", "/es/"+vecIndexName+"/_delete_by_query", body)
+		resp := request("POST", "/es/"+vecIndexName1+"/_delete_by_query", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
 	t.Run("search for vector", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
 		body.WriteString(searchParam)
-		resp := request("POST", "/api/"+vecIndexName+"/_search/vector", body)
+		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}
 		b := resp.Body.Bytes()
@@ -230,7 +278,13 @@ func TestVectorSearch(t *testing.T) {
 
 	t.Run("delete Index", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
-		resp := request("DELETE", "/api/index/"+vecIndexName, body)
+		resp := request("DELETE", "/api/index/"+vecIndexName1, body)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		if resp.Code != http.StatusOK {
+			bd, _ := io.ReadAll(resp.Body)
+			t.Error(string(bd))
+		}
+		resp = request("DELETE", "/api/index/"+vecIndexName2, body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		if resp.Code != http.StatusOK {
 			bd, _ := io.ReadAll(resp.Body)
@@ -244,13 +298,13 @@ func checkExists(t *testing.T) {
 	var exists bool
 	var err error
 	if config.Global.StorageType == "oss" {
-		exists, err = directory.OssExists(vecIndexName)
+		exists, err = directory.OssExists(vecIndexName1)
 	} else if config.Global.StorageType == "s3" {
-		exists, err = directory.S3Exists(vecIndexName)
+		exists, err = directory.S3Exists(vecIndexName1)
 	}
 	assert.Nil(t, err)
 	assert.False(t, exists)
-	_, err = os.Stat(path.Join(config.Global.DataPath, vecIndexName))
+	_, err = os.Stat(path.Join(config.Global.DataPath, vecIndexName1))
 	exists = os.IsExist(err)
 	assert.False(t, exists)
 }
