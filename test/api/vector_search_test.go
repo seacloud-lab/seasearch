@@ -67,13 +67,26 @@ var documents = `{ "index" : {"_index" : "paper" } }
 {"paper-id": "005","title-vec":[10.2,10.37,9.5,22.2]}
 `
 
-var searchParam = `
+var searchParam1 = `
 {
     "query_field":"title-vec",
     "k":3,
     "return_fields":["paper-id"],
     "vector":[10.2,10.39,9.5,22.2],
     "_source": ["paper-id"]
+}
+`
+
+var searchParam2 = `
+{
+    "query_field":"title-vec",
+    "k":3,
+    "return_fields":["paper-id"],
+    "vector":[10.2,10.39,9.5,22.2],
+    "_source": ["paper-id"],
+	"query": {
+		"match_all": {}
+	}
 }
 `
 
@@ -206,7 +219,26 @@ func TestVectorSearch(t *testing.T) {
 
 	t.Run("search for vector", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam)
+		body.WriteString(searchParam1)
+		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var result = &meta.SearchResponse{}
+		b := resp.Body.Bytes()
+		_ = json.Unmarshal(b, &result)
+		var vecResult = &meta.SearchResponse{}
+		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
+		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
+		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
+		for i := 0; i < len(vecResult.Hits.Hits); i++ {
+			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
+			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
+			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
+		}
+	})
+
+	t.Run("search for vector with query", func(t *testing.T) {
+		body := bytes.NewBuffer(nil)
+		body.WriteString(searchParam2)
 		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}
@@ -226,7 +258,7 @@ func TestVectorSearch(t *testing.T) {
 	t.Run("search multi-vector", func(t *testing.T) {
 		uri := fmt.Sprintf("/api/%v,%v/_search/vector", vecIndexName1, vecIndexName2)
 		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam)
+		body.WriteString(searchParam1)
 		resp := request("POST", uri, body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}
@@ -256,7 +288,7 @@ func TestVectorSearch(t *testing.T) {
 
 	t.Run("search for vector", func(t *testing.T) {
 		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam)
+		body.WriteString(searchParam1)
 		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
 		assert.Equal(t, http.StatusOK, resp.Code)
 		var result = &meta.SearchResponse{}

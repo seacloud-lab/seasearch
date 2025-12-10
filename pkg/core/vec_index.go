@@ -1,9 +1,11 @@
 package core
 
 import (
+	"cmp"
 	"container/heap"
 	"fmt"
 	"path"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +23,7 @@ import (
 type VectorIndex interface {
 	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
 	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
+	SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error)
 	// PartialSearch is used for parallel search. The proxy assigns specific segments to each node,
 	// and the local node performs the search based on the assigned segment IDs.
 	PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error)
@@ -36,6 +39,11 @@ type VectorIndex interface {
 	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
 	ListSegment() []*VecSegment
+}
+
+type DocDistance struct {
+	DocID    string
+	Distance float32
 }
 
 type baseIndex struct {
@@ -183,8 +191,15 @@ func (f *FlatIndex) Search(vec []float32, k int64, _ int) (map[string]float32, e
 	if err != nil {
 		return nil, err
 	}
-
 	return f.seg.Search(vec, k, 0)
+}
+
+func (f *FlatIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
+	err := f.loadSegment()
+	if err != nil {
+		return nil, err
+	}
+	return f.seg.SearchByIDs(vec, k, docIDs)
 }
 
 func (f *FlatIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
@@ -475,6 +490,30 @@ func (v *IvfPqIndex) Search(vec []float32, k int64, nprobe int) (map[string]floa
 		return nil, err
 	}
 	return searchSegments(vec, segs, k, nprobe)
+}
+
+func (v *IvfPqIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
+	v.lock.Lock()
+	segs, err := v.copySegments()
+	v.lock.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	var distances []DocDistance
+	for _, seg := range segs {
+		result, err := seg.SearchByIDs(vec, k, docIDs)
+		if err != nil {
+			return nil, err
+		}
+		distances = append(distances, result...)
+	}
+	slices.SortFunc(distances, func(a, b DocDistance) int {
+		return cmp.Compare(a.Distance, b.Distance)
+	})
+	if len(distances) > int(k) {
+		distances = distances[:int(k)]
+	}
+	return distances, nil
 }
 
 func (v *IvfPqIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
