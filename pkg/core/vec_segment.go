@@ -505,7 +505,7 @@ func (s *VecSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]Doc
 		return nil, err
 	}
 	req := bluge.NewAllMatches(zq)
-	vectors, ids, err := s.getVectors(atomic.LoadInt64(&s.ref.Count), req)
+	vectors, ids, err := s.getVectors(-1, req)
 	if err != nil {
 		return nil, err
 	}
@@ -650,8 +650,14 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 		_ = reader.Close()
 	}()
 
-	vectors := make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
-	ids := make([]int64, 0, count)
+	var (
+		vectors []float32
+		ids     []int64
+	)
+	if count > 0 {
+		vectors = make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
+		ids = make([]int64, 0, count)
+	}
 
 	dmi, err := reader.Search(context.Background(), searchReq)
 	if err != nil {

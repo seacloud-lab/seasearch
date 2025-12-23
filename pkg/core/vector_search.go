@@ -23,7 +23,8 @@ type VectorQuery struct {
 	// Nprobe only used for ivf_pq index
 	Nprobe int         `json:"nprobe"`
 	Source interface{} `json:"_source"`
-	Query  interface{} `json:"query"`
+	// FilterQuery contains filter conditions
+	FilterQuery interface{} `json:"query"`
 }
 
 func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error) {
@@ -64,7 +65,7 @@ func searchVector(index *Index, q *VectorQuery) ([]DocDistance, error) {
 	}
 
 	var distances []DocDistance
-	if q.Query == nil {
+	if q.FilterQuery == nil {
 		result, err := vecIndex.Search(q.Vector, int64(q.K), q.Nprobe)
 		if err != nil {
 			return nil, err
@@ -77,46 +78,32 @@ func searchVector(index *Index, q *VectorQuery) ([]DocDistance, error) {
 		return distances, nil
 	}
 
-	var from int
-	for {
-		more := false
+	var docIDs []string
+	zq := &meta.ZincQuery{
+		Query: q.FilterQuery,
+		Sort:  []any{"_id"},
+		Size:  config.Global.MaxResults,
+	}
+	resp, err := index.Search(zq)
+	if err != nil {
+		return nil, err
+	}
+	for _, hit := range resp.Hits.Hits {
+		docIDs = append(docIDs, hit.ID)
+	}
+	if len(docIDs) == 0 {
+		return distances, nil
+	}
 
-		var docIDs []string
-		zq := &meta.ZincQuery{
-			Query: q.Query,
-			Sort:  []any{"_id"},
-			From:  from,
-			Size:  config.Global.MaxResults,
-		}
-		resp, err := index.Search(zq)
-		if err != nil {
-			return nil, err
-		}
-		for _, hit := range resp.Hits.Hits {
-			docIDs = append(docIDs, hit.ID)
-		}
-		if len(docIDs) == 0 {
-			return distances, nil
-		}
-		if len(docIDs) == zq.Size {
-			more = true
-			from += len(docIDs)
-		}
-
-		result, err := vecIndex.SearchByIDs(q.Vector, int64(q.K), docIDs)
-		if err != nil {
-			return nil, err
-		}
-		for _, distance := range result {
-			distances = append(distances, DocDistance{
-				DocID:    distance.DocID,
-				Distance: distance.Distance,
-			})
-		}
-
-		if !more {
-			break
-		}
+	result, err := vecIndex.SearchByIDs(q.Vector, int64(q.K), docIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, distance := range result {
+		distances = append(distances, DocDistance{
+			DocID:    distance.DocID,
+			Distance: distance.Distance,
+		})
 	}
 
 	return distances, nil
