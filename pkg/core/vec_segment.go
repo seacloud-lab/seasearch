@@ -487,7 +487,7 @@ func (s *VecSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string
 
 func L2Distance(slice1, slice2 []float32) (float32, error) {
 	if len(slice1) != len(slice2) {
-		return 0, fmt.Errorf("invliad vectors")
+		return 0, fmt.Errorf("invalid vectors")
 	}
 
 	var sum float32
@@ -497,6 +497,32 @@ func L2Distance(slice1, slice2 []float32) (float32, error) {
 	}
 
 	return sum, nil
+}
+
+func (s *VecSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
+	zq, err := query.TermsQuery(map[string]any{"_id": docIDs}, nil)
+	if err != nil {
+		return nil, err
+	}
+	req := bluge.NewAllMatches(zq)
+	vectors, ids, err := s.getVectors(-1, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var distances []DocDistance
+	for i := range ids {
+		realVector := vectors[i*s.baseIndex.Meta().Dims : (i+1)*s.baseIndex.Meta().Dims]
+		dis, err := L2Distance(vec, realVector)
+		if err != nil {
+			return nil, err
+		}
+		distances = append(distances, DocDistance{
+			DocID:    base62.Encode(ids[i]),
+			Distance: dis,
+		})
+	}
+	return distances, nil
 }
 
 // Seal
@@ -624,8 +650,14 @@ func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]f
 		_ = reader.Close()
 	}()
 
-	vectors := make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
-	ids := make([]int64, 0, count)
+	var (
+		vectors []float32
+		ids     []int64
+	)
+	if count > 0 {
+		vectors = make([]float32, 0, int(count)*s.baseIndex.Meta().Dims)
+		ids = make([]int64, 0, count)
+	}
 
 	dmi, err := reader.Search(context.Background(), searchReq)
 	if err != nil {

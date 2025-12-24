@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -22,37 +23,35 @@ type VectorQuery struct {
 	// Nprobe only used for ivf_pq index
 	Nprobe int         `json:"nprobe"`
 	Source interface{} `json:"_source"`
-}
-
-type vectorResult struct {
-	docID    string
-	distance float32
+	// FilterQuery contains filter conditions
+	FilterQuery interface{} `json:"query"`
 }
 
 func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error) {
-	var results []vectorResult
+	var distances []DocDistance
+
 	for _, index := range indexes {
 		result, err := searchVector(index, q)
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, result...)
+		distances = append(distances, result...)
 	}
-	if len(results) == 0 {
+	if len(distances) == 0 {
 		return &meta.SearchResponse{Hits: meta.Hits{Hits: []meta.Hit{}}}, nil
 	}
 
-	slices.SortFunc(results, func(a, b vectorResult) int {
-		return cmp.Compare(a.distance, b.distance)
+	slices.SortFunc(distances, func(a, b DocDistance) int {
+		return cmp.Compare(a.Distance, b.Distance)
 	})
-	if len(results) > q.K {
-		results = results[:q.K]
+	if len(distances) > q.K {
+		distances = distances[:q.K]
 	}
 
-	return retrieveVectorDocuments(indexes, q, results)
+	return retrieveVectorDocuments(indexes, q, distances)
 }
 
-func searchVector(index *Index, q *VectorQuery) ([]vectorResult, error) {
+func searchVector(index *Index, q *VectorQuery) ([]DocDistance, error) {
 	vecIndex, err := GetVectorIndex(index.GetName(), q.QueryField, false)
 	if errors.Is(err, ErrVecIndexNotExists) {
 		return nil, nil
@@ -64,28 +63,62 @@ func searchVector(index *Index, q *VectorQuery) ([]vectorResult, error) {
 	if vecIndex.Meta().Dims != len(q.Vector) {
 		return nil, fmt.Errorf("invalid query vector, the vector dims should be %d", vecIndex.Meta().Dims)
 	}
-	result, err := vecIndex.Search(q.Vector, int64(q.K), q.Nprobe)
+
+	var distances []DocDistance
+	if q.FilterQuery == nil {
+		result, err := vecIndex.Search(q.Vector, int64(q.K), q.Nprobe)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range result {
+			distances = append(distances, DocDistance{
+				DocID: k, Distance: v,
+			})
+		}
+		return distances, nil
+	}
+
+	var docIDs []string
+	zq := &meta.ZincQuery{
+		Query: q.FilterQuery,
+		Sort:  []any{"_id"},
+		Size:  config.Global.MaxResults,
+	}
+	resp, err := index.Search(zq)
 	if err != nil {
 		return nil, err
 	}
-	var results []vectorResult
-	for k, v := range result {
-		results = append(results, vectorResult{docID: k, distance: v})
+	for _, hit := range resp.Hits.Hits {
+		docIDs = append(docIDs, hit.ID)
+	}
+	if len(docIDs) == 0 {
+		return distances, nil
 	}
 
-	return results, nil
+	result, err := vecIndex.SearchByIDs(q.Vector, int64(q.K), docIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, distance := range result {
+		distances = append(distances, DocDistance{
+			DocID:    distance.DocID,
+			Distance: distance.Distance,
+		})
+	}
+
+	return distances, nil
 }
 
-func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, results []vectorResult) (*meta.SearchResponse, error) {
+func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, distances []DocDistance) (*meta.SearchResponse, error) {
 	var (
 		docIDs    []string
 		err       error
 		searchers []*SimpleSearcher
 	)
-	for _, result := range results {
-		docIDs = append(docIDs, result.docID)
+	for _, distance := range distances {
+		docIDs = append(docIDs, distance.DocID)
 	}
-	query := &meta.ZincQuery{
+	zq := &meta.ZincQuery{
 		Query: &meta.Query{
 			Ids: &meta.IdsQuery{
 				Values: docIDs,
@@ -93,13 +126,13 @@ func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, results []vectorR
 		},
 		Size: len(docIDs),
 	}
-	query.Source, err = source.Request(q.Source)
+	zq.Source, err = source.Request(q.Source)
 	if err != nil {
 		return nil, err
 	}
 	if q.ReturnFields != nil {
 		if v, ok := q.ReturnFields.([]any); ok {
-			if query.Fields, err = fields.Request(v); err != nil {
+			if zq.Fields, err = fields.Request(v); err != nil {
 				return nil, err
 			}
 		}
@@ -107,20 +140,20 @@ func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, results []vectorR
 	for _, index := range indexes {
 		searchers = append(searchers, index.GetSearchers(0, 0)...)
 	}
-	resp, err := zincsearch.MultiSearch(context.Background(), query, indexes[0].GetMappings(), nil, simpleSearchersToSearcher(searchers)...)
+	resp, err := zincsearch.MultiSearch(context.Background(), zq, indexes[0].GetMappings(), nil, simpleSearchersToSearcher(searchers)...)
 	if err != nil {
 		return nil, err
 	}
 
 	for i, hit := range resp.Hits.Hits {
-		j := slices.IndexFunc(results, func(result vectorResult) bool {
-			return result.docID == hit.ID
+		j := slices.IndexFunc(distances, func(result DocDistance) bool {
+			return result.DocID == hit.ID
 		})
 		if j < 0 {
 			resp.Hits.Hits[i].Score = float64(0)
 			continue
 		}
-		score := float64(1 / (1 + results[j].distance))
+		score := float64(1 / (1 + distances[j].Distance))
 		resp.Hits.Hits[i].Score = score
 		if score > resp.Hits.MaxScore {
 			resp.Hits.MaxScore = score
