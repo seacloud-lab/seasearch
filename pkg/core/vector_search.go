@@ -24,7 +24,7 @@ type VectorQuery struct {
 	Nprobe int         `json:"nprobe"`
 	Source interface{} `json:"_source"`
 	// FilterQuery contains filter conditions
-	FilterQuery interface{} `json:"query"`
+	FilterQuery interface{} `json:"filter_query"`
 }
 
 func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error) {
