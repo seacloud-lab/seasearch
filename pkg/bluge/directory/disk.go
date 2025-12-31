@@ -67,12 +67,8 @@ func (d *fileSystemDirectory) Unlock() error {
 var ErrPathNotExists = errors.New("setup err: readOnly, directory does not exist")
 
 func (d *fileSystemDirectory) Setup(readOnly bool) error {
-	dirExists, err := dirExists(d.path)
-	if err != nil {
-		log.Error().Err(err).Msgf("Setup %s err: check dir exists err: ", d.path)
-		return fmt.Errorf("setup err: error checking if directory exists '%s': %w", d.path, err)
-	}
-	if !dirExists {
+	items, err := os.ReadDir(d.path)
+	if os.IsNotExist(err) {
 		if readOnly {
 			return ErrPathNotExists
 		}
@@ -81,17 +77,13 @@ func (d *fileSystemDirectory) Setup(readOnly bool) error {
 			log.Error().Err(err).Msgf("Setup %s err: create dir err: ", d.path)
 			return fmt.Errorf("setup err: error creating directory '%s': %w", d.path, err)
 		}
+	} else if err != nil {
+		log.Error().Err(err).Msgf("Setup %s err: read dir error: ", d.path)
+		return fmt.Errorf("setup err: read dir error '%s': %w", d.path, err)
+	} else if len(items) == 0 {
+		if readOnly {
+			return ErrPathNotExists
+		}
 	}
 	return nil
-}
-
-func dirExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return true, err
 }
