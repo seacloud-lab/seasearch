@@ -127,7 +127,7 @@ type shard struct {
 
 type etcd struct {
 	Endpoints []string `env:"ZINC_ETCD_ENDPOINTS"`
-	Prefix    string   `env:"ZINC_ETCD_PREFIX,default=/zinc"`
+	Prefix    string   `env:"ZINC_ETCD_PREFIX,default=/seasearch"`
 	Username  string   `env:"ZINC_ETCD_USERNAME"`
 	Password  string   `env:"ZINC_ETCD_PASSWORD"`
 }
