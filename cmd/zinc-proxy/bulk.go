@@ -245,15 +245,21 @@ func processBody(target string, body io.Reader) (map[string][]string, error) {
 }
 
 func BulkV2(c *gin.Context) {
-	target := c.Param("target")
-
-	var body meta.JSONIngest
-
-	if err := zutils.GinBindJSON(c, &body); err != nil {
+	data, err := io.ReadAll(c.Request.Body)
+	c.Request.Body.Close()
+	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 
+	var body meta.JSONIngest
+	err = json.Unmarshal(data, &body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	target := c.Param("target")
 	if target == "" {
 		target = body.Index
 	}
@@ -264,7 +270,7 @@ func BulkV2(c *gin.Context) {
 	}
 
 	// rewind body
-	c.Request.Body = rewindBody(body)
+	c.Request.Body = io.NopCloser(bytes.NewReader(data))
 	host, err := GetAddrByIndex(target)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
