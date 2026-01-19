@@ -202,7 +202,7 @@ func Delete(c *gin.Context) {
 			list = append(list, indexName)
 			reqMap[addr] = list
 		} else {
-			reqMap[addr] = []string{addr}
+			reqMap[addr] = []string{indexName}
 		}
 	}
 
