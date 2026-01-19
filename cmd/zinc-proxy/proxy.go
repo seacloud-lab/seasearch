@@ -60,6 +60,9 @@ func syncClusterInfo() {
 		}
 	}()
 
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+
 	for {
 		err := syncCluster()
 		if err != nil {
@@ -68,7 +71,13 @@ func syncClusterInfo() {
 			updateClusterInfo(nil)
 		}
 
-		time.Sleep(time.Minute)
+		timer.Reset(time.Minute)
+		select {
+		case <-timer.C:
+			// do nothing
+		case <-closer.HasBeenClosed():
+			return
+		}
 	}
 }
 
