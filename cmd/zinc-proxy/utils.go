@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,9 +110,4 @@ func (pp *ProxyPool) Get(url *url.URL) *httputil.ReverseProxy {
 	}
 
 	return p
-}
-
-func rewindBody(data interface{}) io.ReadCloser {
-	buf, _ := json.Marshal(data)
-	return io.NopCloser(bytes.NewBuffer(buf))
 }

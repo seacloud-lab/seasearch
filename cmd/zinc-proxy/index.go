@@ -1,20 +1,25 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/core"
-	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"golang.org/x/sync/errgroup"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/errgroup"
 )
 
 type IndexListResponse struct {
@@ -141,8 +146,16 @@ func IndexNameList(c *gin.Context) {
 }
 
 func Create(c *gin.Context) {
+	data, err := io.ReadAll(c.Request.Body)
+	c.Request.Body.Close()
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
 	var newIndex meta.IndexSimple
-	if err := zutils.GinBindJSON(c, &newIndex); err != nil {
+	err = json.Unmarshal(data, &newIndex)
+	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
@@ -157,8 +170,7 @@ func Create(c *gin.Context) {
 		return
 	}
 
-	// rewind body
-	c.Request.Body = rewindBody(newIndex)
+	c.Request.Body = io.NopCloser(bytes.NewReader(data))
 	host, err := GetAddrByIndex(newIndex.Name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
