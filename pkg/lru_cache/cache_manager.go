@@ -15,7 +15,6 @@ import (
 	"github.com/blevesearch/mmap-go"
 	"github.com/blugelabs/bluge/index"
 	segment "github.com/blugelabs/bluge_segment_api"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/docker/go-units"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/unix"
@@ -32,7 +31,6 @@ type LruCache struct {
 	readyMap map[string]chan struct{}
 	maxSize  int64
 	lock     sync.RWMutex
-	closer   *z.Closer
 	// check cache file Ext name
 	fileExt extCheck
 	// check temp file Ext name
@@ -65,7 +63,6 @@ func createCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
 	cacheManager := &LruCache{
 		caches:   make(map[string]*CacheFile),
 		maxSize:  config.Global.ObjCache.MaxCacheSize,
-		closer:   z.NewCloser(1),
 		readyMap: make(map[string]chan struct{}),
 		rootPath: rootPath,
 		fileExt:  fileExt,
@@ -80,7 +77,6 @@ func createCache(rootPath string, fileExt extCheck, tempExt string) *LruCache {
 }
 
 func (c *LruCache) Close() error {
-	c.closer.SignalAndWait()
 	return nil
 }
 
