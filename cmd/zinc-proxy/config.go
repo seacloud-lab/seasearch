@@ -25,16 +25,16 @@ type GeneralConfig struct {
 }
 
 type ClusterProxyConfig struct {
-	ClusterManagerAddr string `env:"SS_CLUSTER_MANAGER_ADDR"`
-	Host               string `env:"SS_CLUSTER_PROXY_HOST,default=0.0.0.0"`
-	Port               int    `env:"SS_CLUSTER_PROXY_PORT,default=4082"`
+	ClusterManagerUrl string `env:"SS_CLUSTER_MANAGER_URL"`
+	Host              string `env:"SS_CLUSTER_PROXY_HOST,default=0.0.0.0"`
+	Port              int    `env:"SS_CLUSTER_PROXY_PORT,default=4082"`
 }
 
 type EtcdConfig struct {
-	Endpoints []string `env:"ZINC_ETCD_ENDPOINTS"`
-	Prefix    string   `env:"ZINC_ETCD_PREFIX,default=/seasearch"`
-	Username  string   `env:"ZINC_ETCD_USERNAME"`
-	Password  string   `env:"ZINC_ETCD_PASSWORD"`
+	Endpoints []string `env:"SS_ETCD_ENDPOINTS"`
+	Prefix    string   `env:"SS_ETCD_PREFIX,default=/seasearch"`
+	Username  string   `env:"SS_ETCD_USERNAME"`
+	Password  string   `env:"SS_ETCD_PASSWORD"`
 }
 
 func initProxyConfig() {

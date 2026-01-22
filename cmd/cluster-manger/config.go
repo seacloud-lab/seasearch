@@ -30,8 +30,8 @@ type ManagerConfig struct {
 }
 
 type ClusterConfig struct {
-	EtcdEndpoints []string `env:"ZINC_ETCD_ENDPOINTS"`
-	EtcdPrefix    string   `env:"ZINC_ETCD_PREFIX,default=/seasearch"`
+	EtcdEndpoints []string `env:"SS_ETCD_ENDPOINTS"`
+	EtcdPrefix    string   `env:"SS_ETCD_PREFIX,default=/seasearch"`
 }
 
 func initConfig() {
