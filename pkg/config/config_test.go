@@ -27,9 +27,8 @@ import (
 
 func TestConfig(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {
-		os.Setenv("ZINC_SERVER_MODE", "node")
-		os.Setenv("ZINC_NODE_ID", "8")
-		os.Setenv("ZINC_ETCD_ENDPOINTS", "localhost:2379")
+		os.Setenv("SS_SERVER_MODE", "node")
+		os.Setenv("SS_ETCD_ENDPOINTS", "localhost:2379")
 		os.Setenv("ZINC_MAX_DOCUMENT_SIZE", "1m")
 		os.Setenv("ZINC_WAL_SYNC_INTERVAL", "10s")
 	})

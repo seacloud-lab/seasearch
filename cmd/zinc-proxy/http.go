@@ -159,7 +159,11 @@ func directForwarding(c *gin.Context) {
 }
 
 func forwardToManager(c *gin.Context) {
-	host := conf.Proxy.ClusterManagerAddr
-	u := url.URL{Scheme: "http", Host: host}
-	proxyPool.Get(&u).ServeHTTP(c.Writer, c.Request)
+	u, err := url.Parse(conf.Proxy.ClusterManagerUrl)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+
+	proxyPool.Get(u).ServeHTTP(c.Writer, c.Request)
 }
