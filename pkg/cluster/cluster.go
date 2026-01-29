@@ -4,21 +4,21 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
+	"github.com/zincsearch/zincsearch/pkg/config"
+
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
-
-	"github.com/zincsearch/zincsearch/pkg/config"
 	client "go.etcd.io/etcd/client/v3"
 )
 
 var (
-	closer                = z.NewCloser(4)
-	assignMap             = make(map[string]struct{})
-	lastAssignProcessTime time.Time
-	lock                  sync.RWMutex
+	closer    = z.NewCloser(4)
+	assignMap = make(map[string]struct{})
+	lock      sync.RWMutex
 
 	// AssignChan used for notify core update memory index list
 	AssignChan = make(chan map[string]struct{})
@@ -158,6 +158,9 @@ func watchAssign() {
 	defer closer.Done()
 
 	watch := func(ch <-chan *AssignEvent) error {
+		timer := time.NewTimer(time.Duration(math.MaxInt64))
+		defer timer.Stop()
+
 		for {
 			select {
 			case <-closer.HasBeenClosed():
@@ -172,15 +175,9 @@ func watchAssign() {
 				if !event.Valid {
 					return fmt.Errorf("invalid assign event")
 				}
-				// Assignments in etcd are updated in a transaction.
-				// So the events should usually arrive at around the same time.
-				// We only need to update our internal assignment cache when the first event arrives.
-				// So we set a 10s buffer to skip the following events.
-				if time.Since(lastAssignProcessTime) < 10*time.Second {
-					// ignore
-					continue
-				}
-				lastAssignProcessTime = time.Now()
+				// Events are delayed and merged into one.
+				timer.Reset(time.Second)
+			case <-timer.C:
 				assigns, err := ListAssigns(closer.Ctx())
 				if err != nil {
 					return fmt.Errorf("update assigns error: %s", err)
