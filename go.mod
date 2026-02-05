@@ -1,6 +1,6 @@
 module github.com/zincsearch/zincsearch
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/DataIntelligenceCrew/go-faiss v0.2.0
@@ -22,7 +22,7 @@ require (
 	github.com/goccy/go-json v0.10.3
 	github.com/google/btree v1.1.3
 	github.com/grafana/pyroscope-go v1.2.0
-	github.com/haiwen/goutils v0.1.2
+	github.com/haiwen/goutils v0.1.5
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.15.0
@@ -43,10 +43,10 @@ require (
 	go.etcd.io/etcd/client/pkg/v3 v3.5.9
 	go.etcd.io/etcd/client/v3 v3.5.7
 	go.uber.org/zap v1.17.0
-	golang.org/x/crypto v0.31.0
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.28.0
-	golang.org/x/text v0.21.0
+	golang.org/x/crypto v0.46.0
+	golang.org/x/sync v0.19.0
+	golang.org/x/sys v0.39.0
+	golang.org/x/text v0.32.0
 )
 
 require (
@@ -127,9 +127,9 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
-	golang.org/x/net v0.30.0 // indirect
+	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
-	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
+	golang.org/x/tools v0.39.0 // indirect
 	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
 	google.golang.org/grpc v1.41.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect

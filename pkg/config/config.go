@@ -101,6 +101,7 @@ type s3 struct {
 	PathStyleRequest string `env:"SS_S3_PATH_STYLE_REQUEST"`
 	AwsRegion        string `env:"SS_S3_AWS_REGION"`
 	SsecKey          string `env:"SS_S3_SSE_C_KEY"`
+	PartSize         uint64 `env:"SS_S3_PART_SIZE"`
 }
 
 type oss struct {
@@ -251,6 +252,7 @@ func checkS3() {
 		log.Fatal().Msg("require s3 endpoint")
 	}
 
+	Global.S3.PartSize = Global.S3.PartSize * 1024 * 1024
 }
 
 func checkWalConfig() {
