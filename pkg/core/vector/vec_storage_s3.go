@@ -155,6 +155,7 @@ func createS3Client() (objclient.Client, error) {
 	objConf.Endpoint = config.Global.S3.Endpoint
 	objConf.Region = config.Global.S3.AwsRegion
 	objConf.SSECKey = config.Global.S3.SsecKey
+	objConf.PartSize = config.Global.S3.PartSize
 
 	return objclient.NewS3Client(objConf)
 }
