@@ -122,8 +122,6 @@ type shard struct {
 	Num int64 `env:"ZINC_SHARD_NUM,default=1"`
 	// MaxSize is the maximum size limit for one shard, or will create a new shard.
 	MaxSize int64 `env:"ZINC_SHARD_MAX_SIZE,default=1073741824"`
-	// LoadObjGoroutineNum concurrently load index from Obj storage
-	LoadObjGoroutineNum int `env:"SS_SHARD_LOAD_OBJS_GOROUTINE_NUM,default=10"`
 }
 
 type etcd struct {
@@ -203,10 +201,6 @@ func initConfig(c *config) {
 	checkOss()
 	checkS3()
 	checkWalConfig()
-	// for disk storage we use single-threaded for loading indexes
-	if c.StorageType == "disk" {
-		c.Shard.LoadObjGoroutineNum = 1
-	}
 }
 
 func checkOss() {

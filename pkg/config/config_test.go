@@ -51,7 +51,6 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 10000, c.MaxResults)
 		assert.Equal(t, 1000, c.AggregationTermsSize)
 		assert.Equal(t, int64(10000000000), c.ObjCache.MaxCacheSize)
-		assert.Equal(t, 1, c.Shard.LoadObjGoroutineNum)
 		assert.Equal(t, "disk", c.StorageType)
 		assert.Equal(t, false, c.EnableWal)
 		assert.Equal(t, 1, c.Cluster.NodeId)
@@ -162,7 +161,6 @@ func TestConfigStorageType(t *testing.T) {
 		c := new(config)
 		initConfig(c)
 
-		assert.Equal(t, 10, c.Shard.LoadObjGoroutineNum)
 		assert.Equal(t, "oss", c.StorageType)
 		assert.Equal(t, "admin", c.Oss.AccessId)
 		assert.Equal(t, "pwd", c.Oss.AccessSecret)

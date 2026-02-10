@@ -31,6 +31,12 @@ import (
 // indexName: the name of the index to use.
 func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
 	config := index.DefaultConfig(path.Join(rootPath, indexName))
+
+	config.IndexName = indexName
+	config = config.WithPersisterNapTimeMSec(50)
+	// ConcurrentSegmentLoad defaults to 1 for local disk, since disk I/O
+	// typically supports limited concurrency compared to network I/O.
+
 	config.DirectoryFunc = func() index.Directory {
 		fs := index.NewFileSystemDirectory(path.Join(rootPath, indexName))
 		return &fileSystemDirectory{
@@ -38,13 +44,13 @@ func GetDiskConfig(rootPath string, indexName string, timeRange ...int64) bluge.
 			path:                path.Join(rootPath, indexName),
 		}
 	}
-	config = config.WithPersisterNapTimeMSec(50)
+
 	if len(timeRange) == 2 {
 		if timeRange[0] <= timeRange[1] {
 			config = config.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
-	config.IndexName = indexName
+
 	return bluge.DefaultConfigWithIndexConfig(config)
 }
 
