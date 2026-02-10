@@ -28,7 +28,11 @@ type OssBackend struct {
 
 func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.Config {
 	cfg := index.DefaultConfig(path.Join(rootPath, indexName))
+
+	cfg.IndexName = indexName
 	cfg = cfg.WithPersisterNapTimeMSec(50)
+	cfg = cfg.WithConcurrentSegmentLoad(config.Global.Shard.GoroutineNum)
+
 	cfg.DirectoryFunc = func() index.Directory {
 		dir, err := CreateOSSBackend(rootPath, indexName)
 		if err != nil {
@@ -42,7 +46,7 @@ func GetOssConfig(rootPath string, indexName string, timeRange ...int64) bluge.C
 			cfg = cfg.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
-	cfg.IndexName = indexName
+
 	return bluge.DefaultConfigWithIndexConfig(cfg)
 }
 

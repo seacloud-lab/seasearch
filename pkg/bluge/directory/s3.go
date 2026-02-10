@@ -21,7 +21,11 @@ import (
 
 func GetS3Config(rootPath string, indexName string, timeRange ...int64) bluge.Config {
 	cfg := index.DefaultConfig(path.Join(rootPath, indexName))
+
+	cfg.IndexName = indexName
 	cfg = cfg.WithPersisterNapTimeMSec(50)
+	cfg = cfg.WithConcurrentSegmentLoad(config.Global.Shard.GoroutineNum)
+
 	cfg.DirectoryFunc = func() index.Directory {
 		dir, err := CreateS3Backend(rootPath, indexName)
 		if err != nil {
@@ -35,7 +39,7 @@ func GetS3Config(rootPath string, indexName string, timeRange ...int64) bluge.Co
 			cfg = cfg.WithTimeRange(timeRange[0], timeRange[1])
 		}
 	}
-	cfg.IndexName = indexName
+
 	return bluge.DefaultConfigWithIndexConfig(cfg)
 }
 

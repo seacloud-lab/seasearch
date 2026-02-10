@@ -172,7 +172,7 @@ type search struct {
 
 func multiSearchIndex(searches []search) []interface{} {
 	eg := errgroup.Group{}
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	var res = make([]interface{}, len(searches))
 
 	for i, s := range searches {
@@ -263,7 +263,7 @@ func UnifiedSearch(c *gin.Context) {
 	var mutex = sync.Mutex{}
 
 	var eg errgroup.Group
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, q := range req.IndexQueries {
 		q := q
 		eg.Go(func() error {
@@ -349,7 +349,7 @@ func InternalUnifiedSearch(c *gin.Context) {
 	var mutex = sync.Mutex{}
 
 	var eg errgroup.Group
-	eg.SetLimit(config.Global.Shard.LoadObjGoroutineNum)
+	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, indexReq := range request.IndexQueries {
 		index, err := core.GetZincIndexFromMetadata(indexReq.Index)
 		if err != nil {
