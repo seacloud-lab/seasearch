@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
+	"slices"
+	"time"
+
+	"github.com/zincsearch/zincsearch/pkg/cluster"
+
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"math/rand"
-	"time"
 )
 
 var (
@@ -53,11 +56,26 @@ func execAssign() error {
 	if err != nil {
 		return fmt.Errorf("assign error: %w", err)
 	}
-	if len(curNodeIds) == 0 {
+	info, err := cluster.GetClusterInfo(managerCloser.Ctx())
+	if err != nil {
+		return fmt.Errorf("failed to get cluster info: %w", err)
+	}
+
+	var alive []int
+	for _, id := range curNodeIds {
+		exist := slices.ContainsFunc(info,
+			func(node cluster.NodeInfo) bool { return node.NodeId == id },
+		)
+		if !exist {
+			continue
+		}
+		alive = append(alive, id)
+	}
+	if len(alive) == 0 {
 		return nil
 	}
 
-	updateAssigns := distribute(curNodeIds)
+	updateAssigns := distribute(alive)
 	if len(updateAssigns) <= 0 {
 		return nil
 	}

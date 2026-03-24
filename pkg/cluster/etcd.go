@@ -215,10 +215,13 @@ type AssignEvent struct {
 }
 
 func WatchAssigns(ctx context.Context) <-chan *AssignEvent {
+	ctx, cancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(DefaultTimeout, cancel)
+
 	prefix := fmt.Sprintf("%s/cluster/assign/", prefix)
 	watcher := client.NewWatcher(cli)
-	ctx, cancel := context.WithCancel(ctx)
 	rspCh := watcher.Watch(client.WithRequireLeader(ctx), prefix, client.WithPrefix())
+	timer.Stop()
 
 	ch := make(chan *AssignEvent)
 	go watchAssigns(ctx, cancel, watcher, rspCh, ch)
@@ -328,10 +331,14 @@ type ClusterInfoEvent struct {
 }
 
 func WatchClusterNodeInfo(ctx context.Context) <-chan *ClusterInfoEvent {
+	ctx, cancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(DefaultTimeout, cancel)
+
 	key := fmt.Sprintf("%s/cluster/nodes", prefix)
 	watcher := client.NewWatcher(cli)
-	ctx, cancel := context.WithCancel(ctx)
 	rspCh := watcher.Watch(client.WithRequireLeader(ctx), key)
+	timer.Stop()
+
 	ch := make(chan *ClusterInfoEvent)
 	go watchClusterInfo(ctx, cancel, watcher, rspCh, ch)
 
@@ -423,10 +430,14 @@ type UserInfoEvent struct {
 }
 
 func WatchUserInfo(ctx context.Context) <-chan *UserInfoEvent {
+	ctx, cancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(DefaultTimeout, cancel)
+
 	prefix := fmt.Sprintf("%s/metadata/user/", prefix)
 	watcher := client.NewWatcher(cli)
-	ctx, cancel := context.WithCancel(ctx)
 	rspCh := watcher.Watch(client.WithRequireLeader(ctx), prefix, client.WithPrefix())
+	timer.Stop()
+
 	ch := make(chan *UserInfoEvent)
 	go watchUserInfo(ctx, cancel, watcher, rspCh, ch)
 
@@ -490,10 +501,14 @@ type RoleEvent struct {
 }
 
 func WatchRoleInfo(ctx context.Context) <-chan *RoleEvent {
+	ctx, cancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(DefaultTimeout, cancel)
+
 	prefix := fmt.Sprintf("%s/metadata/role/", prefix)
 	watcher := client.NewWatcher(cli)
-	ctx, cancel := context.WithCancel(ctx)
 	rspCh := watcher.Watch(client.WithRequireLeader(ctx), prefix, client.WithPrefix())
+	timer.Stop()
+
 	ch := make(chan *RoleEvent)
 	go watchRoleInfo(ctx, cancel, watcher, rspCh, ch)
 
