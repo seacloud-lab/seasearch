@@ -4,15 +4,14 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/haiwen/goutils/clusterkit"
 	"github.com/rs/zerolog/log"
-	client "go.etcd.io/etcd/client/v3"
 )
 
 var (
@@ -20,13 +19,12 @@ var (
 	assignMap = make(map[string]struct{})
 	lock      sync.RWMutex
 
-	// AssignChan used for notify core update memory index list
-	AssignChan = make(chan map[string]struct{})
-
+	// UnassignChan used for notify core update memory index list
+	UnassignChan = make(chan map[string]struct{})
+	// UserChan used for notify core update user list
+	UserChan = make(chan struct{})
 	// RoleChan used for notify core update role list
 	RoleChan = make(chan struct{})
-	// UserChan  used for notify core update user list
-	UserChan = make(chan struct{})
 )
 
 func Init() {
@@ -34,18 +32,18 @@ func Init() {
 		return
 	}
 
-	InitEtcd(config.Global.Etcd.Prefix, config.Global.Etcd.Endpoints)
-	if err := InitAssigns(); err != nil {
-		log.Fatal().Msgf("init cluster error: %s", err)
+	err := clusterkit.Open(config.Global.Etcd.Endpoints, config.Global.Etcd.Prefix)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open clusterkit")
 	}
 
-	go keepHeartBeat()
+	go keepHeartbeat()
 
-	go watchAssign()
+	go syncAssigns()
 
-	go watchUser()
+	go syncUsers()
 
-	go watchRole()
+	go syncRoles()
 }
 
 func Close() {
@@ -53,90 +51,90 @@ func Close() {
 		return
 	}
 	closer.SignalAndWait()
-	CloseEtcd()
+	clusterkit.Close()
 }
 
-func InitAssigns() error {
-	assigns, err := ListAssigns(closer.Ctx())
-	if err != nil {
-		return fmt.Errorf("init assigns error: %s", err)
-	}
-	lock.Lock()
-	defer lock.Unlock()
-	for partition, nodeId := range assigns {
-		if nodeId == config.Global.Cluster.NodeId {
-			assignMap[partition] = struct{}{}
-		}
-	}
-	return nil
-}
-
-func keepHeartBeat() {
+func keepHeartbeat() {
 	defer closer.Done()
 
-	key := fmt.Sprintf("%s/cluster/hb/%d", config.Global.Etcd.Prefix, config.Global.Cluster.NodeId)
-	ls := client.NewLease(cli)
-
-	var curLeaseId client.LeaseID = 0
-	ticker := time.NewTicker(60 * time.Second)
-
-	first := make(chan struct{}, 1)
-	first <- struct{}{}
-
-	var err error
 	for {
+		err := clusterkit.KeepHeartbeat(closer.Ctx(), config.Global.Cluster.NodeId)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed keep heartbeat")
+		}
+
 		select {
 		case <-closer.HasBeenClosed():
 			return
-		case <-first:
-			curLeaseId, err = SendHeartBeat(key, curLeaseId, ls)
-			if err != nil {
-				log.Fatal().Err(err).Msg("cannot send heart beat to etcd")
-			}
-		case <-ticker.C:
-			curLeaseId, err = SendHeartBeat(key, curLeaseId, ls)
-			if err != nil {
-				log.Warn().Err(err).Msg("cannot send heart beat to etcd")
-			}
+		case <-time.After(time.Second * 15):
+			continue
 		}
 	}
 }
 
-// DiffAssigns
-// update current assigns with input map and return should be closed assigns
-// we don't return addMap because we have no way to only load the specified index according to partition id.
-func DiffAssigns(inputAssigns map[string]int) (removeMap map[string]struct{}) {
-	removeMap = make(map[string]struct{})
+func syncAssigns() {
+	defer closer.Done()
+
+	for {
+		err := watchAssigns()
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to watch assigns")
+		}
+
+		// Reset the cluster information when it goes out of sync.
+		lock.Lock()
+		assignMap = make(map[string]struct{})
+		lock.Unlock()
+
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-time.After(time.Second * 15):
+			continue
+		}
+	}
+}
+
+func watchAssigns() error {
+	rev, err := updateAssigns()
+	if err != nil {
+		return err
+	}
+	it := clusterkit.WatchAssigns(closer.Ctx(), rev)
+	for range it.Range() {
+		_, err = updateAssigns()
+		if err != nil {
+			return err
+		}
+	}
+	return it.Error()
+}
+
+func updateAssigns() (int64, error) {
+	assigns, rev, err := clusterkit.ListAssigns(closer.Ctx())
+	if err != nil {
+		return 0, fmt.Errorf("failed to list assigns: %w", err)
+	}
 
 	lock.Lock()
-	for partition, nodeId := range inputAssigns {
-		// assign to us
-		if nodeId == config.Global.Cluster.NodeId {
-			assignMap[partition] = struct{}{}
+
+	assignMap = make(map[string]struct{})
+	unassignMap := make(map[string]struct{})
+	for _, assign := range assigns {
+		if assign.NodeID == config.Global.Cluster.NodeId {
+			assignMap[assign.Prefix] = struct{}{}
 		} else {
-			// we used to have it, but not anymore
-			if _, ok := assignMap[partition]; ok {
-				delete(assignMap, partition)
-				removeMap[partition] = struct{}{}
-			}
+			unassignMap[assign.Prefix] = struct{}{}
 		}
 	}
-	// not present in inputAssigns, they don't belong to anyone
-	for partition := range assignMap {
-		if _, ok := inputAssigns[partition]; !ok {
-			delete(assignMap, partition)
-			removeMap[partition] = struct{}{}
-		}
-	}
+
 	lock.Unlock()
 
-	return
-}
-
-func ClearAssign() {
-	lock.Lock()
-	defer lock.Unlock()
-	assignMap = make(map[string]struct{})
+	select {
+	case <-closer.HasBeenClosed():
+	case UnassignChan <- unassignMap:
+	}
+	return rev, nil
 }
 
 func AssignCheck(indexName string) bool {
@@ -154,88 +152,52 @@ func AssignCheck(indexName string) bool {
 	return ok
 }
 
-func watchAssign() {
+func syncUsers() {
 	defer closer.Done()
 
-	watch := func(ch <-chan *AssignEvent) error {
-		timer := time.NewTimer(time.Duration(math.MaxInt64))
-		defer timer.Stop()
-
-		for {
+	for {
+		it := WatchUsers(closer.Ctx())
+		for range it.Range() {
 			select {
 			case <-closer.HasBeenClosed():
-				return nil
-			case event, ok := <-ch:
-				if !ok {
-					return fmt.Errorf("watch goroutine chrashed")
-				}
-				if event.Err != nil {
-					return event.Err
-				}
-				if !event.Valid {
-					return fmt.Errorf("invalid assign event")
-				}
-				// Events are delayed and merged into one.
-				timer.Reset(time.Second)
-			case <-timer.C:
-				assigns, err := ListAssigns(closer.Ctx())
-				if err != nil {
-					return fmt.Errorf("update assigns error: %s", err)
-				}
-				removeMap := DiffAssigns(assigns)
-				AssignChan <- removeMap
+				return
+			case UserChan <- struct{}{}:
 			}
 		}
-	}
+		if it.Error() != nil {
+			log.Warn().Err(it.Error()).Msg("failed to watch users")
+		}
 
-	for {
-		ch := WatchAssigns(closer.Ctx())
-		err := watch(ch)
-		if err != nil {
-			log.Err(err).Msg("watch assign error, retrying")
-			ClearAssign()
-			time.Sleep(1 * time.Minute)
-			if err = InitAssigns(); err != nil {
-				log.Err(err).Msg("get assigns error")
-			}
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-time.After(time.Second * 15):
 			continue
 		}
-		return
 	}
 }
 
-func watchUser() {
+func syncRoles() {
 	defer closer.Done()
-	ch := WatchUserInfo(closer.Ctx())
+
 	for {
-		select {
-		case <-closer.HasBeenClosed():
-			return
-		case ev, ok := <-ch:
-			if !ok || ev.Err != nil {
-				time.Sleep(1 * time.Minute)
-				ch = WatchUserInfo(closer.Ctx())
-				continue
+		it := WatchRoles(closer.Ctx())
+		for range it.Range() {
+			select {
+			case <-closer.HasBeenClosed():
+				return
+			case RoleChan <- struct{}{}:
 			}
-			UserChan <- struct{}{}
 		}
-	}
-}
+		if it.Error() != nil {
+			log.Warn().Err(it.Error()).Msg("failed to watch roles")
+		}
 
-func watchRole() {
-	defer closer.Done()
-	ch := WatchRoleInfo(closer.Ctx())
-	for {
 		select {
 		case <-closer.HasBeenClosed():
 			return
-		case ev, ok := <-ch:
-			if !ok || ev.Err != nil {
-				time.Sleep(1 * time.Minute)
-				ch = WatchRoleInfo(closer.Ctx())
-				continue
-			}
-			RoleChan <- struct{}{}
+		case <-time.After(time.Second * 15):
+			continue
 		}
 	}
 }

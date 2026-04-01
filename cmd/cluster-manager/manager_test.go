@@ -8,8 +8,8 @@ import (
 
 func TestNewNodeDistribute(t *testing.T) {
 	// 3 is the new node
-	var curNodes = []int{1, 2, 3}
-	curAssignMap = map[string]int{
+	curNodes := []int{1, 2, 3}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 1,
 		"a3": 1,
@@ -19,7 +19,7 @@ func TestNewNodeDistribute(t *testing.T) {
 		"a7": 2,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 249, len(result))
 
 	count3 := 0
@@ -42,8 +42,8 @@ func TestNewNodeDistribute(t *testing.T) {
 }
 
 func TestRemoveNodeDistribute(t *testing.T) {
-	var curNodes = []int{1, 2}
-	curAssignMap = map[string]int{
+	curNodes := []int{1, 2}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 1,
 		"a3": 1,
@@ -53,7 +53,7 @@ func TestRemoveNodeDistribute(t *testing.T) {
 		"a7": 3,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 251, len(result))
 
 	count2 := 2
@@ -74,8 +74,8 @@ func TestRemoveNodeDistribute(t *testing.T) {
 
 func TestChangeNodeDistribute(t *testing.T) {
 	// 3 is removed, 4 is new node
-	var curNodes = []int{1, 2, 4}
-	curAssignMap = map[string]int{
+	curNodes := []int{1, 2, 4}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 1,
 		"a3": 1,
@@ -85,7 +85,7 @@ func TestChangeNodeDistribute(t *testing.T) {
 		"a7": 3,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 251, len(result))
 
 	count4 := 0
@@ -109,9 +109,8 @@ func TestChangeNodeDistribute(t *testing.T) {
 }
 
 func TestTwoNodeJoinDistribute(t *testing.T) {
-
-	var curNodes = []int{1, 2}
-	curAssignMap = map[string]int{
+	curNodes := []int{1, 2}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 1,
 		"a3": 1,
@@ -121,7 +120,7 @@ func TestTwoNodeJoinDistribute(t *testing.T) {
 		"a7": 1,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 
 	assert.Equal(t, 249, len(result))
 
@@ -142,8 +141,8 @@ func TestTwoNodeJoinDistribute(t *testing.T) {
 }
 
 func TestTwoNodeRetireDistribute(t *testing.T) {
-	var curNodes = []int{2}
-	curAssignMap = map[string]int{
+	curNodes := []int{2}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 1,
 		"a3": 1,
@@ -153,7 +152,7 @@ func TestTwoNodeRetireDistribute(t *testing.T) {
 		"a7": 2,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 253, len(result))
 
 	for _, to := range result {
@@ -163,10 +162,10 @@ func TestTwoNodeRetireDistribute(t *testing.T) {
 
 func TestSingleNodeInit(t *testing.T) {
 
-	var curNodes = []int{1}
-	curAssignMap = map[string]int{}
+	curNodes := []int{1}
+	curAssignMap := map[string]int{}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 256, len(result))
 
 	for _, to := range result {
@@ -176,10 +175,10 @@ func TestSingleNodeInit(t *testing.T) {
 
 func TestTwoNodesInit(t *testing.T) {
 
-	var curNodes = []int{1, 2}
-	curAssignMap = map[string]int{}
+	curNodes := []int{1, 2}
+	curAssignMap := map[string]int{}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 256, len(result))
 
 	count1 := 0
@@ -198,8 +197,8 @@ func TestTwoNodesInit(t *testing.T) {
 }
 
 func TestStability(t *testing.T) {
-	var curNodes = []int{1, 2, 3}
-	curAssignMap = map[string]int{
+	curNodes := []int{1, 2, 3}
+	curAssignMap := map[string]int{
 		"a1": 1,
 		"a2": 2,
 		"a3": 3,
@@ -209,7 +208,7 @@ func TestStability(t *testing.T) {
 		"a7": 1,
 	}
 
-	result := distribute(curNodes)
+	result := distribute(curNodes, curAssignMap)
 	assert.Equal(t, 249, len(result))
 
 	for partition := range result {

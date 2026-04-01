@@ -1,15 +1,16 @@
 package main
 
 import (
-	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
-	"strconv"
+	"slices"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/haiwen/goutils/clusterkit"
 	log "github.com/sirupsen/logrus"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 )
 
 func SetupHttp(r *gin.Engine) {
@@ -27,126 +28,218 @@ func SetupHttp(r *gin.Engine) {
 		AllowCredentials: true,
 	}))
 
-	r.PUT("/api/cluster-nodes", PutClusterInfo)
-	r.POST("/api/cluster-nodes", SetNodeInfo)
-	r.GET("/api/cluster-nodes", GetNodeInfos)
-	r.DELETE("/api/cluster-nodes", RemoveNode)
+	r.GET("/api/cluster/nodes", listClusterNodes)
+	r.POST("/api/cluster/nodes", createClusterNodes)
+	r.PUT("/api/cluster/nodes", updateClusterNodes)
+	r.DELETE("/api/cluster/nodes", deleleClusterNodes)
+	r.POST("/api/cluster/clean", cleanClusterData)
 }
 
-func PutClusterInfo(c *gin.Context) {
-	var clusterInfo []cluster.NodeInfo
-	err := c.BindJSON(&clusterInfo)
+type ClusterNode struct {
+	ID  int    `json:"id"`
+	URL string `json:"url"`
+}
+
+type ListClusterNodesResponse struct {
+	NodeId int    `json:"node_id"`
+	URL    string `json:"url"`
+	Alive  bool   `json:"alive"`
+}
+
+func listClusterNodes(c *gin.Context) {
+	cluster, _, err := clusterkit.GetClusterNodes(c.Request.Context())
+	if err != nil {
+		log.Errorf("failed to get cluster nodes: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	alive := make(map[int]bool)
+	beats, err := clusterkit.ListHeartbeats(c.Request.Context())
+	for _, beat := range beats {
+		alive[beat.NodeID] = true
+	}
+
+	var rsp []ListClusterNodesResponse
+	for _, node := range cluster.Nodes {
+		rsp = append(rsp, ListClusterNodesResponse{
+			NodeId: node.ID,
+			URL:    node.URL,
+			Alive:  alive[node.ID],
+		})
+	}
+
+	c.JSON(http.StatusOK, rsp)
+}
+
+type CreateClusterNodesRequest struct {
+	Nodes []ClusterNode `json:"nodes"`
+}
+
+func createClusterNodes(c *gin.Context) {
+	var req CreateClusterNodesRequest
+	err := c.BindJSON(&req)
 	if err != nil {
 		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	if err = cluster.PutClusterInfo(context.Background(), clusterInfo); err != nil {
-		c.String(http.StatusInternalServerError, "put cluster info error: %s", err)
-	}
-	c.String(http.StatusOK, "success")
-}
-
-func RemoveNode(c *gin.Context) {
-	nodeId := c.Query("id")
-	if nodeId == "" {
-		c.String(http.StatusBadRequest, "require id")
-		return
-	}
-	nodes, err := cluster.GetClusterInfo(context.Background())
+	cluster, _, err := clusterkit.GetClusterNodes(c.Request.Context())
 	if err != nil {
-		log.Errorf("get cluster node info error: %s", err)
+		log.Errorf("failed to get cluster nodes %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	newNodes := make([]cluster.NodeInfo, 0)
-	for _, node := range nodes {
-		if strconv.Itoa(node.NodeId) == nodeId {
-			continue
+	var ids []int
+	for _, node := range cluster.Nodes {
+		ids = append(ids, node.ID)
+	}
+
+	for _, node := range req.Nodes {
+		if node.ID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "node id must be non-zero",
+			})
+			return
 		}
-		newNodes = append(newNodes, node)
+		if slices.Contains(ids, node.ID) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("node id %v already exist", node.ID),
+			})
+			return
+		}
+		if node.URL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "node url must be specified",
+			})
+			return
+		}
+		if _, err := url.Parse(node.URL); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("failed to parse node url: %v", err),
+			})
+			return
+		}
+
+		cluster.Nodes = append(cluster.Nodes, clusterkit.ClusterNode{
+			ID:  node.ID,
+			URL: node.URL,
+		})
 	}
 
-	err = cluster.PutClusterInfo(context.Background(), newNodes)
+	err = clusterkit.SetClusterNode(cluster)
 	if err != nil {
-		log.Errorf("put cluster node info error: %s", err)
+		log.Errorf("failed to set cluster node: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	c.String(http.StatusOK, "success")
 }
 
-func SetNodeInfo(c *gin.Context) {
-	var nodeInfo cluster.NodeInfo
-	err := c.BindJSON(&nodeInfo)
+type UpdateClusterNodesRequest struct {
+	Nodes []ClusterNode `json:"nodes"`
+}
+
+func updateClusterNodes(c *gin.Context) {
+	var req UpdateClusterNodesRequest
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	cluster, _, err := clusterkit.GetClusterNodes(c.Request.Context())
+	if err != nil {
+		log.Errorf("failed to get cluster nodes: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	for _, node := range req.Nodes {
+		if node.ID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "node id must be non-zero",
+			})
+			return
+		}
+		i := slices.IndexFunc(cluster.Nodes,
+			func(n clusterkit.ClusterNode) bool { return n.ID == node.ID },
+		)
+		if i < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("node id %v not found", node.ID),
+			})
+			return
+		}
+		if node.URL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "node addr must be specified",
+			})
+			return
+		}
+		if _, err := url.Parse(node.URL); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("failed to parse node url: %v", err),
+			})
+			return
+		}
+
+		cluster.Nodes[i].URL = node.URL
+	}
+
+	err = clusterkit.SetClusterNode(cluster)
+	if err != nil {
+		log.Errorf("failed to set cluster node: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+}
+
+type DeleteClusterNodesRequest struct {
+	NodeIDs []int `json:"node_ids"`
+}
+
+func deleleClusterNodes(c *gin.Context) {
+	var req DeleteClusterNodesRequest
+	err := c.BindJSON(&req)
 	if err != nil {
 		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	nodes, err := cluster.GetClusterInfo(context.Background())
+	cluster, _, err := clusterkit.GetClusterNodes(c.Request.Context())
 	if err != nil {
-		log.Errorf("get cluster node info error: %s", err)
+		log.Errorf("failed to get cluster nodes: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 
-	update := false
-	for i, node := range nodes {
-		if node.NodeId == nodeInfo.NodeId {
-			nodes[i] = nodeInfo
-			update = true
-			break
-		}
+	for _, id := range req.NodeIDs {
+		cluster.Nodes = slices.DeleteFunc(cluster.Nodes,
+			func(node clusterkit.ClusterNode) bool { return node.ID == id },
+		)
 	}
-	if !update {
-		nodes = append(nodes, nodeInfo)
-	}
-	err = cluster.PutClusterInfo(context.Background(), nodes)
+
+	err = clusterkit.SetClusterNode(cluster)
 	if err != nil {
-		log.Errorf("put cluster node info error: %s", err)
+		log.Errorf("failed to set cluster node: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	c.String(http.StatusOK, "success")
 }
 
-type NodeInfoResp struct {
-	NodeId  int    `json:"node_id"`
-	Address string `json:"address"`
-	Alive   bool   `json:"alive"`
-}
-
-func GetNodeInfos(c *gin.Context) {
-	nodes, err := cluster.GetClusterInfo(context.Background())
+func cleanClusterData(c *gin.Context) {
+	err := clusterkit.Delete(c.Request.Context(), "/cluster/nodes", false)
 	if err != nil {
-		log.Errorf("get cluster node info error: %s", err)
+		log.Errorf("failed to delete etcd key: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-
-	aliveNodes, err := cluster.ListAvailableNodes(context.Background())
+	err = clusterkit.Delete(c.Request.Context(), "/cluster/assign/", true)
 	if err != nil {
-		log.Errorf("get alive nodes error: %s", err)
+		log.Errorf("failed to delete etcd key: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	aliveMap := make(map[int]struct{})
-	for _, aliveId := range aliveNodes {
-		aliveMap[aliveId] = struct{}{}
-	}
-
-	result := make([]NodeInfoResp, len(nodes))
-
-	for i, node := range nodes {
-		_, alive := aliveMap[node.NodeId]
-		resp := NodeInfoResp{
-			NodeId:  node.NodeId,
-			Address: node.Address,
-			Alive:   alive,
-		}
-		result[i] = resp
-	}
-
-	c.JSON(http.StatusOK, result)
 }

@@ -310,8 +310,8 @@ func watchIndexUpdate() {
 		select {
 		case <-indexUpdateCloser.HasBeenClosed():
 			return
-		case removeMap := <-cluster.AssignChan:
-			err := updateIndexList(removeMap)
+		case unassignMap := <-cluster.UnassignChan:
+			err := updateIndexList(unassignMap)
 			if err != nil {
 				log.Error().Err(err).Msg("cannot update memory index list")
 			}
@@ -319,7 +319,7 @@ func watchIndexUpdate() {
 	}
 }
 
-func updateIndexList(removeMap map[string]struct{}) error {
+func updateIndexList(unassignMap map[string]struct{}) error {
 	// The index list only contains indexes managed by the current node.
 	// When the allocation of shards changes, we need to close the indexes that are not managed by this node
 	// and delete them from the index list
@@ -330,7 +330,7 @@ func updateIndexList(removeMap map[string]struct{}) error {
 		partition := str[:2]
 
 		// the index not assign to us, we should close it.
-		if _, ok := removeMap[partition]; ok {
+		if _, ok := unassignMap[partition]; ok {
 			log.Debug().Msgf("unload index: %s not assign to current node", index.GetName())
 			ZINC_INDEX_LIST.Delete(index.GetName())
 		}
