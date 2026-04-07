@@ -56,6 +56,11 @@ func listClusterNodes(c *gin.Context) {
 
 	alive := make(map[int]bool)
 	beats, err := clusterkit.ListHeartbeats(c.Request.Context())
+	if err != nil {
+		log.Errorf("failed to list heartbeats: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
 	for _, beat := range beats {
 		alive[beat.NodeID] = true
 	}
