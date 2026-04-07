@@ -23,7 +23,7 @@ require (
 	github.com/google/btree v1.1.3
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/haiwen/goutils v0.1.5
-	github.com/haiwen/goutils/clusterkit v0.0.0-unpublished
+	github.com/haiwen/goutils/clusterkit v0.1.0
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.20.5
