@@ -38,10 +38,10 @@ func SetupHttp(r *gin.Engine) {
 	})
 
 	// cluster manager
-	r.PUT("/api/cluster-nodes", forwardToManager)
-	r.POST("/api/cluster-nodes", forwardToManager)
-	r.GET("/api/cluster-nodes", forwardToManager)
-	r.DELETE("/api/cluster-nodes", forwardToManager)
+	r.GET("/api/cluster/nodes", forwardToManager)
+	r.POST("/api/cluster/nodes", forwardToManager)
+	r.PUT("/api/cluster/nodes", forwardToManager)
+	r.DELETE("/api/cluster/nodes", forwardToManager)
 
 	// auth
 	r.POST("/api/login", auth.Login)

@@ -3,93 +3,115 @@ package main
 import (
 	"fmt"
 	"math/rand"
+	"runtime/debug"
 	"slices"
 	"time"
 
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/haiwen/goutils/clusterkit"
 	"github.com/rs/zerolog/log"
 )
 
 var (
-	managerCloser = z.NewCloser(1)
-
-	curAssignMap = make(map[string]int)
+	closer = z.NewCloser(1)
 )
 
 func InitClusterManger() {
-	cluster.InitEtcd(conf.Cluster.EtcdPrefix, conf.Cluster.EtcdEndpoints)
-
-	go assign()
+	err := clusterkit.Open(conf.Cluster.EtcdEndpoints, conf.Cluster.EtcdPrefix)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open clusterkit")
+	}
+	go watchCluster()
 }
 
 func ShutDownClusterManager() {
-	managerCloser.SignalAndWait()
-	cluster.CloseEtcd()
+	closer.SignalAndWait()
+	clusterkit.Close()
 }
 
-func assign() {
-	assignMap, err := cluster.ListAssigns(managerCloser.Ctx())
-	if err != nil {
-		log.Fatal().Msgf("list assign error: %s", err)
-	}
-	curAssignMap = assignMap
-
-	tick := time.NewTicker(10 * time.Second)
-	defer managerCloser.Done()
+func watchCluster() {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("watchCluster crashed: %v\n%v", err, debug.Stack())
+		}
+		closer.Done()
+	}()
 
 	for {
 		select {
-		case <-managerCloser.HasBeenClosed():
+		case <-closer.HasBeenClosed():
 			return
-		case <-tick.C:
-			if err := execAssign(); err != nil {
-				log.Error().Msgf("assign to nodes error: %s", err)
-			}
+		case <-time.After(time.Second * 15):
+			// do nothing
+		}
+
+		err := updateAssigns()
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to update assigns")
 		}
 	}
 }
 
-func execAssign() error {
-	curNodeIds, err := cluster.ListAvailableNodes(managerCloser.Ctx())
+// updateAssigns rebalances the 256 two-hex-digit prefixes across the currently alive nodes.
+func updateAssigns() error {
+	// fetch heartbeats and cluster nodes
+	hbs, err := clusterkit.ListHeartbeats(closer.Ctx())
 	if err != nil {
-		return fmt.Errorf("assign error: %w", err)
+		return fmt.Errorf("failed to list heartbeats: %w", err)
 	}
-	info, err := cluster.GetClusterInfo(managerCloser.Ctx())
+	cluster, _, err := clusterkit.GetClusterNodes(closer.Ctx())
 	if err != nil {
-		return fmt.Errorf("failed to get cluster info: %w", err)
+		return fmt.Errorf("failed to get cluster nodes: %w", err)
 	}
 
+	// filter deleted nodes
 	var alive []int
-	for _, id := range curNodeIds {
-		exist := slices.ContainsFunc(info,
-			func(node cluster.NodeInfo) bool { return node.NodeId == id },
+	for _, hb := range hbs {
+		exist := slices.ContainsFunc(cluster.Nodes,
+			func(node clusterkit.ClusterNode) bool { return node.ID == hb.NodeID },
 		)
 		if !exist {
 			continue
 		}
-		alive = append(alive, id)
+		alive = append(alive, hb.NodeID)
 	}
 	if len(alive) == 0 {
+		// nothing to do when no alive nodes
 		return nil
 	}
 
-	updateAssigns := distribute(alive)
-	if len(updateAssigns) <= 0 {
-		return nil
+	// fetch current assignments
+	assigns, _, err := clusterkit.ListAssigns(closer.Ctx())
+	if err != nil {
+		return fmt.Errorf("failed to list assigns: %w", err)
 	}
 
-	if err := cluster.PutAssigns(managerCloser.Ctx(), updateAssigns); err != nil {
-		return fmt.Errorf("update assigns error: %w", err)
+	hash := make(map[string]int)
+	for _, assign := range assigns {
+		hash[assign.Prefix] = assign.NodeID
 	}
-	for partition, nodeId := range updateAssigns {
-		curAssignMap[partition] = nodeId
+	// Node IDs should be sorted to keep the distribute result steady.
+	slices.Sort(alive)
+	hash = distribute(alive, hash)
+
+	if len(hash) > 0 {
+		var updates []clusterkit.Assign
+		for k, v := range hash {
+			updates = append(updates, clusterkit.Assign{
+				Prefix: k, NodeID: v,
+			})
+		}
+		err := clusterkit.SetAssigns(updates)
+		if err != nil {
+			return fmt.Errorf("failed to set assigns: %w", err)
+		}
+		log.Info().Msg("cluster assigns updated")
 	}
+
 	return nil
 }
 
-func distribute(curNodeIds []int) map[string]int {
+func distribute(curNodeIds []int, curAssignMap map[string]int) map[string]int {
 	fullAssigns := make(map[string]struct{})
 	for i := 0; i < 1<<8; i++ {
 		fullAssigns[fmt.Sprintf("%02x", i)] = struct{}{}

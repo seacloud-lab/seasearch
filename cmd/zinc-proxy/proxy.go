@@ -1,26 +1,26 @@
 package main
 
 import (
+	"cmp"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/haiwen/goutils/clusterkit"
 	"github.com/rs/zerolog/log"
-
-	"github.com/zincsearch/zincsearch/pkg/cluster"
 )
 
 var (
+	closer *z.Closer
 	// nodeId -> url
 	nodeMap *NodeMap
 	// partition -> node id
 	assignMap *AssignMap
-	closer    = z.NewCloser(1)
 )
 
 type AssignMap struct {
@@ -40,116 +40,149 @@ type nodeInfo struct {
 }
 
 func StartProxy() {
-	cluster.InitEtcd(conf.Etcd.Prefix, conf.Etcd.Endpoints)
+	closer = z.NewCloser(0)
 	nodeMap = &NodeMap{
 		mp: make(map[int]string),
 	}
 	assignMap = &AssignMap{
 		mp: make(map[string]int),
 	}
-
-	go syncClusterInfo()
-}
-
-func syncClusterInfo() {
-	defer closer.Done()
-
-	defer func() {
-		if err := recover(); err != nil {
-			log.Printf("sync cluster info goroutine crashed: %v\n%s", err, debug.Stack())
-		}
-	}()
-
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-
-	for {
-		err := syncCluster()
-		if err != nil {
-			log.Err(err).Msg("failed to sync cluster info: ")
-			log.Info().Msg("clearing cluster map")
-			updateClusterInfo(nil)
-		}
-
-		timer.Reset(time.Minute)
-		select {
-		case <-timer.C:
-			// do nothing
-		case <-closer.HasBeenClosed():
-			return
-		}
-	}
-}
-
-func syncCluster() error {
-	infos, err := cluster.GetClusterInfo(closer.Ctx())
+	err := clusterkit.Open(conf.Etcd.Endpoints, conf.Etcd.Prefix)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to init proxy")
-	}
-	updateClusterInfo(infos)
-
-	assigns, err := cluster.ListAssigns(closer.Ctx())
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to init proxy")
+		log.Fatal().Err(err).Msg("failed to open clusterkit")
 	}
 
-	assignMap.mutex.Lock()
-	for partition, nodeId := range assigns {
-		assignMap.mp[partition] = nodeId
-	}
-	assignMap.mutex.Unlock()
-
-	assignCh := cluster.WatchAssigns(closer.Ctx())
-	nodeCh := cluster.WatchClusterNodeInfo(closer.Ctx())
-
-	for {
-		select {
-		case event, ok := <-assignCh:
-			if !ok {
-				return nil
-			}
-			if event.Err != nil {
-				return event.Err
-			}
-			if !event.Valid {
-				return fmt.Errorf("invalid assign event")
-			}
-
-			log.Debug().Msgf("update assign")
-			if event.ItemUpdated {
-				assignMap.mutex.Lock()
-				assignMap.mp[event.Assign.Partition] = event.Assign.NodeId
-				assignMap.mutex.Unlock()
-			} else {
-				assignMap.mutex.Lock()
-				delete(assignMap.mp, event.Assign.Partition)
-				assignMap.mutex.Unlock()
-			}
-
-		case event, ok := <-nodeCh:
-			if !ok {
-				return nil
-			}
-			if event.Err != nil {
-				return event.Err
-			}
-			if !event.Valid {
-				return fmt.Errorf("invalid assign event")
-			}
-			log.Debug().Msgf("update nodes")
-
-			if event.ItemUpdated {
-				updateClusterInfo(event.Info)
-			} else {
-				updateClusterInfo(nil)
-				log.Warn().Msg("cluster node was removed")
-			}
-		}
-	}
+	closer.AddRunning(2)
+	go syncClusterNodes()
+	go syncAssigns()
 }
 
 func ShutDownProxy() {
 	closer.SignalAndWait()
+	clusterkit.Close()
+}
+
+func syncClusterNodes() {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("syncClusterNodes crashed: %v\n%v", err, debug.Stack())
+		}
+		closer.Done()
+	}()
+
+	for {
+		err := watchClusterNodes()
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to watch cluster nodes")
+		}
+
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-time.After(time.Second * 15):
+			continue
+		}
+	}
+}
+
+func watchClusterNodes() error {
+	rev, err := updateNodeMp()
+	if err != nil {
+		return err
+	}
+	it := clusterkit.WatchClusterNodes(closer.Ctx(), rev)
+	for range it.Range() {
+		_, err = updateNodeMp()
+		if err != nil {
+			return err
+		}
+	}
+	return it.Error()
+}
+
+func updateNodeMp() (int64, error) {
+	nodes, rev, err := clusterkit.GetClusterNodes(closer.Ctx())
+	if err != nil {
+		return 0, fmt.Errorf("failed to get cluster nodes: %w", err)
+	}
+
+	nodeMap.mutex.Lock()
+	defer nodeMap.mutex.Unlock()
+
+	nodeMap.mp = make(map[int]string)
+	nodeMap.nodeList = nil
+	for _, node := range nodes.Nodes {
+		nodeMap.mp[node.ID] = node.URL
+		nodeMap.nodeList = append(nodeMap.nodeList, nodeInfo{
+			id:   node.ID,
+			addr: node.URL,
+		})
+	}
+	slices.SortFunc(nodeMap.nodeList, func(a, b nodeInfo) int {
+		return cmp.Compare(a.id, b.id)
+	})
+
+	return rev, nil
+}
+
+func syncAssigns() {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("syncAssigns crashed: %v\n%v", err, debug.Stack())
+		}
+		closer.Done()
+	}()
+
+	for {
+		err := watchAssigns()
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to watch assigns")
+		}
+
+		// Reset the cluster information when it goes out of sync.
+		assignMap.mutex.Lock()
+		assignMap.mp = make(map[string]int)
+		assignMap.mutex.Unlock()
+
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case <-time.After(time.Second * 15):
+			continue
+		}
+	}
+}
+
+func watchAssigns() error {
+	rev, err := updateAssigns()
+	if err != nil {
+		return err
+	}
+	it := clusterkit.WatchAssigns(closer.Ctx(), rev)
+	for range it.Range() {
+		_, err = updateAssigns()
+		if err != nil {
+			return err
+		}
+	}
+	return it.Error()
+}
+
+func updateAssigns() (int64, error) {
+	assigns, rev, err := clusterkit.ListAssigns(closer.Ctx())
+	if err != nil {
+		return 0, fmt.Errorf("failed to list assigns: %w", err)
+	}
+
+	assignMap.mutex.Lock()
+	defer assignMap.mutex.Unlock()
+
+	assignMap.mp = make(map[string]int)
+	for _, assign := range assigns {
+		assignMap.mp[assign.Prefix] = assign.NodeID
+	}
+
+	return rev, nil
 }
 
 func GetAddrByIndex(indexName string) (string, error) {
@@ -192,23 +225,4 @@ func getAssignNodeByIndex(indexName string) (int, bool) {
 
 	id, ok := assignMap.mp[assign]
 	return id, ok
-}
-
-func updateClusterInfo(infos []cluster.NodeInfo) {
-	nodeMap.mutex.Lock()
-	defer nodeMap.mutex.Unlock()
-
-	nodeMap.mp = make(map[int]string)
-	nodeMap.nodeList = make([]nodeInfo, len(infos))
-
-	for i, info := range infos {
-		nodeMap.mp[info.NodeId] = info.Address
-		nodeMap.nodeList[i] = nodeInfo{
-			id:   info.NodeId,
-			addr: info.Address,
-		}
-	}
-	sort.Slice(nodeMap.nodeList, func(i, j int) bool {
-		return nodeMap.nodeList[i].id < nodeMap.nodeList[j].id
-	})
 }
