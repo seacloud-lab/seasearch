@@ -174,7 +174,7 @@ func MultiSearch(c *gin.Context) {
 	eg.SetLimit(6)
 
 	for addr, indexList := range addrIndexMap {
-		host := addr
+		addr := addr
 		indexes := indexList
 		eg.Go(func() error {
 			buf := bytes.Buffer{}
@@ -201,7 +201,7 @@ func MultiSearch(c *gin.Context) {
 				}
 			}
 			var result multiSearchRsp
-			err := fetchHTTP(http.MethodPost, host, c.Request.URL.Path, "", &buf, &result, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, c.Request.URL.Path, "", &buf, &result, auth, true)
 			if err != nil {
 				return err
 			}

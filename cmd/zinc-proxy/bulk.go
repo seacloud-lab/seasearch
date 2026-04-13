@@ -39,7 +39,7 @@ func Bulk(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(6)
 	for addr, data := range nodeDataMap {
-		host := addr
+		addr := addr
 		data := data
 		eg.Go(func() error {
 			buf := bytes.Buffer{}
@@ -50,7 +50,7 @@ func Bulk(c *gin.Context) {
 				}
 			}
 			result := meta.HTTPResponseRecordCount{}
-			err := fetchHTTP(http.MethodPost, host, c.Request.URL.Path, "", &buf, &result, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, c.Request.URL.Path, "", &buf, &result, auth, true)
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ func EsBulk(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(6)
 	for addr, data := range nodeDataMap {
-		host := addr
+		addr := addr
 		data := data
 		eg.Go(func() error {
 			buf := bytes.Buffer{}
@@ -107,7 +107,7 @@ func EsBulk(c *gin.Context) {
 				}
 			}
 			result := document.BulkResponse{Items: []map[string]document.BulkResponseItem{}}
-			err := fetchHTTP(http.MethodPost, host, c.Request.URL.Path, "", &buf, &result, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, c.Request.URL.Path, "", &buf, &result, auth, true)
 			if err != nil {
 				return err
 			}
@@ -271,12 +271,16 @@ func BulkV2(c *gin.Context) {
 
 	// rewind body
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
-	host, err := GetAddrByIndex(target)
+	addr, err := GetAddrByIndex(target)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	u := &url.URL{Scheme: "http", Host: host}
+	u, err := url.Parse(addr)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
 	proxyPool.Get(u).ServeHTTP(c.Writer, c.Request)
 
 }

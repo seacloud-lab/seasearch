@@ -171,12 +171,16 @@ func Create(c *gin.Context) {
 	}
 
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
-	host, err := GetAddrByIndex(newIndex.Name)
+	addr, err := GetAddrByIndex(newIndex.Name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	u := &url.URL{Scheme: "http", Host: host}
+	u, err := url.Parse(addr)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
 	proxyPool.Get(u).ServeHTTP(c.Writer, c.Request)
 }
 
@@ -213,11 +217,11 @@ func Delete(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(6)
 	for addr, data := range reqMap {
-		host := addr
+		addr := addr
 		data := data
 		eg.Go(func() error {
 			path := fmt.Sprintf("/api/index/%s", strings.Join(data, ","))
-			err := fetchHTTP(http.MethodDelete, host, path, "", nil, nil, auth, false)
+			err := fetchHTTP(http.MethodDelete, addr, path, "", nil, nil, auth, false)
 			if err != nil {
 				return err
 			}
