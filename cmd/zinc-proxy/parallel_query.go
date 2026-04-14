@@ -201,7 +201,7 @@ func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexe
 	var eg errgroup.Group
 	eg.SetLimit(6)
 	for addr, partialIndexes := range parallelNodeMap {
-		host := addr
+		addr := addr
 		partialIndexes := partialIndexes
 		eg.Go(func() error {
 			var req = search.InternalQueryStatsRequest{
@@ -210,7 +210,7 @@ func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexe
 			}
 			reqBody, _ := json.Marshal(req)
 			var result *zincsearch.UnifiedStats
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/get_stats", "", bytes.NewBuffer(reqBody), &result, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, "/api/internal/get_stats", "", bytes.NewBuffer(reqBody), &result, auth, true)
 			if err != nil {
 				return err
 			}
@@ -245,7 +245,7 @@ func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialInd
 	eg.SetLimit(6)
 
 	for addr, partialIndexes := range parallelNodeMap {
-		host := addr
+		addr := addr
 		partialIndexes := partialIndexes
 		eg.Go(func() error {
 			var req = search.InternalUnifiedSearchRequest{
@@ -262,7 +262,7 @@ func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialInd
 
 			reqBody, _ := json.Marshal(req)
 			var res meta.SearchResponse
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/unified_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, "/api/internal/unified_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
 			if err != nil {
 				return err
 			}

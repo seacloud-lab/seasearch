@@ -26,15 +26,14 @@ func InitProxy() {
 	}
 }
 
-func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{}, auth string, returnBody bool) error {
-	u := &url.URL{
-		Scheme:   "http",
-		Host:     host,
-		Path:     path,
-		RawQuery: query,
+func fetchHTTP(method, addr, path, query string, reqBody io.Reader, x interface{}, auth string, returnBody bool) error {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return fmt.Errorf("failed to parse addr %v: %w", addr, err)
 	}
+	u = u.JoinPath(path)
+	u.RawQuery = query
 	var req *http.Request
-	var err error
 	if reqBody != nil {
 		req, err = http.NewRequest(method, u.String(), reqBody)
 	} else {
@@ -46,7 +45,7 @@ func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{
 	}
 	rsp, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil {
-		return fmt.Errorf("failed to send request to node %s: %w", host, err)
+		return fmt.Errorf("failed to send request to node %s: %w", addr, err)
 	}
 	defer rsp.Body.Close()
 
@@ -54,20 +53,20 @@ func fetchHTTP(method, host, path, query string, reqBody io.Reader, x interface{
 		body, _ := io.ReadAll(rsp.Body)
 		resp := &meta.HTTPResponseError{}
 		_ = json.Unmarshal(body, &resp)
-		return newHttpClientError(fmt.Sprintf("bad response from host: %s, err: %s", host, resp.Error), rsp.StatusCode)
+		return newHttpClientError(fmt.Sprintf("bad response from addr: %s, err: %s", addr, resp.Error), rsp.StatusCode)
 	} else if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to get response from node %s: %s", host, rsp.Status)
+		return fmt.Errorf("failed to get response from node %s: %s", addr, rsp.Status)
 	}
 	if !returnBody {
 		return nil
 	}
 	body, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response body from node %s: %w", host, err)
+		return fmt.Errorf("failed to read response body from node %s: %w", addr, err)
 	}
 	err = json.Unmarshal(body, x)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal response body from node %s: %w", host, err)
+		return fmt.Errorf("failed to unmarshal response body from node %s: %w", addr, err)
 	}
 
 	return nil

@@ -153,9 +153,12 @@ func directForwarding(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-
-	u := url.URL{Scheme: "http", Host: addr}
-	proxyPool.Get(&u).ServeHTTP(c.Writer, c.Request)
+	u, err := url.Parse(addr)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	proxyPool.Get(u).ServeHTTP(c.Writer, c.Request)
 }
 
 func forwardToManager(c *gin.Context) {

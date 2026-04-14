@@ -85,7 +85,7 @@ func SearchVector(c *gin.Context) {
 	eg := errgroup.Group{}
 	eg.SetLimit(6)
 	for addr, segments := range nodeSegmentsMap {
-		host := addr
+		addr := addr
 		segments := segments
 		eg.Go(func() error {
 			var req = core.InternalVectorQuery{
@@ -99,7 +99,7 @@ func SearchVector(c *gin.Context) {
 
 			reqBody, _ := json.Marshal(req)
 			var res core.InternalVectorSearchResponse
-			err := fetchHTTP(http.MethodPost, host, "/api/internal/vector_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
+			err := fetchHTTP(http.MethodPost, addr, "/api/internal/vector_search", "", bytes.NewBuffer(reqBody), &res, auth, true)
 			if err != nil {
 				return err
 			}
