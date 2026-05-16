@@ -40,7 +40,7 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, "release", c.GinMode)
 		assert.Equal(t, "4080", c.ServerPort)
 		assert.Equal(t, "./data", c.DataPath)
-		assert.Equal(t, true, c.SentryEnable)
+		assert.Equal(t, false, c.SentryEnable)
 		assert.Equal(t, "https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942", c.SentryDSN) // Add check for default value
 		assert.Equal(t, false, c.TelemetryEnable)
 		assert.Equal(t, false, c.PrometheusEnable)

@@ -30,8 +30,8 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 
 	"github.com/dgraph-io/ristretto/z"
-	"golang.org/x/sync/errgroup"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
