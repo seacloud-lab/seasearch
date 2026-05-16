@@ -16,16 +16,18 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/argon2"
-
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+
+	"golang.org/x/crypto/argon2"
 )
 
 func CreateUser(id, name, plaintextPassword, role string) (*meta.User, error) {
@@ -73,7 +75,8 @@ func CreateUser(id, name, plaintextPassword, role string) (*meta.User, error) {
 var _cacheGeneratePassword = sync.Map{}
 
 func GeneratePassword(password, salt string) string {
-	key := password + ":" + salt
+	shasum := sha256.Sum256([]byte(password + ":" + salt))
+	key := hex.EncodeToString(shasum[:])
 	if v, ok := _cacheGeneratePassword.Load(key); ok {
 		return v.(string)
 	}
