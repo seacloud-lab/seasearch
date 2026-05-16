@@ -24,13 +24,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+
+	"github.com/dgraph-io/ristretto/z"
 	"golang.org/x/sync/errgroup"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -79,7 +80,7 @@ func InitIndexList() {
 		log.Fatal().Err(err).Msg("Error loading alias")
 	}
 
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 
@@ -298,7 +299,7 @@ func LazyCloseSecondIndexShardWriters() {
 }
 
 func CloseIndexList() {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 	indexUpdateCloser.SignalAndWait()

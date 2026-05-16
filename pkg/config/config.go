@@ -22,11 +22,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+
 	"github.com/blugelabs/ice/compress"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 const (
@@ -34,9 +35,6 @@ const (
 	WalStorageTypeRkv   = "rkv"
 	WalStorageTypePgsql = "postgresql"
 	WalStorageTypeMysql = "mysql"
-
-	ServerModeCluster = "cluster"
-	ServerModeProxy   = "proxy"
 )
 
 type config struct {
@@ -45,12 +43,10 @@ type config struct {
 	ServerAddress             string        `env:"ZINC_SERVER_ADDRESS"`
 	ServerTLSCertificateFile  string        `env:"ZINC_SERVER_TLS_CERTIFICATE_FILE"`
 	ServerTLSKeyFile          string        `env:"ZINC_SERVER_TLS_KEY_FILE"`
-	ServerMode                string        `env:"SS_SERVER_MODE,default=node"`
-	NodeID                    int           `env:"ZINC_NODE_ID,default=1"`
 	DataPath                  string        `env:"SS_DATA_PATH,default=./data"`
 	MetadataStorage           string        `env:"ZINC_METADATA_STORAGE,default=bolt"`
 	IceCompressor             string        `env:"ZINC_ICE_COMPRESSOR,default=zstd"`
-	SentryEnable              bool          `env:"ZINC_SENTRY,default=true"`
+	SentryEnable              bool          `env:"ZINC_SENTRY,default=false"`
 	SentryDSN                 string        `env:"ZINC_SENTRY_DSN,default=https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942"`
 	ProfilerEnable            bool          `env:"ZINC_PROFILER,default=false"`
 	ProfilerServer            string        `env:"ZINC_PROFILER_SERVER,default=https://pyroscope.dev.zincsearch.com"`
@@ -112,7 +108,8 @@ type oss struct {
 }
 
 type cluster struct {
-	NodeId int `env:"SS_CLUSTER_ID,default=1"`
+	Enable bool `env:"SS_CLUSTER_ENABLE"`
+	NodeId int  `env:"SS_CLUSTER_ID,default=1"`
 }
 
 type shard struct {

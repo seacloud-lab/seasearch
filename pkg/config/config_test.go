@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConfig(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {
-		os.Setenv("SS_SERVER_MODE", "node")
 		os.Setenv("SS_ETCD_ENDPOINTS", "localhost:2379")
 		os.Setenv("ZINC_MAX_DOCUMENT_SIZE", "1m")
 		os.Setenv("ZINC_WAL_SYNC_INTERVAL", "10s")
@@ -39,7 +39,6 @@ func TestConfig(t *testing.T) {
 
 		assert.Equal(t, "release", c.GinMode)
 		assert.Equal(t, "4080", c.ServerPort)
-		assert.Equal(t, "node", c.ServerMode)
 		assert.Equal(t, "./data", c.DataPath)
 		assert.Equal(t, true, c.SentryEnable)
 		assert.Equal(t, "https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942", c.SentryDSN) // Add check for default value

@@ -28,7 +28,7 @@ var (
 )
 
 func Init() {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 
@@ -47,7 +47,7 @@ func Init() {
 }
 
 func Close() {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 	closer.SignalAndWait()
@@ -138,7 +138,7 @@ func updateAssigns() (int64, error) {
 }
 
 func AssignCheck(indexName string) bool {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return true
 	}
 
