@@ -3,10 +3,10 @@ package main
 import (
 	"reflect"
 
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 type ProxyConfig struct {
@@ -42,5 +42,4 @@ func initProxyConfig() {
 	_ = godotenv.Load()
 	zutils.LoadConfig(reflect.ValueOf(conf).Elem())
 	gin.SetMode(gin.ReleaseMode)
-	config.Global.ServerMode = config.ServerModeProxy
 }

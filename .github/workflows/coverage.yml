@@ -37,11 +37,20 @@ jobs:
         run: |
             bash -e ./ci/install_faiss.sh
 
-      - name: Static Check
+      - name: Check Formatting (gofmt)
         run: |
-          [ "$(gofmt -l . 2>&1)" == "" ]
-          go vet ./...
-          staticcheck ./...
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "Standard formatting issues found in:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run staticcheck
+        run: staticcheck ./...
 
       - run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
       - name: Codecov
