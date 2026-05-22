@@ -31,8 +31,7 @@ var ErrorKeyNotExists = errors.New("key not exists")
 var db storage.Storager
 
 func InitMetaStorage() {
-	if strings.ToLower(config.Global.ServerMode) == config.ServerModeCluster ||
-		strings.ToLower(config.Global.ServerMode) == config.ServerModeProxy {
+	if config.Global.Cluster.Enable {
 		db = etcd.New(config.Global.Etcd.Endpoints, config.Global.Etcd.Username, config.Global.Etcd.Password, config.Global.Etcd.Prefix+"/metadata")
 	} else {
 		switch strings.ToLower(config.Global.MetadataStorage) {

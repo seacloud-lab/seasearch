@@ -16,20 +16,21 @@
 package auth
 
 import (
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"sync"
 
+	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
 )
 
 var ZINC_CACHED_USERS = cachedUsers{users: map[string]*meta.User{}}
 var closer = z.NewCloser(2)
 
 func Init() {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 	go userUpdate()
@@ -37,7 +38,7 @@ func Init() {
 }
 
 func Close() {
-	if config.Global.ServerMode != config.ServerModeCluster {
+	if !config.Global.Cluster.Enable {
 		return
 	}
 	closer.SignalAndWait()
