@@ -10,11 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -30,6 +31,8 @@ func main() {
 	ider.InitIder()
 	InitProxy()
 	StartProxy()
+
+	go logger.HandleRotateSignal()
 
 	app := gin.New()
 	SetupHttp(app)
