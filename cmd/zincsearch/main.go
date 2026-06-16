@@ -27,24 +27,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/grafana/pyroscope-go"
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/routes"
 	"github.com/zincsearch/zincsearch/pkg/wal"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
+	"github.com/grafana/pyroscope-go"
 	"github.com/rs/zerolog/log"
-
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
-	"github.com/zincsearch/zincsearch/pkg/routes"
 )
 
 // @title           Zinc Search engine API
@@ -105,6 +104,8 @@ func main() {
 		core.InitWalList()
 		wal.Init()
 	}
+
+	go logger.HandleRotateSignal()
 
 	// HTTP init
 	app := gin.New()

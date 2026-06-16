@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 
+	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,6 +19,8 @@ func main() {
 	initConfig()
 
 	log.Logger = logger.SetupMainLog(conf.General.LogToStd, "zinc-cluster-manager.log", conf.General.LogDir, conf.General.LogLevel, logger.ComponentSeaSearchClusterManager)
+
+	go logger.HandleRotateSignal()
 
 	app := gin.New()
 	SetupHttp(app)
