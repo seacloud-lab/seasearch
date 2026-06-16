@@ -5,47 +5,114 @@ import (
 	"io"
 	stdlog "log"
 	"os"
-	"path"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sys/unix"
 )
 
-type LogOuter struct {
-	LogToStdout   bool
-	Out           io.Writer
-	componentName string
+const (
+	ComponentSeaSearch               = "[seasearch] "
+	ComponentSeaSearchProxy          = "[seasearch-proxy] "
+	ComponentSeaSearchClusterManager = "[seasearch-cluster-manager] "
+)
+
+var (
+	writersMutex sync.Mutex
+	writers      []*RotatingWriter
+)
+
+type RotatingWriter struct {
+	componentName  string
+	filename       string
+	logToStdOut    bool
+	redirectStdErr bool
+
+	mutex  sync.Mutex
+	file   *os.File
+	writer io.Writer
 }
 
-const ComponentSeaSearch = "[seasearch] "
-const ComponentSeaSearchProxy = "[seasearch-proxy] "
-const ComponentSeaSearchClusterManager = "[seasearch-cluster-manager] "
+func newLogger(componentName, filename string, stdout, stderr bool) *RotatingWriter {
+	w := new(RotatingWriter)
+	w.componentName = componentName
+	w.filename = filename
+	w.logToStdOut = stdout
+	w.redirectStdErr = stderr
 
-func (l *LogOuter) Write(data []byte) (n int, err error) {
-	if l.LogToStdout {
-		buf := make([]byte, 0, len(l.componentName)+len(data))
-		buf = append(buf, []byte(l.componentName)...)
-		_, err := l.Out.Write(append(buf, data...))
-		return len(data), err
+	writersMutex.Lock()
+	writers = append(writers, w)
+	writersMutex.Unlock()
+
+	return w
+}
+
+func (w *RotatingWriter) reopen() error {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if w.logToStdOut {
+		w.writer = os.Stdout
+		return nil
 	}
-	return l.Out.Write(data)
+
+	oldFile := w.file
+
+	err := os.MkdirAll(filepath.Dir(w.filename), 0777)
+	if err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+	file, err := os.OpenFile(w.filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to open log file %v: %w", w.filename, err)
+	}
+	if w.redirectStdErr {
+		err = unix.Dup2(int(file.Fd()), int(os.Stderr.Fd()))
+		if err != nil {
+			file.Close()
+			return fmt.Errorf("failed to duplicate stderr: %w", err)
+		}
+	}
+	w.file = file
+	w.writer = file
+
+	if oldFile != nil {
+		oldFile.Close()
+	}
+
+	return nil
+}
+
+func (w *RotatingWriter) Write(data []byte) (int, error) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if !w.logToStdOut {
+		return w.writer.Write(data)
+	}
+
+	buf := make([]byte, 0, len(w.componentName)+len(data))
+	buf = append(buf, w.componentName...)
+	buf = append(buf, data...)
+	_, err := w.writer.Write(buf)
+	return len(data), err
 }
 
 func SetupAccessLog(logToStdout bool, name, logDir, componentName string) zerolog.Logger {
-	var out *LogOuter
+	var out *RotatingWriter
 	if logToStdout {
-		out = &LogOuter{Out: os.Stdout, LogToStdout: true, componentName: componentName}
+		out = newLogger(componentName, "", true, false)
 	} else {
-		err := os.MkdirAll(logDir, os.ModePerm)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-		}
-		file, err := os.OpenFile(path.Join(logDir, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-		}
-		out = &LogOuter{Out: file, LogToStdout: false, componentName: componentName}
+		out = newLogger(componentName, filepath.Join(logDir, name), false, false)
+	}
+	err := out.reopen()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open log")
 	}
 
 	writer := zerolog.ConsoleWriter{Out: out, TimeFormat: "[2006-01-02 15:04:05]", NoColor: true}
@@ -87,24 +154,15 @@ func (s *stdLogAdapter) Write(data []byte) (int, error) {
 }
 
 func SetupMainLog(logToStdout bool, name, logDir, level, componentName string) zerolog.Logger {
-	var out *LogOuter
+	var out *RotatingWriter
 	if logToStdout {
-		out = &LogOuter{Out: os.Stdout, LogToStdout: true, componentName: componentName}
+		out = newLogger(componentName, "", true, false)
 	} else {
-		err := os.MkdirAll(logDir, os.ModePerm)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot make dir")
-		}
-		file, err := os.OpenFile(path.Join(logDir, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal().Err(err).Msg("set log output to file error, cannot open file")
-		}
-		// setup stdErr
-		err = Dup(int(file.Fd()), int(os.Stderr.Fd()))
-		if err != nil {
-			log.Fatal().Err(err).Msgf("failed to dup stderr: %s", err)
-		}
-		out = &LogOuter{Out: file, LogToStdout: false, componentName: componentName}
+		out = newLogger(componentName, filepath.Join(logDir, name), false, true)
+	}
+	err := out.reopen()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open log")
 	}
 
 	lv, err := zerolog.ParseLevel(level)
@@ -142,4 +200,22 @@ func SetupMainLog(logToStdout bool, name, logDir, level, componentName string) z
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(&stdLogAdapter{out: zeroLogger})
 	return zeroLogger
+}
+
+func HandleRotateSignal() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR1)
+
+	for {
+		<-ch
+
+		writersMutex.Lock()
+		for _, logger := range writers {
+			err := logger.reopen()
+			if err != nil {
+				log.Error().Msgf("failed to rotate logs: %v", err)
+			}
+		}
+		writersMutex.Unlock()
+	}
 }
