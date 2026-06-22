@@ -22,7 +22,7 @@ require (
 	github.com/goccy/go-json v0.10.6
 	github.com/google/btree v1.1.3
 	github.com/grafana/pyroscope-go v1.2.0
-	github.com/haiwen/goutils/clusterkit v0.1.0
+	github.com/haiwen/goutils/clusterkit v0.1.1
 	github.com/haiwen/goutils/objclient v0.1.6
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.10.9
