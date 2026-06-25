@@ -188,7 +188,11 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 			if newProp.Dims <= 0 {
 				return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should greater than 0", field))
 			}
-			if newProp.VecIndexType == vector.IvfPQ {
+			switch newProp.VecIndexType {
+			case vector.Flat:
+				// do nothing
+
+			case vector.IVFPQ:
 				if newProp.M <= 0 {
 					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s m should greater than 0", field))
 				}
@@ -198,8 +202,11 @@ func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{
 				if newProp.Dims%newProp.M != 0 {
 					return nil, errors.New(errors.ErrorTypeInvalidArgument, fmt.Sprintf("[mappings] %s dims should be divisible by m", field))
 				}
-			}
-			if newProp.VecIndexType != vector.Flat && newProp.VecIndexType != vector.IvfPQ {
+
+			case vector.HNSW:
+				// do nothing
+
+			default:
 				return nil, errors.New(errors.ErrorTypeParsingException, fmt.Sprintf("[mappings] %s vec_index_type parse err invalid vec type", field))
 			}
 		}

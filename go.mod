@@ -2,6 +2,11 @@ module github.com/zincsearch/zincsearch
 
 go 1.25.0
 
+// Keep the usearch Go binding in sync with usearch library v2.25.2.
+// This version corresponds to commit 29e5277
+// (installed via: go get github.com/unum-cloud/usearch/golang@29e5277).
+require github.com/unum-cloud/usearch/golang v0.0.0-20260502205332-29e527731957
+
 require (
 	github.com/DataIntelligenceCrew/go-faiss v0.2.0
 	github.com/blevesearch/mmap-go v1.0.4

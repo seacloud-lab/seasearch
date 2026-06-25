@@ -152,7 +152,7 @@ func execGC() (bool, error) {
 func lazyCloseSegmentWriter() {
 	ticker := time.NewTicker(1 * time.Minute)
 	for range ticker.C {
-		closeList := make([]*VecSegment, 0)
+		closeList := make([]*IVFPQSegment, 0)
 		vecIdxManager.lock.Lock()
 		for _, vec := range vecIdxManager.cache {
 			closeList = append(closeList, vec.ListSegment()...)
@@ -314,7 +314,7 @@ func SealIndex(zincIndexName string, field string) error {
 	if !ok {
 		return ErrVecIndexNotExists
 	}
-	if vecIndex.TargetType != vector.IvfPQ {
+	if vecIndex.TargetType != vector.IVFPQ {
 		return fmt.Errorf("the vector index doesn't need to seal")
 	}
 
@@ -364,7 +364,7 @@ func backgroundSealCheck() {
 				continue
 			}
 			for field, vecIndex := range vecIndexes {
-				if vecIndex.TargetType != vector.IvfPQ {
+				if vecIndex.TargetType != vector.IVFPQ {
 					continue
 				}
 

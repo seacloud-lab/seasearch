@@ -140,7 +140,7 @@ func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, distances []DocDi
 	for _, index := range indexes {
 		searchers = append(searchers, index.GetSearchers(0, 0)...)
 	}
-	resp, err := zincsearch.MultiSearch(context.Background(), zq, indexes[0].GetMappings(), nil, simpleSearchersToSearcher(searchers)...)
+	resp, err := zincsearch.MultiZincSearch(context.Background(), zq, indexes[0].GetMappings(), nil, simpleSearchersToSearcher(searchers)...)
 	if err != nil {
 		return nil, err
 	}

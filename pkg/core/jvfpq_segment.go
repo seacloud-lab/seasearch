@@ -12,9 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/DataIntelligenceCrew/go-faiss"
-	"github.com/blugelabs/bluge"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/faiss_wrapper"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -23,12 +20,16 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/uquery/query"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+
+	"github.com/DataIntelligenceCrew/go-faiss"
+	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 )
 
 // we store original vectors with a fixed field.
 const internalVecField = "vec"
 
-type VecSegment struct {
+type IVFPQSegment struct {
 	baseIndex VectorIndex
 	ref       *meta.VectorSegment
 	index     faiss.Index
@@ -47,9 +48,9 @@ type VecSegment struct {
 	closeTime      time.Time
 }
 
-func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
+func openIVFPQSegment(vecIndex VectorIndex, id int) (*IVFPQSegment, error) {
 	ref := vecIndex.Meta().Segments[id]
-	seg := &VecSegment{
+	seg := &IVFPQSegment{
 		ref:       ref,
 		baseIndex: vecIndex,
 	}
@@ -68,7 +69,7 @@ func openSegment(vecIndex VectorIndex, id int) (*VecSegment, error) {
 	return seg, nil
 }
 
-func (s *VecSegment) initVecStorePath() error {
+func (s *IVFPQSegment) initVecStorePath() error {
 	p := path.Join(config.Global.DataPath, path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec"))
 	err := os.MkdirAll(p, 0777)
 	if err != nil {
@@ -77,7 +78,7 @@ func (s *VecSegment) initVecStorePath() error {
 	return nil
 }
 
-func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
+func (s *IVFPQSegment) openVecStoreReader() (*bluge.Reader, error) {
 	dataPath := config.Global.DataPath
 	name := path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
 	var cfg bluge.Config
@@ -116,7 +117,7 @@ func (s *VecSegment) openVecStoreReader() (*bluge.Reader, error) {
 	return r, err
 }
 
-func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
+func (s *IVFPQSegment) openVecStoreWriter() (*bluge.Writer, error) {
 	s.writerLock.Lock()
 	w := s.vecStoreWriter
 	s.writerLock.Unlock()
@@ -151,7 +152,7 @@ func (s *VecSegment) openVecStoreWriter() (*bluge.Writer, error) {
 	return writer, nil
 }
 
-func (s *VecSegment) closeVecStoreWriter() {
+func (s *IVFPQSegment) closeVecStoreWriter() {
 	s.writerLock.Lock()
 	s.closeTime = time.Now()
 	s.writerLock.Unlock()
@@ -159,11 +160,11 @@ func (s *VecSegment) closeVecStoreWriter() {
 	log.Debug().Msgf("close vec segment %s, current ref count: %d", s.getName(), curRef)
 }
 
-func (s *VecSegment) getName() string {
+func (s *IVFPQSegment) getName() string {
 	return fmt.Sprintf("%s_%d", s.baseIndex.Name(), s.ref.Id)
 }
 
-func (s *VecSegment) saveFaissIndex() error {
+func (s *IVFPQSegment) saveFaissIndex() error {
 	f, err := os.CreateTemp(vecIdxManager.tmpDir, "temp_index")
 	if err != nil {
 		return err
@@ -184,7 +185,7 @@ func (s *VecSegment) saveFaissIndex() error {
 	return err
 }
 
-func (s *VecSegment) loadFaissIndexFile() error {
+func (s *IVFPQSegment) loadFaissIndexFile() error {
 	localFile, closer, err := vecIdxManager.storage.LoadFile(s.getFaissIndexPath())
 	if err != nil {
 		return err
@@ -196,11 +197,11 @@ func (s *VecSegment) loadFaissIndexFile() error {
 	return err
 }
 
-func (s *VecSegment) getFaissIndexPath() string {
+func (s *IVFPQSegment) getFaissIndexPath() string {
 	return path.Join(s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "faiss")
 }
 
-func (s *VecSegment) Batch(batch *segBatch) error {
+func (s *IVFPQSegment) Batch(batch *segBatch) error {
 	s.Lock()
 	defer s.Unlock()
 	if len(batch.deleteIds) > 0 {
@@ -220,7 +221,7 @@ func (s *VecSegment) Batch(batch *segBatch) error {
 
 // addVectors
 // require Lock.
-func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
+func (s *IVFPQSegment) addVectors(vectors [][]float32, ids []int64) error {
 	// this should never have happened
 	if s.ref.Status != vector.StatusGrowing {
 		return fmt.Errorf("cannot add vectors to a non-Growing segment")
@@ -252,7 +253,7 @@ func (s *VecSegment) addVectors(vectors [][]float32, ids []int64) error {
 
 // removeIDs
 // require Lock.
-func (s *VecSegment) removeIDs(ids []int64) error {
+func (s *IVFPQSegment) removeIDs(ids []int64) error {
 	if s.ref.Status == vector.StatusSealed {
 		selector, err := faiss.NewIDSelectorBatch(ids)
 		if err != nil {
@@ -282,7 +283,7 @@ func (s *VecSegment) removeIDs(ids []int64) error {
 
 // GetExistsIds
 // Filter out the id that exists in this segment. It‘s lock free.
-func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
+func (s *IVFPQSegment) GetExistsIds(ids []int64) ([]int64, error) {
 	r, err := s.openVecStoreReader()
 	if err != nil {
 		return nil, err
@@ -323,7 +324,7 @@ func (s *VecSegment) GetExistsIds(ids []int64) ([]int64, error) {
 
 // save
 // require Lock.
-func (s *VecSegment) save() error {
+func (s *IVFPQSegment) save() error {
 	if s.ref.Status != vector.StatusSealed {
 		// the vectors have been updated, we clear the cache
 		s.freeCache()
@@ -350,7 +351,7 @@ func (s *VecSegment) save() error {
 	return s.saveFaissIndex()
 }
 
-func (s *VecSegment) Free() {
+func (s *IVFPQSegment) Free() {
 	if s.index != nil {
 		s.index.Delete()
 	}
@@ -367,21 +368,21 @@ func (s *VecSegment) Free() {
 
 // freeCache
 // require Lock
-func (s *VecSegment) freeCache() {
+func (s *IVFPQSegment) freeCache() {
 	s.ids = nil
 	s.cachedVectorsCache = nil
 }
 
 // Search
 // query vectors
-func (s *VecSegment) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
+func (s *IVFPQSegment) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
 	if s.ref.Status == vector.StatusGrowing {
 		return s.searchFlat(vec, k)
 	}
 	return s.searchIvfPq(vec, k, nprobe)
 }
 
-func (s *VecSegment) searchFlat(vec []float32, k int64) (map[string]float32, error) {
+func (s *IVFPQSegment) searchFlat(vec []float32, k int64) (map[string]float32, error) {
 	s.Lock()
 	ids, xb, err := s.getVecCaches()
 	s.Unlock()
@@ -398,7 +399,7 @@ func (s *VecSegment) searchFlat(vec []float32, k int64) (map[string]float32, err
 
 // getVecCaches
 // require Lock
-func (s *VecSegment) getVecCaches() ([]int64, []float32, error) {
+func (s *IVFPQSegment) getVecCaches() ([]int64, []float32, error) {
 	var cacheVectors []float32
 	var cacheIds []int64
 
@@ -430,7 +431,7 @@ func flatSearch(baseIds []int64, base []float32, query []float32, k, dim int) ma
 	return result
 }
 
-func (s *VecSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string]float32, error) {
+func (s *IVFPQSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string]float32, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -499,7 +500,7 @@ func L2Distance(slice1, slice2 []float32) (float32, error) {
 	return sum, nil
 }
 
-func (s *VecSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
+func (s *IVFPQSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
 	zq, err := query.TermsQuery(map[string]any{"_id": docIDs}, nil)
 	if err != nil {
 		return nil, err
@@ -527,7 +528,7 @@ func (s *VecSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]Doc
 
 // Seal
 // build an ivf_pq index, require Lock.
-func (s *VecSegment) Seal() error {
+func (s *IVFPQSegment) Seal() error {
 	s.Lock()
 	defer s.Unlock()
 
@@ -572,7 +573,7 @@ func (s *VecSegment) Seal() error {
 
 // Recall
 // calculate recall for whole segment, require RLock.
-func (s *VecSegment) Recall(count int, k int64, nprobe int) (float32, error) {
+func (s *IVFPQSegment) Recall(count int, k int64, nprobe int) (float32, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -615,7 +616,7 @@ func (s *VecSegment) Recall(count int, k int64, nprobe int) (float32, error) {
 
 // getQueryVectors
 // get some vectors from vec_store for Recall
-func (s *VecSegment) getQueryVectors(n int) ([][]float32, error) {
+func (s *IVFPQSegment) getQueryVectors(n int) ([][]float32, error) {
 	q := bluge.NewMatchAllQuery()
 	req := bluge.NewTopNSearch(n, q)
 	vectors, _, err := s.getVectors(int64(n), req)
@@ -632,13 +633,13 @@ func (s *VecSegment) getQueryVectors(n int) ([][]float32, error) {
 
 // getAllVectors
 // get all vectors from vec_store
-func (s *VecSegment) getAllVectors() ([]float32, []int64, error) {
+func (s *IVFPQSegment) getAllVectors() ([]float32, []int64, error) {
 	q := bluge.NewMatchAllQuery()
 	req := bluge.NewAllMatches(q)
 	return s.getVectors(atomic.LoadInt64(&s.ref.Count), req)
 }
 
-func (s *VecSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
+func (s *IVFPQSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
 	reader, err := s.openVecStoreReader()
 	if err != nil {
 		return nil, nil, err

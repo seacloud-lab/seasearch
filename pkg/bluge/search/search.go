@@ -19,25 +19,54 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"iter"
 	"sync/atomic"
+
+	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/uquery"
+	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
+	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+	"github.com/zincsearch/zincsearch/pkg/zutils/flex"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/blugelabs/bluge/search"
 	"github.com/blugelabs/bluge/search/aggregations"
-	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/config"
-
-	"golang.org/x/sync/errgroup"
-
 	"github.com/blugelabs/bluge/search/highlight"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/uquery"
-	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
-	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
-func MultiSearch(
+func Search(ctx context.Context, reader *bluge.Reader, request bluge.SearchRequest) flex.Iter[iter.Seq2[string, []byte]] {
+	return flex.NewIter(func(yield func(iter.Seq2[string, []byte]) bool) error {
+		it, err := reader.Search(ctx, request)
+		if err != nil {
+			return err
+		}
+		for {
+			match, err := it.Next()
+			if err != nil {
+				return err
+			} else if match == nil {
+				break
+			}
+
+			seq := func(yield func(string, []byte) bool) {
+				err = match.VisitStoredFields(yield)
+			}
+			if !yield(seq) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func MultiZincSearch(
 	ctx context.Context,
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,

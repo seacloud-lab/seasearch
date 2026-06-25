@@ -17,6 +17,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -38,7 +39,7 @@ type VectorIndex interface {
 	Free()
 	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
-	ListSegment() []*VecSegment
+	ListSegment() []*IVFPQSegment
 }
 
 type DocDistance struct {
@@ -98,7 +99,9 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 	} else {
 		subPath = field
 	}
-	if vecIndexMeta.TargetType == vector.Flat {
+
+	switch vecIndexMeta.TargetType {
+	case vector.Flat:
 		return &FlatIndex{
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
@@ -110,25 +113,44 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 				aTime:     time.Now(),
 			},
 		}, nil
-	}
 
-	ivfPqIndex := &IvfPqIndex{
-		baseIndex: baseIndex{
-			zincIndex: zincIndex,
-			name:      path.Join(zincIndex.GetName(), field),
-			storeName: path.Join(zincIndex.GetStoreName(), subPath),
-			field:     field,
-			ref:       vecIndexMeta,
-			refCount:  1,
-			aTime:     time.Now(),
-		},
+	case vector.IVFPQ:
+		ivfPqIndex := &IvfPqIndex{
+			baseIndex: baseIndex{
+				zincIndex: zincIndex,
+				name:      path.Join(zincIndex.GetName(), field),
+				storeName: path.Join(zincIndex.GetStoreName(), subPath),
+				field:     field,
+				ref:       vecIndexMeta,
+				refCount:  1,
+				aTime:     time.Now(),
+			},
+		}
+		err := ivfPqIndex.checkStoredSegments()
+		if err != nil {
+			return nil, err
+		}
+		ivfPqIndex.segments = make([]*IVFPQSegment, len(vecIndexMeta.Segments))
+		return ivfPqIndex, nil
+
+	case vector.HNSW:
+		index := &HNSWIndex{
+			baseIndex: baseIndex{
+				zincIndex: zincIndex,
+				name:      path.Join(zincIndex.GetName(), field),
+				storeName: path.Join(zincIndex.GetStoreName(), subPath),
+				field:     field,
+				ref:       vecIndexMeta,
+				refCount:  1,
+				aTime:     time.Now(),
+			},
+		}
+		index.segment = newHNSWSegment(index.baseIndex.StoreName(), vecIndexMeta.Dims)
+		return index, nil
+
+	default:
+		return nil, fmt.Errorf("invalid index type %v", vecIndexMeta.TargetType)
 	}
-	err := ivfPqIndex.checkStoredSegments()
-	if err != nil {
-		return nil, err
-	}
-	ivfPqIndex.segments = make([]*VecSegment, len(vecIndexMeta.Segments))
-	return ivfPqIndex, nil
 }
 
 // FlatIndex stores vectors without building faiss index.
@@ -136,7 +158,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 // Usually if you expect to have more than 100K vectors you should use IvfPQ index instead.
 type FlatIndex struct {
 	baseIndex
-	seg *VecSegment
+	seg *IVFPQSegment
 }
 
 func (f *FlatIndex) loadSegment() error {
@@ -148,7 +170,7 @@ func (f *FlatIndex) loadSegment() error {
 	}
 	var err error
 	// only one segment with id 0
-	f.seg, err = openSegment(f, 0)
+	f.seg, err = openIVFPQSegment(f, 0)
 	if err != nil {
 		return err
 	}
@@ -212,14 +234,14 @@ func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	return 1, nil
 }
 
-func (f *FlatIndex) ListSegment() []*VecSegment {
+func (f *FlatIndex) ListSegment() []*IVFPQSegment {
 	f.lock.RLock()
 	seg := f.seg
 	f.lock.RUnlock()
 	if seg == nil {
 		return nil
 	}
-	res := make([]*VecSegment, 1)
+	res := make([]*IVFPQSegment, 1)
 	res[0] = seg
 	return res
 }
@@ -228,7 +250,7 @@ func (f *FlatIndex) ListSegment() []*VecSegment {
 // The growing segment (a.k.a. current segment) has no faiss index, while all sealed segments have faiss indexes built.
 type IvfPqIndex struct {
 	baseIndex
-	segments []*VecSegment
+	segments []*IVFPQSegment
 }
 
 // checkStoredSegments
@@ -294,7 +316,7 @@ func (v *IvfPqIndex) loadCurrentSegment() error {
 	if seg := v.segments[v.ref.CurrentSegmentId]; seg != nil {
 		return nil
 	}
-	seg, err := openSegment(v, v.ref.CurrentSegmentId)
+	seg, err := openIVFPQSegment(v, v.ref.CurrentSegmentId)
 	if err != nil {
 		return err
 	}
@@ -311,23 +333,23 @@ func (v *IvfPqIndex) loadAllSegments() error {
 	return err
 }
 
-func (v *IvfPqIndex) copySegments() ([]*VecSegment, error) {
+func (v *IvfPqIndex) copySegments() ([]*IVFPQSegment, error) {
 	err := v.loadAllSegments()
 	if err != nil {
 		return nil, err
 	}
-	res := make([]*VecSegment, len(v.segments))
+	res := make([]*IVFPQSegment, len(v.segments))
 	copy(res, v.segments)
 	return res, nil
 }
 
-func (v *IvfPqIndex) copySegmentsWithIds(ids []int) ([]*VecSegment, error) {
+func (v *IvfPqIndex) copySegmentsWithIds(ids []int) ([]*IVFPQSegment, error) {
 	segments, err := v.loadSegments(ids)
 	return segments, err
 }
 
-func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
-	res := make([]*VecSegment, 0, len(ids))
+func (v *IvfPqIndex) loadSegments(ids []int) ([]*IVFPQSegment, error) {
+	res := make([]*IVFPQSegment, 0, len(ids))
 	for _, id := range ids {
 		// already loaded
 		if id > len(v.segments) || id < 0 {
@@ -338,7 +360,7 @@ func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
 			res = append(res, seg)
 			continue
 		}
-		seg, err := openSegment(v, id)
+		seg, err := openIVFPQSegment(v, id)
 		if err != nil {
 			return nil, err
 		}
@@ -351,7 +373,7 @@ func (v *IvfPqIndex) loadSegments(ids []int) ([]*VecSegment, error) {
 // getCurSegment
 // should be used with lock,
 // otherwise other goroutine may has updated current seg id.
-func (v *IvfPqIndex) getCurSegment() (*VecSegment, error) {
+func (v *IvfPqIndex) getCurSegment() (*IVFPQSegment, error) {
 	err := v.loadCurrentSegment()
 	if err != nil {
 		return nil, err
@@ -427,7 +449,7 @@ func (v *IvfPqIndex) processDel(deleteIds []int64) error {
 	return nil
 }
 
-func getDelBatches(segs []*VecSegment, delIds []int64) (delBatch map[int]*segBatch, err error) {
+func getDelBatches(segs []*IVFPQSegment, delIds []int64) (delBatch map[int]*segBatch, err error) {
 	delBatch = make(map[int]*segBatch)
 	for segId, seg := range segs {
 		var ids []int64
@@ -469,7 +491,7 @@ func (v *IvfPqIndex) processAdd(addVectors [][]float32, addIds []int64) error {
 }
 
 // checkNewSeg must be called with Lock
-func (v *IvfPqIndex) checkNewSeg(curSeg *VecSegment) error {
+func (v *IvfPqIndex) checkNewSeg(curSeg *IVFPQSegment) error {
 	if atomic.LoadInt64(&curSeg.ref.Count) >= config.Global.VectorConfig.IvfPqThreshold {
 		// make new segment as current segment
 		v.segments = append(v.segments, nil)
@@ -527,7 +549,7 @@ func (v *IvfPqIndex) PartialSearch(vec []float32, k int64, nprobe int, segments 
 	return searchSegments(vec, segs, k, nprobe)
 }
 
-func searchSegments(vec []float32, segs []*VecSegment, k int64, nprobe int) (map[string]float32, error) {
+func searchSegments(vec []float32, segs []*IVFPQSegment, k int64, nprobe int) (map[string]float32, error) {
 	searchHeap := &vecSearchHeap{}
 	heap.Init(searchHeap)
 
@@ -577,11 +599,11 @@ func searchSegments(vec []float32, segs []*VecSegment, k int64, nprobe int) (map
 	return result, nil
 }
 
-func (v *IvfPqIndex) ListSegment() []*VecSegment {
+func (v *IvfPqIndex) ListSegment() []*IVFPQSegment {
 	v.lock.RLock()
 	defer v.lock.RUnlock()
 
-	res := make([]*VecSegment, 0, len(v.segments))
+	res := make([]*IVFPQSegment, 0, len(v.segments))
 	for _, seg := range v.segments {
 		if seg != nil {
 			res = append(res, seg)
@@ -673,4 +695,55 @@ func (v *IvfPqIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 		total += val
 	}
 	return total / float32(len(segs)), nil
+}
+
+type HNSWIndex struct {
+	baseIndex
+
+	segment *HNSWSegment
+}
+
+func (index *HNSWIndex) Free() {
+	index.segment.Close()
+}
+
+func (index *HNSWIndex) Batch(vectors [][]float32, addIds, deleteIds []int64) error {
+	err := index.segment.Batch(addIds, vectors, deleteIds)
+	if err != nil {
+		return fmt.Errorf("failed to batch segment: %w", err)
+	}
+	return nil
+}
+
+func (index *HNSWIndex) Search(vec []float32, k int64, nprobe int) (map[string]float32, error) {
+	ids, distances, err := index.segment.Search(vec, k)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search segment: %w", err)
+	}
+	hash := make(map[string]float32)
+	for i, id := range ids {
+		hash[base62.Encode(id)] = distances[i]
+	}
+	return hash, nil
+}
+
+func (index *HNSWIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
+	return nil, nil
+}
+
+func (index *HNSWIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
+	return nil, nil
+}
+
+func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) {
+	return 0, nil
+}
+
+func (index *HNSWIndex) ListSegment() []*IVFPQSegment {
+	return nil
+}
+
+func (index *HNSWIndex) SealSeg() error {
+	log.Warn().Msgf("SealSeg should not be called on flat index %s", index.name)
+	return nil
 }

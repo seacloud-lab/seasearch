@@ -24,7 +24,7 @@ func makeIvfPqForTest(t *testing.T) *IvfPqIndex {
 			Name: testIdxName,
 			VecIndexes: map[string]*meta.VecIndex{
 				testFieldName: {
-					TargetType:       vector.IvfPQ,
+					TargetType:       vector.IVFPQ,
 					NBits:            4,
 					Dims:             4,
 					M:                2,
