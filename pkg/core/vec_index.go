@@ -3,6 +3,7 @@ package core
 import (
 	"cmp"
 	"container/heap"
+	"context"
 	"fmt"
 	"path"
 	"slices"
@@ -40,6 +41,7 @@ type VectorIndex interface {
 	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
 	ListSegment() []*IVFPQSegment
+	BuildHNSW(context.Context) error
 }
 
 type DocDistance struct {
@@ -146,6 +148,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			},
 		}
 		index.segment = newHNSWSegment(index.baseIndex.StoreName(), vecIndexMeta.Dims)
+		index.checkRebuildHNSW()
 		return index, nil
 
 	default:
@@ -203,6 +206,11 @@ func (f *FlatIndex) Free() {
 func (f *FlatIndex) SealSeg() error {
 	// Flat index should never be called SealedSeg
 	log.Warn().Msgf("SealSeg should not be called on flat index %s.", f.name)
+	return nil
+}
+
+func (f *FlatIndex) BuildHNSW(ctx context.Context) error {
+	log.Warn().Msgf("BuildHNSW should not be called on flat index %s.", f.name)
 	return nil
 }
 
@@ -679,6 +687,11 @@ func (v *IvfPqIndex) SealSeg() error {
 	return nil
 }
 
+func (v *IvfPqIndex) BuildHNSW(ctx context.Context) error {
+	log.Warn().Msgf("BuildHNSW should not be called on ivfpq index %s", v.name)
+	return nil
+}
+
 func (v *IvfPqIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	v.lock.Lock()
 	segs, err := v.copySegments()
@@ -712,6 +725,15 @@ func (index *HNSWIndex) Batch(vectors [][]float32, addIds, deleteIds []int64) er
 	if err != nil {
 		return fmt.Errorf("failed to batch segment: %w", err)
 	}
+	index.checkRebuildHNSW()
+	return nil
+}
+
+func (index *HNSWIndex) BuildHNSW(ctx context.Context) error {
+	err := index.segment.BuildHNSW(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to build hnsw: %w", err)
+	}
 	return nil
 }
 
@@ -732,7 +754,7 @@ func (index *HNSWIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]
 }
 
 func (index *HNSWIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
-	return nil, nil
+	return index.Search(vec, k, nprobe)
 }
 
 func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) {
@@ -746,4 +768,10 @@ func (index *HNSWIndex) ListSegment() []*IVFPQSegment {
 func (index *HNSWIndex) SealSeg() error {
 	log.Warn().Msgf("SealSeg should not be called on flat index %s", index.name)
 	return nil
+}
+
+func (index *HNSWIndex) checkRebuildHNSW() {
+	if index.segment.NeedRebuildHNSW() {
+		BuildHNSWIndex(index.name, index.field)
+	}
 }

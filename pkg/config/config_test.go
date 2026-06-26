@@ -54,6 +54,7 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, false, c.EnableWal)
 		assert.Equal(t, 1, c.Cluster.NodeId)
 		assert.Equal(t, int64(100000), c.VectorConfig.IvfPqThreshold)
+		assert.Equal(t, int64(10000), c.VectorConfig.HNSWMaxLogs)
 
 		assert.Equal(t, 10*time.Second, c.WalSyncInterval)
 		assert.Equal(t, []string{"localhost:2379"}, c.Etcd.Endpoints)

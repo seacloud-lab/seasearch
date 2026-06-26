@@ -2,6 +2,7 @@ package core
 
 import "C"
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
+	"github.com/tidwall/btree"
 )
 
 var (
@@ -35,6 +38,8 @@ type VecIndexManager struct {
 	sealTaskMp map[string]struct{}
 	sealCh     chan *sealTask
 	sealedLock sync.RWMutex
+	indexTasks *btree.BTreeG[indexTask]
+	indexCh    chan indexTask
 	lock       sync.Mutex
 	storage    vector.ObjStore
 	// path for saving temp file
@@ -65,6 +70,8 @@ func InitVecIndexManager() {
 		ready:      make(map[string]chan struct{}),
 		sealTaskMp: make(map[string]struct{}),
 		sealCh:     make(chan *sealTask, 10),
+		indexTasks: btree.NewBTreeG(indexTask.less),
+		indexCh:    make(chan indexTask),
 		storage:    storage,
 		closer:     z.NewCloser(3),
 		tmpDir:     tmpDir,
@@ -440,4 +447,57 @@ func backgroundSeal() {
 			vecIdxManager.sealedLock.Unlock()
 		}
 	}
+}
+
+type indexTask struct {
+	index string
+	field string
+}
+
+func (task indexTask) less(other indexTask) bool {
+	return cmp.Or(
+		cmp.Compare(task.index, other.index),
+		cmp.Compare(task.field, other.field),
+	) < 0
+}
+
+func BuildHNSWIndex(index, field string) {
+	task := indexTask{index: index, field: field}
+	if _, ok := vecIdxManager.indexTasks.Set(task); !ok {
+		vecIdxManager.indexCh <- task
+	}
+}
+
+func backgroundIndex() {
+	defer vecIdxManager.closer.Done()
+	for {
+		select {
+		case <-vecIdxManager.closer.HasBeenClosed():
+			return
+
+		case task := <-vecIdxManager.indexCh:
+			err := createIndex(task)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to create hnsw index")
+				continue
+			}
+		}
+	}
+}
+
+func createIndex(task indexTask) error {
+	defer vecIdxManager.indexTasks.Delete(task)
+
+	index, err := GetVectorIndex(task.index, task.field, false)
+	if err != nil {
+		return fmt.Errorf("failed to get vector index %v %v: %w", task.index, task.field, err)
+	}
+	defer CloseVectorIndex(index, false)
+
+	err = index.BuildHNSW(vecIdxManager.closer.Ctx())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

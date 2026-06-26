@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -13,20 +15,24 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+	"github.com/zincsearch/zincsearch/pkg/zutils/flex"
 
 	"github.com/blugelabs/bluge"
 	usearch "github.com/unum-cloud/usearch/golang"
 )
 
 type HNSWSegment struct {
-	mutex sync.RWMutex
-
-	path       string
+	store      string
 	dimensions int
+
+	writer *bluge.Writer
+
+	mutex sync.RWMutex
 
 	loaded atomic.Bool
 
-	currentLogID int64
+	hnswLogID   int64
+	latestLogID int64
 
 	cache struct {
 		docIDs     []int64
@@ -40,7 +46,7 @@ type HNSWSegment struct {
 
 func newHNSWSegment(path string, dimensions int) *HNSWSegment {
 	var seg HNSWSegment
-	seg.path = path
+	seg.store = path
 	seg.dimensions = dimensions
 	seg.shadowDocIDs = make(map[int64]struct{})
 	seg.cache.docIDIndex = make(map[int64]int)
@@ -48,9 +54,15 @@ func newHNSWSegment(path string, dimensions int) *HNSWSegment {
 }
 
 func (seg *HNSWSegment) Close() {
+	seg.mutex.Lock()
+	defer seg.mutex.Unlock()
 	if seg.index != nil {
 		seg.index.Close()
 		seg.index = nil
+	}
+	if seg.writer != nil {
+		seg.writer.Close()
+		seg.writer = nil
 	}
 }
 
@@ -72,10 +84,12 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 		}
 	}
 
-	var batch = bluge.NewBatch()
+	batch := bluge.NewBatch()
+	latestLogID := seg.latestLogID
+
 	for _, docID := range delIDs {
-		seg.currentLogID++
-		doc := bluge.NewDocument(fmt.Sprintf("log/%v", seg.currentLogID))
+		latestLogID++
+		doc := bluge.NewDocument(fmt.Sprintf("log/%v", latestLogID))
 		doc.AddField(bluge.NewStoredOnlyField("doc_id",
 			[]byte(strconv.FormatInt(docID, 10)),
 		))
@@ -85,8 +99,8 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 		batch.Update(doc.ID(), doc)
 	}
 	for i, docID := range addIDs {
-		seg.currentLogID++
-		doc := bluge.NewDocument(fmt.Sprintf("log/%v", seg.currentLogID))
+		latestLogID++
+		doc := bluge.NewDocument(fmt.Sprintf("log/%v", latestLogID))
 		doc.AddField(bluge.NewStoredOnlyField("doc_id",
 			[]byte(strconv.FormatInt(docID, 10)),
 		))
@@ -95,35 +109,18 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 		))
 		batch.Update(doc.ID(), doc)
 	}
-	doc := bluge.NewDocument("current_log_id")
+	doc := bluge.NewDocument("latest_log_id")
 	doc.AddField(bluge.NewStoredOnlyField("log_id",
-		[]byte(strconv.FormatInt(seg.currentLogID, 10)),
+		[]byte(strconv.FormatInt(latestLogID, 10)),
 	))
 	batch.Update(doc.ID(), doc)
 
-	name := filepath.Join(vector.VecPrefix, seg.path, "0000", "stored_vec")
-	var cfg bluge.Config
-	switch config.Global.StorageType {
-	case "disk":
-		cfg = directory.GetDiskConfig(config.Global.DataPath, name)
-	case "s3":
-		cfg = directory.GetS3Config(config.Global.DataPath, name)
-	case "oss":
-		cfg = directory.GetOssConfig(config.Global.DataPath, name)
-	default:
-		return fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
-	}
-
-	writer, err := bluge.OpenWriter(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to open bluge writer: %w", err)
-	}
-	defer writer.Close()
-	err = writer.Batch(batch)
+	err = seg.writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("failed to write bluge batch: %w", err)
 	}
 
+	seg.latestLogID = latestLogID
 	for _, docID := range delIDs {
 		seg.shadowDocIDs[docID] = struct{}{}
 		seg.deleteCache(docID)
@@ -133,6 +130,34 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 		seg.updateCache(docID, vectors[i])
 	}
 
+	return nil
+}
+
+func (seg *HNSWSegment) NeedRebuildHNSW() bool {
+	seg.mutex.RLock()
+	defer seg.mutex.RUnlock()
+
+	unapplied := seg.latestLogID - seg.hnswLogID
+	return unapplied > config.Global.VectorConfig.HNSWMaxLogs
+}
+
+func (seg *HNSWSegment) BuildHNSW(ctx context.Context) error {
+	err := seg.load()
+	if err != nil {
+		return fmt.Errorf("failed to load: %w", err)
+	}
+	logID, err := seg.applyLogs()
+	if err != nil {
+		return fmt.Errorf("failed to apply logs: %w", err)
+	}
+	err = seg.buildHNSW()
+	if err != nil {
+		return fmt.Errorf("failed to build hnsw: %w", err)
+	}
+	err = seg.cleanLogs(logID)
+	if err != nil {
+		return fmt.Errorf("failed to clean logs: %w", err)
+	}
 	return nil
 }
 
@@ -177,10 +202,15 @@ func (seg *HNSWSegment) load() error {
 	if seg.loaded.Load() {
 		return nil
 	}
+
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
 
-	name := filepath.Join(vector.VecPrefix, seg.path, "0000", "stored_vec")
+	if seg.loaded.Load() {
+		return nil
+	}
+
+	name := filepath.Join(vector.VecPrefix, seg.store, "0000", "stored_vec")
 	var cfg bluge.Config
 	switch config.Global.StorageType {
 	case "disk":
@@ -193,15 +223,21 @@ func (seg *HNSWSegment) load() error {
 		return fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
 	}
 
-	reader, err := bluge.OpenReader(cfg)
+	writer, err := bluge.OpenWriter(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to open bluge reader: %w", err)
 	}
+	seg.writer = writer
+
+	reader, err := writer.Reader()
+	if err != nil {
+		return fmt.Errorf("failed to get reader: %w", err)
+	}
 	defer reader.Close()
 
-	err = seg.loadCurrentLogID(reader)
+	err = seg.loadLogIDs(reader)
 	if err != nil {
-		return fmt.Errorf("failed to load current log id: %w", err)
+		return fmt.Errorf("failed to load log ids: %w", err)
 	}
 	err = seg.loadLogs(reader)
 	if err != nil {
@@ -212,83 +248,38 @@ func (seg *HNSWSegment) load() error {
 	return nil
 }
 
-func (seg *HNSWSegment) loadCurrentLogID(reader *bluge.Reader) error {
-	query := bluge.NewTermQuery("current_log_id").SetField("_id")
-	request := bluge.NewTopNSearch(1, query)
-
-	var data []byte
-	it := search.Search(context.Background(), reader, request)
-	for doc := range it.Range() {
-		for field, value := range doc {
-			if field == "log_id" {
-				data = value
-				break
-			}
-		}
-	}
-	if it.Error() != nil {
-		return it.Error()
-	}
-
-	if data == nil {
-		return nil
-	}
-	logID, err := strconv.ParseInt(string(data), 10, 64)
+func (seg *HNSWSegment) loadLogIDs(reader *bluge.Reader) error {
+	id, err := seg.readLogID(reader, "hnsw_log_id")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read hnsw log id: %w", err)
 	}
-	seg.currentLogID = logID
+	seg.hnswLogID = id
+
+	id, err = seg.readLogID(reader, "latest_log_id")
+	if err != nil {
+		return fmt.Errorf("failed to read latest log id: %w", err)
+	}
+	seg.latestLogID = id
 
 	return nil
 }
 
 func (seg *HNSWSegment) loadLogs(reader *bluge.Reader) error {
-	docTS := make(map[int64]int64)
+	logs := make(map[int64]HNSWLogRow)
 
-	query := bluge.NewPrefixQuery("log/").SetField("_id")
-	request := bluge.NewAllMatches(query)
-	it := search.Search(context.Background(), reader, request)
-	for doc := range it.Range() {
-		var (
-			logID  int64
-			docID  int64
-			docDel bool
-			vector []float32
-		)
-		for field, value := range doc {
-			switch field {
-			case "_id":
-				id, err := strconv.ParseInt(string(value)[4:], 10, 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
-				}
-				logID = id
-			case "doc_id":
-				id, err := strconv.ParseInt(string(value), 10, 64)
-				if err != nil {
-					return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
-				}
-				docID = id
-			case "doc_del":
-				if string(value) == "true" {
-					docDel = true
-				}
-			case "vector":
-				vector = zutils.BytesToVector(value)
-			}
+	it := seg.readHNSWLogRows(reader)
+	for row := range it.Range() {
+		r, ok := logs[row.DocID]
+		if !ok || row.ID > r.ID {
+			logs[row.DocID] = row
 		}
-
-		seg.shadowDocIDs[docID] = struct{}{}
-
-		if docTS[docID] > logID {
-			continue
-		}
-		docTS[docID] = logID
-
-		if docDel {
-			seg.deleteCache(docID)
+	}
+	for _, row := range logs {
+		seg.shadowDocIDs[row.DocID] = struct{}{}
+		if row.DocDel {
+			seg.deleteCache(row.DocID)
 		} else {
-			seg.updateCache(docID, vector)
+			seg.updateCache(row.DocID, row.Vector)
 		}
 	}
 	if it.Error() != nil {
@@ -314,14 +305,272 @@ func (seg *HNSWSegment) deleteCache(docID int64) {
 	if !ok {
 		return
 	}
-
 	j := len(seg.cache.docIDs) - 1
 	d := seg.dimensions
 
-	seg.cache.docIDs[i] = seg.cache.docIDs[j]
+	if i != j {
+		seg.cache.docIDs[i] = seg.cache.docIDs[j]
+		copy(seg.cache.docVectors[i*d:(i+1)*d], seg.cache.docVectors[j*d:(j+1)*d])
+		seg.cache.docIDIndex[seg.cache.docIDs[i]] = i
+	}
+
 	seg.cache.docIDs = seg.cache.docIDs[:j]
-	copy(seg.cache.docVectors[i*d:(i+1)*d], seg.cache.docVectors[j*d:(j+1)*d])
 	seg.cache.docVectors = seg.cache.docVectors[:j*d]
-	seg.cache.docIDIndex[seg.cache.docIDs[i]] = i
 	delete(seg.cache.docIDIndex, docID)
+}
+
+func (seg *HNSWSegment) applyLogs() (int64, error) {
+	seg.mutex.Lock()
+	writer := seg.writer
+	reader, err := writer.Reader()
+	latestLogID := seg.latestLogID
+	seg.mutex.Unlock()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get reader: %w", err)
+	}
+	defer reader.Close()
+
+	batch := bluge.NewBatch()
+	logs := make(map[int64]HNSWLogRow)
+
+	it := seg.readHNSWLogRows(reader)
+	for row := range it.Range() {
+		if row.ID > latestLogID {
+			continue
+		}
+		r, ok := logs[row.DocID]
+		if !ok || row.ID > r.ID {
+			logs[row.DocID] = row
+		}
+	}
+	for _, row := range logs {
+		doc := bluge.NewDocument(fmt.Sprintf("doc/%v", row.DocID))
+		if row.DocDel {
+			batch.Delete(doc.ID())
+		} else {
+			doc.AddField(bluge.NewStoredOnlyField("vector",
+				zutils.VectorToBytes(row.Vector),
+			))
+			batch.Update(doc.ID(), doc)
+		}
+	}
+	if it.Error() != nil {
+		return 0, it.Error()
+	}
+
+	err = writer.Batch(batch)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write bluge batch: %w", err)
+	}
+
+	return latestLogID, nil
+}
+
+func (seg *HNSWSegment) buildHNSW() error {
+	seg.mutex.Lock()
+	reader, err := seg.writer.Reader()
+	seg.mutex.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to get reader: %w", err)
+	}
+	defer reader.Close()
+
+	index, err := seg.newIndex()
+	if err != nil {
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+	defer index.Close()
+
+	size, err := seg.countHNSWDocRows(reader)
+	if err != nil {
+		return fmt.Errorf("failed to count hnsw doc rows: %w", err)
+	}
+	err = index.Reserve(uint(size))
+	if err != nil {
+		return fmt.Errorf("failed to reserve index: %w", err)
+	}
+
+	it := seg.readHNSWDocRows(reader)
+	for row := range it.Range() {
+		err = index.Add(usearch.Key(row.ID), row.Vector)
+		if err != nil {
+			return fmt.Errorf("failed to add index: %w", err)
+		}
+	}
+	if it.Error() != nil {
+		return it.Error()
+	}
+
+	name := filepath.Join(vecIdxManager.tmpDir, seg.store)
+	defer os.RemoveAll(name)
+	err = index.Save(name)
+	if err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
+	}
+	err = vecIdxManager.storage.SaveFile(name, path.Join(seg.store, "0000", "hnsw"))
+	if err != nil {
+		return fmt.Errorf("failed to save index to storage: %w", err)
+	}
+
+	return nil
+}
+
+func (seg *HNSWSegment) cleanLogs(logID int64) error {
+	seg.mutex.Lock()
+	writer := seg.writer
+	reader, err := writer.Reader()
+	seg.mutex.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to get reader: %w", err)
+	}
+	defer reader.Close()
+
+	batch := bluge.NewBatch()
+
+	it := seg.readHNSWLogRows(reader)
+	for row := range it.Range() {
+		if row.ID > logID {
+			continue
+		}
+		doc := bluge.NewDocument(fmt.Sprintf("log/%v", row.ID))
+		batch.Delete(doc.ID())
+	}
+	if it.Error() != nil {
+		return it.Error()
+	}
+
+	err = writer.Batch(batch)
+	if err != nil {
+		return fmt.Errorf("failed to write bluge batch: %w", err)
+	}
+
+	return nil
+}
+
+func (seg *HNSWSegment) newIndex() (*usearch.Index, error) {
+	conf := usearch.IndexConfig{
+		Quantization: usearch.I8,
+		Metric:       usearch.L2sq,
+		Dimensions:   uint(seg.dimensions),
+	}
+	return usearch.NewIndex(conf)
+}
+
+func (seg *HNSWSegment) readLogID(reader *bluge.Reader, id string) (int64, error) {
+	var data []byte
+	query := bluge.NewTermQuery(id).SetField("_id")
+	request := bluge.NewTopNSearch(1, query)
+	it := search.Search(context.Background(), reader, request)
+	for doc := range it.Range() {
+		for field, value := range doc {
+			if field == "log_id" {
+				data = value
+				break
+			}
+		}
+	}
+	if it.Error() != nil {
+		return 0, it.Error()
+	}
+	if data == nil {
+		return 0, nil
+	}
+	logID, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return logID, nil
+}
+
+type HNSWLogRow struct {
+	ID     int64
+	DocID  int64
+	DocDel bool
+	Vector []float32
+}
+
+func (seg *HNSWSegment) readHNSWLogRows(reader *bluge.Reader) flex.Iter[HNSWLogRow] {
+	return flex.NewIter(func(yield func(HNSWLogRow) bool) error {
+		query := bluge.NewPrefixQuery("log/").SetField("_id")
+		request := bluge.NewAllMatches(query)
+		it := search.Search(context.Background(), reader, request)
+		for doc := range it.Range() {
+			var row HNSWLogRow
+			for field, value := range doc {
+				switch field {
+				case "_id":
+					id, err := strconv.ParseInt(string(value)[4:], 10, 64)
+					if err != nil {
+						return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
+					}
+					row.ID = id
+				case "doc_id":
+					id, err := strconv.ParseInt(string(value), 10, 64)
+					if err != nil {
+						return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
+					}
+					row.DocID = id
+				case "doc_del":
+					if string(value) == "true" {
+						row.DocDel = true
+					}
+				case "vector":
+					row.Vector = zutils.BytesToVector(value)
+				}
+			}
+			if !yield(row) {
+				return nil
+			}
+		}
+		if it.Error() != nil {
+			return it.Error()
+		}
+		return nil
+	})
+}
+
+type HNSWDocRow struct {
+	ID     int64
+	Vector []float32
+}
+
+func (seg *HNSWSegment) readHNSWDocRows(reader *bluge.Reader) flex.Iter[HNSWDocRow] {
+	return flex.NewIter(func(yield func(HNSWDocRow) bool) error {
+		query := bluge.NewPrefixQuery("doc/").SetField("_id")
+		request := bluge.NewAllMatches(query)
+		it := search.Search(context.Background(), reader, request)
+		for doc := range it.Range() {
+			var row HNSWDocRow
+			for field, value := range doc {
+				switch field {
+				case "_id":
+					id, err := strconv.ParseInt(string(value)[4:], 10, 64)
+					if err != nil {
+						return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
+					}
+					row.ID = id
+				case "vector":
+					row.Vector = zutils.BytesToVector(value)
+				}
+			}
+			if !yield(row) {
+				return nil
+			}
+		}
+		if it.Error() != nil {
+			return it.Error()
+		}
+		return nil
+	})
+}
+
+func (seg *HNSWSegment) countHNSWDocRows(reader *bluge.Reader) (int, error) {
+	query := bluge.NewPrefixQuery("doc/").SetField("_id")
+	request := bluge.NewTopNSearch(0, query)
+	dmi, err := reader.Search(context.Background(), request)
+	if err != nil {
+		return 0, err
+	}
+	size := dmi.Aggregations().Count()
+	return int(size), nil
 }
