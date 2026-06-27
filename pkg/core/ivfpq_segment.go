@@ -164,6 +164,30 @@ func (s *IVFPQSegment) getName() string {
 	return fmt.Sprintf("%s_%d", s.baseIndex.Name(), s.ref.Id)
 }
 
+func (s *IVFPQSegment) TryCloseIdleWriter(idleThreshold time.Duration) bool {
+	s.writerLock.RLock()
+	w := s.vecStoreWriter
+	refCount := s.writerRefCount
+	closeTime := s.closeTime
+	s.writerLock.RUnlock()
+
+	if refCount != 0 || w == nil || time.Since(closeTime) <= idleThreshold {
+		return false
+	}
+
+	s.writerLock.Lock()
+	if s.vecStoreWriter != w || s.writerRefCount != 0 || time.Since(s.closeTime) <= idleThreshold {
+		s.writerLock.Unlock()
+		return false
+	}
+	s.vecStoreWriter = nil
+	s.writerLock.Unlock()
+
+	_ = w.Close()
+	log.Debug().Msgf("lazy close vec index segment writer %s", s.getName())
+	return true
+}
+
 func (s *IVFPQSegment) saveFaissIndex() error {
 	f, err := os.CreateTemp(vecIdxManager.tmpDir, "temp_index")
 	if err != nil {

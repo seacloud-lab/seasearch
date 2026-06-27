@@ -40,8 +40,12 @@ type VectorIndex interface {
 	Free()
 	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
-	ListSegment() []*IVFPQSegment
+	ListSegment() []IndexSegment
 	BuildHNSW(context.Context) error
+}
+
+type IndexSegment interface {
+	TryCloseIdleWriter(idleThreshold time.Duration) bool
 }
 
 type DocDistance struct {
@@ -241,14 +245,14 @@ func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	return 1, nil
 }
 
-func (f *FlatIndex) ListSegment() []*IVFPQSegment {
+func (f *FlatIndex) ListSegment() []IndexSegment {
 	f.lock.RLock()
 	seg := f.seg
 	f.lock.RUnlock()
 	if seg == nil {
 		return nil
 	}
-	res := make([]*IVFPQSegment, 1)
+	res := make([]IndexSegment, 1)
 	res[0] = seg
 	return res
 }
@@ -606,11 +610,11 @@ func searchSegments(vec []float32, segs []*IVFPQSegment, k int64, nprobe int) (m
 	return result, nil
 }
 
-func (v *IvfPqIndex) ListSegment() []*IVFPQSegment {
+func (v *IvfPqIndex) ListSegment() []IndexSegment {
 	v.lock.RLock()
 	defer v.lock.RUnlock()
 
-	res := make([]*IVFPQSegment, 0, len(v.segments))
+	res := make([]IndexSegment, 0, len(v.segments))
 	for _, seg := range v.segments {
 		if seg != nil {
 			res = append(res, seg)
@@ -796,7 +800,7 @@ func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) 
 	return 0, fmt.Errorf("recall is not supported for hnsw index")
 }
 
-func (index *HNSWIndex) ListSegment() []*IVFPQSegment {
+func (index *HNSWIndex) ListSegment() []IndexSegment {
 	return nil
 }
 
