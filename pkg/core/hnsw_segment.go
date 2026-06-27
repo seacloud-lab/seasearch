@@ -33,14 +33,18 @@ type HNSWSegment struct {
 
 	writer *bluge.Writer
 
+	// hnswLogID is the log id of the last applied log to hnsw index
 	hnswLogID   int64
 	latestLogID int64
 
+	// cache holds the hot data that has not been applied to hnsw index yet.
 	cache struct {
 		docIDs     []int64
 		docVectors []float32
 		docIDIndex map[int64]int
 	}
+	// docTS contains the log id of the last applied log for each doc id. It is
+	// used to filter out the deleted docs in hnsw index.
 	docTS map[int64]int64
 
 	index *usearch.Index
