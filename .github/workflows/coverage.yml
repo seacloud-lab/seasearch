@@ -37,6 +37,10 @@ jobs:
         run: |
             bash -e ./ci/install_faiss.sh
 
+      - name: install usearch
+        run: |
+            bash -e ./ci/install_usearch.sh
+
       - name: Check Formatting (gofmt)
         run: |
           UNFORMATTED=$(gofmt -l .)

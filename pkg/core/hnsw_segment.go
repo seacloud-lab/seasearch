@@ -410,7 +410,11 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (*usearch.Index, error) {
 }
 
 func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usearch.Index) error {
-	defer index.Close()
+	defer func() {
+		if index != nil {
+			index.Close()
+		}
+	}()
 
 	seg.mutex.Lock()
 	writer := seg.writer
@@ -450,13 +454,17 @@ func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usear
 
 	seg.mutex.Lock()
 	seg.hnswLogID = logID
-	seg.index, index = index, seg.index
 	for docID := range docs {
 		if seg.docTS[docID] <= logID {
 			seg.deleteCache(docID)
 			delete(seg.docTS, docID)
 		}
 	}
+	if seg.index != nil {
+		seg.index.Close()
+	}
+	seg.index = index
+	index = nil
 	seg.mutex.Unlock()
 
 	return nil
