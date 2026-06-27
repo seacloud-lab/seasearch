@@ -148,7 +148,6 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			},
 		}
 		index.segment = newHNSWSegment(index.baseIndex.StoreName(), vecIndexMeta.Dims)
-		index.checkRebuildHNSW()
 		return index, nil
 
 	default:
@@ -725,11 +724,16 @@ func (index *HNSWIndex) Batch(vectors [][]float32, addIds, deleteIds []int64) er
 	if err != nil {
 		return fmt.Errorf("failed to batch segment: %w", err)
 	}
-	index.checkRebuildHNSW()
+	if index.segment.NeedRebuildHNSW() {
+		BuildHNSWIndex(index.zincIndex.GetName(), index.field)
+	}
 	return nil
 }
 
 func (index *HNSWIndex) BuildHNSW(ctx context.Context) error {
+	if !index.segment.NeedRebuildHNSW() {
+		return nil
+	}
 	err := index.segment.BuildHNSW(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to build hnsw: %w", err)
@@ -750,15 +754,46 @@ func (index *HNSWIndex) Search(vec []float32, k int64, nprobe int) (map[string]f
 }
 
 func (index *HNSWIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
-	return nil, nil
+	ids := make([]int64, 0, len(docIDs))
+	seen := make(map[int64]struct{}, len(docIDs))
+	for _, docID := range docIDs {
+		id := base62.Decode(docID)
+		if base62.Encode(id) != docID {
+			log.Warn().Str("doc_id", docID).Msg("skip invalid doc id in hnsw SearchByIDs")
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 || k <= 0 {
+		return nil, nil
+	}
+
+	matchedIDs, distances, err := index.segment.SearchByIDs(vec, k, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search segment by ids: %w", err)
+	}
+
+	result := make([]DocDistance, 0, len(matchedIDs))
+	for i, id := range matchedIDs {
+		result = append(result, DocDistance{
+			DocID:    base62.Encode(id),
+			Distance: distances[i],
+		})
+	}
+
+	return result, nil
 }
 
 func (index *HNSWIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
-	return index.Search(vec, k, nprobe)
+	return nil, fmt.Errorf("partial search is not supported for hnsw index")
 }
 
 func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) {
-	return 0, nil
+	return 0, fmt.Errorf("recall is not supported for hnsw index")
 }
 
 func (index *HNSWIndex) ListSegment() []*IVFPQSegment {
@@ -766,12 +801,5 @@ func (index *HNSWIndex) ListSegment() []*IVFPQSegment {
 }
 
 func (index *HNSWIndex) SealSeg() error {
-	log.Warn().Msgf("SealSeg should not be called on flat index %s", index.name)
-	return nil
-}
-
-func (index *HNSWIndex) checkRebuildHNSW() {
-	if index.segment.NeedRebuildHNSW() {
-		BuildHNSWIndex(index.name, index.field)
-	}
+	return fmt.Errorf("SealSeg should not be called on hnsw index %s", index.name)
 }

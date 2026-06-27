@@ -73,7 +73,7 @@ func InitVecIndexManager() {
 		indexTasks: btree.NewBTreeG(indexTask.less),
 		indexCh:    make(chan indexTask),
 		storage:    storage,
-		closer:     z.NewCloser(3),
+		closer:     z.NewCloser(4),
 		tmpDir:     tmpDir,
 	}
 
@@ -84,6 +84,8 @@ func InitVecIndexManager() {
 	go backgroundSeal()
 
 	go lazyCloseSegmentWriter()
+
+	go backgroundIndex()
 }
 
 func CloseVecIndexManager() {
@@ -494,10 +496,15 @@ func createIndex(task indexTask) error {
 	}
 	defer CloseVectorIndex(index, false)
 
+	log.Debug().Msgf("start to build hnsw index for %v %v", task.index, task.field)
+
+	start := time.Now()
 	err = index.BuildHNSW(vecIdxManager.closer.Ctx())
 	if err != nil {
 		return err
 	}
+
+	log.Debug().Msgf("build hnsw index for %v %v finished. took %.2fs", task.index, task.field, time.Since(start).Seconds())
 
 	return nil
 }
