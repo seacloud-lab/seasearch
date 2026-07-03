@@ -151,7 +151,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 				aTime:     time.Now(),
 			},
 		}
-		index.segment = newHNSWSegment(index.baseIndex.StoreName(), vecIndexMeta.Dims)
+		index.segment = newHNSWSegment(index.StoreName(), vecIndexMeta.Dims)
 		return index, nil
 
 	default:

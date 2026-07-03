@@ -179,7 +179,9 @@ func processBody(target string, body io.Reader) (map[string][]string, error) {
 				for k := range lastLineMetaData {
 					delete(lastLineMetaData, k)
 				}
-				if k == "index" || k == "create" || k == "update" {
+
+				switch k {
+				case "index", "create", "update":
 					nextLineIsData = true
 					if vm["_index"] != "" { // if index is specified in metadata then it overtakes the index in the query path
 						lastLineMetaData["_index"] = vm["_index"]
@@ -198,7 +200,7 @@ func processBody(target string, body io.Reader) (map[string][]string, error) {
 						lines = append(lines, scanner.Text())
 						indexLineMap[indexName] = lines
 					}
-				} else if k == "delete" {
+				case "delete":
 					nextLineIsData = false
 					indexName := target
 					if vm["_index"] != "" { // if index is specified in metadata then it overtakes the index in the query path
@@ -216,7 +218,7 @@ func processBody(target string, body io.Reader) (map[string][]string, error) {
 						lines = append(lines, scanner.Text())
 						indexLineMap[indexName] = lines
 					}
-				} else {
+				default:
 					continue
 				}
 			}

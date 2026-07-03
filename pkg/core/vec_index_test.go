@@ -75,6 +75,33 @@ func clean() {
 	_ = store.Remove(path.Join(testIdxName, testFieldName))
 }
 
+func initVecIdxManagerForTest(t *testing.T) {
+	t.Helper()
+
+	vecObjStore, err := vector.GetVectorStorage()
+	if err != nil {
+		t.Fatalf("get vector storage err: %v", err)
+	}
+	vecIdxManager = &VecIndexManager{
+		storage: vecObjStore,
+	}
+
+	baseTmpDir := path.Join(config.Global.DataPath, vector.VecPrefix, "tmp_test")
+	err = os.MkdirAll(baseTmpDir, os.ModePerm)
+	if err != nil {
+		t.Fatalf("create test tmp dir err: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp(baseTmpDir, "vecidx-*")
+	if err != nil {
+		t.Fatalf("create temp dir err: %v", err)
+	}
+	vecIdxManager.tmpDir = tmpDir
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
+}
+
 func TestVecIndex(t *testing.T) {
 	// config.Global.StorageType = "s3"
 	// config.Global.S3.Bucket = "zincsearch"
@@ -279,21 +306,13 @@ func testSealIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	assert.EqualValues(t, 2, len(idx.ref.Segments))
@@ -331,19 +350,11 @@ func testAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -402,21 +413,13 @@ func testSearchIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -448,20 +451,12 @@ func testFreeIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -499,20 +494,12 @@ func testReOpenIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -553,21 +540,13 @@ func testRecall(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()

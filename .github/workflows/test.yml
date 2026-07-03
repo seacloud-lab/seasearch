@@ -1,0 +1,36 @@
+---
+name: CI Test
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    container:
+      image: ghcr.io/seafileltd/seasearch-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    env:
+      ZINC_FIRST_ADMIN_USER: admin
+      ZINC_FIRST_ADMIN_PASSWORD: Complexpass#123
+      ZINC_WAL_SYNC_INTERVAL: 10ms
+      ZINC_WAL_REDOLOG_NO_SYNC: true
+      ZINC_WAL_ENABLE: false
+      ZINC_ENABLE_TEXT_KEYWORD_MAPPING: true
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          check-latest: true
+      - run: go test ./...

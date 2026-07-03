@@ -329,9 +329,10 @@ func TestVectorSearch(t *testing.T) {
 func checkExists(t *testing.T) {
 	var exists bool
 	var err error
-	if config.Global.StorageType == "oss" {
+	switch config.Global.StorageType {
+	case "oss":
 		exists, err = directory.OssExists(vecIndexName1)
-	} else if config.Global.StorageType == "s3" {
+	case "s3":
 		exists, err = directory.S3Exists(vecIndexName1)
 	}
 	assert.Nil(t, err)
