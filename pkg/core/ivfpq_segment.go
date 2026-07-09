@@ -524,8 +524,8 @@ func L2Distance(slice1, slice2 []float32) (float32, error) {
 	return sum, nil
 }
 
-func (s *IVFPQSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
-	zq, err := query.TermsQuery(map[string]any{"_id": docIDs}, nil)
+func (s *IVFPQSegment) SearchByIDs(vec []float32, k int64, filter []string) ([]DocDistance, error) {
+	zq, err := query.TermsQuery(map[string]any{"_id": filter}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -535,19 +535,19 @@ func (s *IVFPQSegment) SearchByIDs(vec []float32, k int64, docIDs []string) ([]D
 		return nil, err
 	}
 
-	var distances []DocDistance
-	for i := range ids {
-		realVector := vectors[i*s.baseIndex.Meta().Dims : (i+1)*s.baseIndex.Meta().Dims]
-		dis, err := L2Distance(vec, realVector)
-		if err != nil {
-			return nil, err
-		}
-		distances = append(distances, DocDistance{
-			DocID:    base62.Encode(ids[i]),
-			Distance: dis,
+	dimensions := s.baseIndex.Meta().Dims
+	docIDs, distances, err := ExactSearch(ids, vectors, vec, dimensions, int(k))
+	if err != nil {
+		return nil, fmt.Errorf("failed to exact search: %w", err)
+	}
+	var items []DocDistance
+	for i, docID := range docIDs {
+		items = append(items, DocDistance{
+			DocID:    base62.Encode(docID),
+			Distance: distances[i],
 		})
 	}
-	return distances, nil
+	return items, nil
 }
 
 // Seal

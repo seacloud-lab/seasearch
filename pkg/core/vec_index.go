@@ -759,21 +759,8 @@ func (index *HNSWIndex) Search(vec []float32, k int64, nprobe int) (map[string]f
 
 func (index *HNSWIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error) {
 	ids := make([]int64, 0, len(docIDs))
-	seen := make(map[int64]struct{}, len(docIDs))
 	for _, docID := range docIDs {
-		id := base62.Decode(docID)
-		if base62.Encode(id) != docID {
-			log.Warn().Str("doc_id", docID).Msg("skip invalid doc id in hnsw SearchByIDs")
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 || k <= 0 {
-		return nil, nil
+		ids = append(ids, base62.Decode(docID))
 	}
 
 	matchedIDs, distances, err := index.segment.SearchByIDs(vec, k, ids)

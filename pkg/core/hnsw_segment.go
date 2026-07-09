@@ -1,14 +1,12 @@
 package core
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"maps"
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,20 +29,31 @@ type HNSWSegment struct {
 	loaded atomic.Bool
 	mutex  sync.RWMutex
 
+	// writer persists vector state in Bluge using three record families:
+	// 1. "log/{logID}" for changes that have not yet been indexed by HNSW.
+	// 2. "doc/{docID}" for the materialized vector state, which is the source
+	//    for the HNSW index.
+	// 3. singleton metadata docs such as "latest_log_id" and "hnsw_log_id".
+	// New writes are appended to the "log/" family. The background worker will
+	// periodically apply those logs to the "doc/" family and rebuild the HNSW
+	// index.
 	writer *bluge.Writer
 
-	// hnswLogID is the log id of the last applied log to hnsw index
+	// hnswLogID is the log id of the last applied log to HNSW index.
 	hnswLogID   int64
 	latestLogID int64
 
-	// cache holds the hot data that has not been applied to hnsw index yet.
+	// cache is an in-memory state which applied from the "log/" family.
+	// Vectors are stored contiguously in a single slice, therefore we can
+	// search them using the usearch.ExactSearch function.
 	cache struct {
 		docIDs     []int64
 		docVectors []float32
 		docIDIndex map[int64]int
 	}
-	// docTS contains the log id of the last applied log for each doc id. It is
-	// used to filter out the deleted docs in hnsw index.
+	// docTS maps doc id to the latest log id (from the "log/" family).
+	// Note: when a document is deleted, it will be removed from the cache and
+	// added to docTS.
 	docTS map[int64]int64
 
 	index *usearch.Index
@@ -383,6 +392,11 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (*usearch.Index, error) {
 		return nil, fmt.Errorf("failed to reserve index: %w", err)
 	}
 
+	// Read all document vectors stored in Bluge (under "doc/") and add them to
+	// the HNSW index.
+	// Note: The in-memory cache only tracks log entries that have not yet been
+	// applied to that materialized "doc/" state, so the full applied vector
+	// set must be read from "doc/" here.
 	it := seg.readHNSWDocRows(ctx, reader)
 	for row := range it.Range() {
 		err = index.Add(usearch.Key(row.ID), row.Vector)
@@ -459,6 +473,9 @@ func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usear
 	seg.mutex.Lock()
 	seg.hnswLogID = logID
 	for docID := range docs {
+		// Only delete documents with timestamps that are not newer than the
+		// last applied HNSW log ID. This ensures we do not delete documents
+		// that were added after the HNSW index was last updated.
 		if seg.docTS[docID] <= logID {
 			seg.deleteCache(docID)
 			delete(seg.docTS, docID)
@@ -530,28 +547,10 @@ func (seg *HNSWSegment) Search(query []float32, k int64) ([]int64, []float32, er
 }
 
 func (seg *HNSWSegment) searchCache(query []float32, k int64) ([]int64, []float32, error) {
-	count := uint(len(seg.cache.docIDs))
-	stride := uint(seg.dimensions * 4)
-	limit := uint(min(k, int64(count)))
-	if limit == 0 {
-		return nil, nil, nil
-	}
-
-	keys, distances, err := usearch.ExactSearch(
-		seg.cache.docVectors, query, count, 1,
-		stride, stride, uint(seg.dimensions),
-		usearch.L2sq, limit, 0,
-	)
+	docIDs, distances, err := ExactSearch(seg.cache.docIDs, seg.cache.docVectors, query, seg.dimensions, int(k))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to exact search: %w", err)
 	}
-
-	var docIDs []int64
-	for _, key := range keys {
-		docID := seg.cache.docIDs[key]
-		docIDs = append(docIDs, docID)
-	}
-
 	return docIDs, distances, nil
 }
 
@@ -560,6 +559,10 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 		return nil, nil, nil
 	}
 
+	// The limit is set to k + len(seg.docTS) to ensure that we can retrieve
+	// enough results from the HNSW index, even after filtering out any
+	// documents that have been deleted (i.e., those present in seg.docTS).
+	// This way, we can still return up to k valid results after filtering.
 	limit := uint(k + int64(len(seg.docTS)))
 	keys, dts, err := seg.index.Search(query, limit)
 	if err != nil {
@@ -579,7 +582,7 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 	return docIDs, distances, nil
 }
 
-func (seg *HNSWSegment) SearchByIDs(query []float32, k int64, docIDs []int64) ([]int64, []float32, error) {
+func (seg *HNSWSegment) SearchByIDs(query []float32, k int64, filter []int64) ([]int64, []float32, error) {
 	err := seg.load()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load: %w", err)
@@ -591,77 +594,73 @@ func (seg *HNSWSegment) SearchByIDs(query []float32, k int64, docIDs []int64) ([
 	if len(query) != seg.dimensions {
 		return nil, nil, fmt.Errorf("wrong dimension for vector: %v", len(query))
 	}
-	if k <= 0 || len(docIDs) == 0 {
-		return nil, nil, nil
+	k = max(k, 0)
+
+	ids1, distances1, err := seg.searchCache(query, k)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to search cache: %w", err)
+	}
+	ids2, distances2, err := seg.searchDocsByIDs(query, k, filter)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to search docs by IDs: %w", err)
 	}
 
-	type searchResult struct {
-		id  int64
-		dis float32
+	var i, j int
+	var docIDs []int64
+	var distances []float32
+	for {
+		if i == len(ids1) {
+			docIDs = append(docIDs, ids2[j:]...)
+			distances = append(distances, distances2[j:]...)
+			break
+		}
+		if j == len(ids2) {
+			docIDs = append(docIDs, ids1[i:]...)
+			distances = append(distances, distances1[i:]...)
+			break
+		}
+		if distances1[i] < distances2[j] {
+			docIDs = append(docIDs, ids1[i])
+			distances = append(distances, distances1[i])
+			i++
+		} else {
+			docIDs = append(docIDs, ids2[j])
+			distances = append(distances, distances2[j])
+			j++
+		}
+	}
+	if len(docIDs) > int(k) {
+		docIDs = docIDs[:k]
+		distances = distances[:k]
 	}
 
-	pending := make(map[int64]struct{}, len(docIDs))
-	for _, docID := range docIDs {
-		pending[docID] = struct{}{}
-	}
+	return docIDs, distances, nil
+}
 
-	results := make([]searchResult, 0, len(pending))
-	for docID := range pending {
-		i, ok := seg.cache.docIDIndex[docID]
-		if !ok {
+func (seg *HNSWSegment) searchDocsByIDs(query []float32, k int64, filter []int64) ([]int64, []float32, error) {
+	reader, err := seg.writer.Reader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get reader: %w", err)
+	}
+	defer reader.Close()
+
+	ids := make([]int64, 0, len(filter))
+	vectors := make([]float32, 0, len(filter)*seg.dimensions)
+	it := seg.readHNSWDocRowsByIDs(context.Background(), reader, filter)
+	for doc := range it.Range() {
+		if _, ok := seg.docTS[doc.ID]; ok {
 			continue
 		}
-		d := seg.dimensions
-		vec := seg.cache.docVectors[i*d : (i+1)*d]
-		dis, err := L2Distance(query, vec)
-		if err != nil {
-			return nil, nil, err
-		}
-		results = append(results, searchResult{id: docID, dis: dis})
-		delete(pending, docID)
+		ids = append(ids, doc.ID)
+		vectors = append(vectors, doc.Vector...)
 	}
 
-	if len(pending) > 0 {
-		reader, err := seg.writer.Reader()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get reader: %w", err)
-		}
-		defer reader.Close()
-
-		it := seg.readHNSWDocRows(context.Background(), reader)
-		for row := range it.Range() {
-			if _, ok := pending[row.ID]; !ok {
-				continue
-			}
-			if _, ok := seg.docTS[row.ID]; ok {
-				continue
-			}
-			dis, err := L2Distance(query, row.Vector)
-			if err != nil {
-				return nil, nil, err
-			}
-			results = append(results, searchResult{id: row.ID, dis: dis})
-		}
-		if it.Error() != nil {
-			return nil, nil, it.Error()
-		}
+	docIDs, distances, err := ExactSearch(ids, vectors, query, seg.dimensions, int(k))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to exact search: %w", err)
 	}
 
-	slices.SortFunc(results, func(a, b searchResult) int {
-		return cmp.Compare(a.dis, b.dis)
-	})
-	if len(results) > int(k) {
-		results = results[:int(k)]
-	}
-
-	ids := make([]int64, 0, len(results))
-	distances := make([]float32, 0, len(results))
-	for _, result := range results {
-		ids = append(ids, result.id)
-		distances = append(distances, result.dis)
-	}
-
-	return ids, distances, nil
+	return docIDs, distances, nil
 }
 
 func (seg *HNSWSegment) updateCache(docID int64, vector []float32) {
@@ -682,6 +681,10 @@ func (seg *HNSWSegment) deleteCache(docID int64) {
 	}
 	j := len(seg.cache.docIDs) - 1
 	d := seg.dimensions
+
+	// i is the index of the docID to be deleted, j is the last index.
+	// We delete the doc by moving the last doc to the position of the deleted
+	// doc, and then truncating the slice.
 
 	if i != j {
 		seg.cache.docIDs[i] = seg.cache.docIDs[j]
@@ -707,7 +710,7 @@ func (seg *HNSWSegment) readLogID(reader *bluge.Reader, id string) (int64, error
 	var data []byte
 	query := bluge.NewTermQuery(id).SetField("_id")
 	request := bluge.NewTopNSearch(1, query)
-	it := search.Search(context.Background(), reader, request)
+	it := search.SearchAndVisitStoredFields(context.Background(), reader, request)
 	for doc := range it.Range() {
 		for field, value := range doc {
 			if field == "log_id" {
@@ -740,7 +743,7 @@ func (seg *HNSWSegment) readHNSWLogRows(ctx context.Context, reader *bluge.Reade
 	return flex.NewIter(func(yield func(HNSWLogRow) bool) error {
 		query := bluge.NewPrefixQuery("log/").SetField("_id")
 		request := bluge.NewAllMatches(query)
-		it := search.Search(ctx, reader, request)
+		it := search.SearchAndVisitStoredFields(ctx, reader, request)
 		for doc := range it.Range() {
 			var row HNSWLogRow
 			for field, value := range doc {
@@ -785,7 +788,41 @@ func (seg *HNSWSegment) readHNSWDocRows(ctx context.Context, reader *bluge.Reade
 	return flex.NewIter(func(yield func(HNSWDocRow) bool) error {
 		query := bluge.NewPrefixQuery("doc/").SetField("_id")
 		request := bluge.NewAllMatches(query)
-		it := search.Search(ctx, reader, request)
+		it := search.SearchAndVisitStoredFields(ctx, reader, request)
+		for doc := range it.Range() {
+			var row HNSWDocRow
+			for field, value := range doc {
+				switch field {
+				case "_id":
+					id, err := strconv.ParseInt(string(value)[4:], 10, 64)
+					if err != nil {
+						return fmt.Errorf("failed to parse doc id %v: %w", string(value), err)
+					}
+					row.ID = id
+				case "vector":
+					row.Vector = zutils.BytesToVector(value)
+				}
+			}
+			if !yield(row) {
+				return nil
+			}
+		}
+		if it.Error() != nil {
+			return it.Error()
+		}
+		return nil
+	})
+}
+
+func (seg *HNSWSegment) readHNSWDocRowsByIDs(ctx context.Context, reader *bluge.Reader, ids []int64) flex.Iter[HNSWDocRow] {
+	return flex.NewIter(func(yield func(HNSWDocRow) bool) error {
+		query := bluge.NewBooleanQuery()
+		for _, id := range ids {
+			term := "doc/" + strconv.FormatInt(id, 10)
+			query.AddShould(bluge.NewTermQuery(term).SetField("_id"))
+		}
+		request := bluge.NewAllMatches(query)
+		it := search.SearchAndVisitStoredFields(ctx, reader, request)
 		for doc := range it.Range() {
 			var row HNSWDocRow
 			for field, value := range doc {
@@ -820,4 +857,30 @@ func (seg *HNSWSegment) countHNSWDocRows(ctx context.Context, reader *bluge.Read
 	}
 	size := dmi.Aggregations().Count()
 	return int(size), nil
+}
+
+func ExactSearch(ids []int64, vectors, query []float32, dimensions, k int) ([]int64, []float32, error) {
+	count := uint(len(vectors) / dimensions)
+	stride := uint(dimensions * 4)
+	limit := uint(min(k, int(count)))
+	if limit == 0 {
+		return nil, nil, nil
+	}
+
+	keys, distances, err := usearch.ExactSearch(
+		vectors, query, count, 1,
+		stride, stride, uint(dimensions),
+		usearch.L2sq, limit, 0,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var docIDs []int64
+	for _, key := range keys {
+		docID := ids[key]
+		docIDs = append(docIDs, docID)
+	}
+
+	return docIDs, distances, nil
 }

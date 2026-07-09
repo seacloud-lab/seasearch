@@ -33,15 +33,15 @@ type sealTask struct {
 }
 
 type VecIndexManager struct {
-	cache      map[string]VectorIndex
-	ready      map[string]chan struct{}
-	sealTaskMp map[string]struct{}
-	sealCh     chan *sealTask
-	sealedLock sync.RWMutex
-	indexTasks *btree.BTreeG[indexTask]
-	indexCh    chan indexTask
-	lock       sync.Mutex
-	storage    vector.ObjStore
+	cache               map[string]VectorIndex
+	ready               map[string]chan struct{}
+	sealTaskMp          map[string]struct{}
+	sealCh              chan *sealTask
+	sealedLock          sync.RWMutex
+	buildHNSWIndexTasks *btree.BTreeG[BuildHNSWIndexTask]
+	buildHNSWIndexChan  chan BuildHNSWIndexTask
+	lock                sync.Mutex
+	storage             vector.ObjStore
 	// path for saving temp file
 	tmpDir string
 	closer *z.Closer
@@ -66,15 +66,15 @@ func InitVecIndexManager() {
 		}
 	}
 	vecIdxManager = &VecIndexManager{
-		cache:      make(map[string]VectorIndex),
-		ready:      make(map[string]chan struct{}),
-		sealTaskMp: make(map[string]struct{}),
-		sealCh:     make(chan *sealTask, 10),
-		indexTasks: btree.NewBTreeG(indexTask.less),
-		indexCh:    make(chan indexTask),
-		storage:    storage,
-		closer:     z.NewCloser(4),
-		tmpDir:     tmpDir,
+		cache:               make(map[string]VectorIndex),
+		ready:               make(map[string]chan struct{}),
+		sealTaskMp:          make(map[string]struct{}),
+		sealCh:              make(chan *sealTask, 10),
+		buildHNSWIndexTasks: btree.NewBTreeG(BuildHNSWIndexTask.less),
+		buildHNSWIndexChan:  make(chan BuildHNSWIndexTask),
+		storage:             storage,
+		closer:              z.NewCloser(4),
+		tmpDir:              tmpDir,
 	}
 
 	go backgroundGC()
@@ -85,7 +85,7 @@ func InitVecIndexManager() {
 
 	go lazyCloseSegmentWriter()
 
-	go backgroundIndex()
+	go backgroundBuildHNSWIndex()
 }
 
 func CloseVecIndexManager() {
@@ -439,12 +439,12 @@ func backgroundSeal() {
 	}
 }
 
-type indexTask struct {
+type BuildHNSWIndexTask struct {
 	index string
 	field string
 }
 
-func (task indexTask) less(other indexTask) bool {
+func (task BuildHNSWIndexTask) less(other BuildHNSWIndexTask) bool {
 	return cmp.Or(
 		cmp.Compare(task.index, other.index),
 		cmp.Compare(task.field, other.field),
@@ -452,21 +452,21 @@ func (task indexTask) less(other indexTask) bool {
 }
 
 func BuildHNSWIndex(index, field string) {
-	task := indexTask{index: index, field: field}
-	if _, ok := vecIdxManager.indexTasks.Set(task); !ok {
-		vecIdxManager.indexCh <- task
+	task := BuildHNSWIndexTask{index: index, field: field}
+	if _, ok := vecIdxManager.buildHNSWIndexTasks.Set(task); !ok {
+		vecIdxManager.buildHNSWIndexChan <- task
 	}
 }
 
-func backgroundIndex() {
+func backgroundBuildHNSWIndex() {
 	defer vecIdxManager.closer.Done()
 	for {
 		select {
 		case <-vecIdxManager.closer.HasBeenClosed():
 			return
 
-		case task := <-vecIdxManager.indexCh:
-			err := createIndex(task)
+		case task := <-vecIdxManager.buildHNSWIndexChan:
+			err := buildHNSWIndex(task)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to create hnsw index")
 				continue
@@ -475,8 +475,8 @@ func backgroundIndex() {
 	}
 }
 
-func createIndex(task indexTask) error {
-	defer vecIdxManager.indexTasks.Delete(task)
+func buildHNSWIndex(task BuildHNSWIndexTask) error {
+	defer vecIdxManager.buildHNSWIndexTasks.Delete(task)
 
 	index, err := GetVectorIndex(task.index, task.field, false)
 	if err != nil {

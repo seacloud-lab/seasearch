@@ -38,7 +38,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func Search(ctx context.Context, reader *bluge.Reader, request bluge.SearchRequest) flex.Iter[iter.Seq2[string, []byte]] {
+// SearchAndVisitStoredFields executes a search and returns an iterator over
+// the stored fields of each matching document. Each yielded item represents
+// one matching document as an iterator of (field name, field value) pairs,
+// equivalent to iterating over a map[string][]byte without materializing the
+// map.
+func SearchAndVisitStoredFields(ctx context.Context, reader *bluge.Reader, request bluge.SearchRequest) flex.Iter[iter.Seq2[string, []byte]] {
 	return flex.NewIter(func(yield func(iter.Seq2[string, []byte]) bool) error {
 		it, err := reader.Search(ctx, request)
 		if err != nil {
