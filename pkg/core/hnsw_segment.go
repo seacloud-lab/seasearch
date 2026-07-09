@@ -596,7 +596,7 @@ func (seg *HNSWSegment) SearchByIDs(query []float32, k int64, filter []int64) ([
 	}
 	k = max(k, 0)
 
-	ids1, distances1, err := seg.searchCache(query, k)
+	ids1, distances1, err := seg.searchCacheByIDs(query, k, filter)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to search cache: %w", err)
 	}
@@ -634,6 +634,27 @@ func (seg *HNSWSegment) SearchByIDs(query []float32, k int64, filter []int64) ([
 		distances = distances[:k]
 	}
 
+	return docIDs, distances, nil
+}
+
+func (seg *HNSWSegment) searchCacheByIDs(query []float32, k int64, filter []int64) ([]int64, []float32, error) {
+	var (
+		dim = seg.dimensions
+		ids = make([]int64, 0, len(filter))
+		vec = make([]float32, 0, len(filter)*dim)
+	)
+
+	for _, id := range filter {
+		if i, ok := seg.cache.docIDIndex[id]; ok {
+			ids = append(ids, id)
+			vec = append(vec, seg.cache.docVectors[i*dim:(i+1)*dim]...)
+		}
+	}
+
+	docIDs, distances, err := ExactSearch(ids, vec, query, dim, int(k))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to exact search: %w", err)
+	}
 	return docIDs, distances, nil
 }
 
