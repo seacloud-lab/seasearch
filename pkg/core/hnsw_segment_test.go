@@ -29,20 +29,22 @@ func TestHNSWSegment_BatchAndSearchCacheOnly(t *testing.T) {
 		config.Global.VectorConfig.HNSWMaxLogs = originalMaxLogs
 	}()
 
-	err := seg.Batch(
+	count, err := seg.Batch(
 		[]int64{1, 2},
 		[][]float32{zutils.MinuteVector(1), zutils.MinuteVector(5)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 2, count)
 	assert.False(t, seg.NeedRebuildHNSW())
 
-	err = seg.Batch(
+	count, err = seg.Batch(
 		[]int64{3},
 		[][]float32{zutils.MinuteVector(3)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 1, count)
 	assert.True(t, seg.NeedRebuildHNSW())
 
 	ids, distances, err := seg.Search(zutils.MinuteVector(0), 2)
@@ -59,12 +61,13 @@ func TestHNSWSegment_BuildHNSWAndSearch(t *testing.T) {
 	seg := makeHNSWSegmentForTest(t)
 	defer seg.Close()
 
-	err := seg.Batch(
+	count, err := seg.Batch(
 		[]int64{1, 2, 3},
 		[][]float32{zutils.MinuteVector(1), zutils.MinuteVector(5), zutils.MinuteVector(3)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 3, count)
 
 	err = seg.BuildHNSW(context.Background())
 	assert.Nil(t, err)
@@ -84,18 +87,20 @@ func TestHNSWSegment_SearchFiltersDeletedInHNSW(t *testing.T) {
 	seg := makeHNSWSegmentForTest(t)
 	defer seg.Close()
 
-	err := seg.Batch(
+	count, err := seg.Batch(
 		[]int64{1, 2},
 		[][]float32{zutils.MinuteVector(0), zutils.MinuteVector(1)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 2, count)
 
 	err = seg.BuildHNSW(context.Background())
 	assert.Nil(t, err)
 
-	err = seg.Batch(nil, nil, []int64{1})
+	count, err = seg.Batch(nil, nil, []int64{1})
 	assert.Nil(t, err)
+	assert.Equal(t, -1, count)
 
 	ids, _, err := seg.Search(zutils.MinuteVector(0), 2)
 	assert.Nil(t, err)
@@ -109,22 +114,24 @@ func TestHNSWSegment_SearchByIDs_MergesCacheAndDocs(t *testing.T) {
 	seg := makeHNSWSegmentForTest(t)
 	defer seg.Close()
 
-	err := seg.Batch(
+	count, err := seg.Batch(
 		[]int64{1, 2},
 		[][]float32{zutils.MinuteVector(10), zutils.MinuteVector(20)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 2, count)
 
 	err = seg.BuildHNSW(context.Background())
 	assert.Nil(t, err)
 
-	err = seg.Batch(
+	count, err = seg.Batch(
 		[]int64{3},
 		[][]float32{zutils.MinuteVector(5)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 1, count)
 
 	ids, _, err := seg.SearchByIDs(zutils.MinuteVector(0), 2, []int64{1, 3})
 	assert.Nil(t, err)
@@ -137,22 +144,24 @@ func TestHNSWSegment_ReloadPersistence(t *testing.T) {
 
 	seg := makeHNSWSegmentForTest(t)
 
-	err := seg.Batch(
+	count, err := seg.Batch(
 		[]int64{1, 2},
 		[][]float32{zutils.MinuteVector(10), zutils.MinuteVector(20)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 2, count)
 
 	err = seg.BuildHNSW(context.Background())
 	assert.Nil(t, err)
 
-	err = seg.Batch(
+	count, err = seg.Batch(
 		[]int64{3},
 		[][]float32{zutils.MinuteVector(5)},
 		nil,
 	)
 	assert.Nil(t, err)
+	assert.Equal(t, 1, count)
 
 	store := seg.store
 	seg.Close()

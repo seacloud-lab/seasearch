@@ -724,9 +724,14 @@ func (index *HNSWIndex) Free() {
 }
 
 func (index *HNSWIndex) Batch(vectors [][]float32, addIds, deleteIds []int64) error {
-	err := index.segment.Batch(addIds, vectors, deleteIds)
+	count, err := index.segment.Batch(addIds, vectors, deleteIds)
 	if err != nil {
 		return fmt.Errorf("failed to batch segment: %w", err)
+	}
+	atomic.AddInt64(&index.ref.Count, int64(count))
+	err = index.zincIndex.SaveVecIndexMeta(index.field, index.ref)
+	if err != nil {
+		return fmt.Errorf("failed to save vec index meta: %w", err)
 	}
 	if index.segment.NeedRebuildHNSW() {
 		BuildHNSWIndex(index.zincIndex.GetName(), index.field)

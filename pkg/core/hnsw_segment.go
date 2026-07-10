@@ -212,21 +212,21 @@ func (seg *HNSWSegment) loadHNSW() error {
 	return nil
 }
 
-func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int64) error {
+func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int64) (int, error) {
 	err := seg.load()
 	if err != nil {
-		return fmt.Errorf("failed to load: %w", err)
+		return 0, fmt.Errorf("failed to load: %w", err)
 	}
 
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
 
 	if len(addIDs) != len(vectors) {
-		return fmt.Errorf("invalid parameters: size of docIDs and vectors not equal")
+		return 0, fmt.Errorf("invalid parameters: size of docIDs and vectors not equal")
 	}
 	for _, vector := range vectors {
 		if len(vector) != seg.dimensions {
-			return fmt.Errorf("wrong dimension for vector: %v", len(vector))
+			return 0, fmt.Errorf("wrong dimension for vector: %v", len(vector))
 		}
 	}
 
@@ -269,7 +269,11 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 
 	err = seg.writer.Batch(batch)
 	if err != nil {
-		return fmt.Errorf("failed to write bluge batch: %w", err)
+		return 0, fmt.Errorf("failed to write bluge batch: %w", err)
+	}
+	count, err := seg.countDelta(addIDs, delIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count deltas: %w", err)
 	}
 
 	seg.latestLogID = latestLogID
@@ -281,7 +285,55 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 	}
 	maps.Copy(seg.docTS, docTS)
 
-	return nil
+	return count, nil
+}
+
+func (seg *HNSWSegment) countDelta(addIDs []int64, delIDs []int64) (int, error) {
+	docIDs := make(map[int64]int)
+	for _, docID := range delIDs {
+		docIDs[docID] = -1
+	}
+	for _, docID := range addIDs {
+		docIDs[docID] = +1
+	}
+
+	var delta int
+	for docID, count := range docIDs {
+		_, ok := seg.cache.docIDIndex[docID]
+		if ok {
+			if count < 0 {
+				delta += count
+			}
+			continue
+		}
+
+		_, ok = seg.docTS[docID]
+		if ok {
+			if count > 0 {
+				delta += count
+			}
+			continue
+		}
+
+		if seg.index == nil {
+			if count > 0 {
+				delta += count
+			}
+			continue
+		}
+
+		ok, err := seg.index.Contains(usearch.Key(docID))
+		if err != nil {
+			return 0, fmt.Errorf("failed to check if index contains docID: %w", err)
+		}
+		if ok && count < 0 {
+			delta += count
+		} else if !ok && count > 0 {
+			delta += count
+		}
+	}
+
+	return delta, nil
 }
 
 func (seg *HNSWSegment) NeedRebuildHNSW() bool {
