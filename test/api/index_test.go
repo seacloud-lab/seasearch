@@ -31,7 +31,7 @@ func TestIndex(t *testing.T) {
 	t.Run("PUT /api/index", func(t *testing.T) {
 		t.Run("create index with payload", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(fmt.Sprintf(`{"name":"%s"}`, "newindex"))
+			fmt.Fprintf(body, `{"name":"%s"}`, "newindex")
 			resp := request("PUT", "/api/index", body)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -44,7 +44,7 @@ func TestIndex(t *testing.T) {
 
 		t.Run("create index with error input", func(t *testing.T) {
 			body := bytes.NewBuffer(nil)
-			body.WriteString(fmt.Sprintf(`{"name":"%s"}`, ""))
+			fmt.Fprintf(body, `{"name":"%s"}`, "")
 			resp := request("PUT", "/api/index", body)
 			assert.Equal(t, http.StatusBadRequest, resp.Code)
 		})

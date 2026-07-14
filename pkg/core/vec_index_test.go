@@ -15,6 +15,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 )
 
@@ -24,7 +25,7 @@ func makeIvfPqForTest(t *testing.T) *IvfPqIndex {
 			Name: testIdxName,
 			VecIndexes: map[string]*meta.VecIndex{
 				testFieldName: {
-					TargetType:       vector.IvfPQ,
+					TargetType:       vector.IVFPQ,
 					NBits:            4,
 					Dims:             4,
 					M:                2,
@@ -64,6 +65,27 @@ func makeFlatForTest(t *testing.T) *FlatIndex {
 	return idx
 }
 
+func makeHNSWForTest(t *testing.T) *HNSWIndex {
+	t.Helper()
+	testHNSWIndex := &Index{
+		ref: &meta.Index{
+			Name: testIdxName,
+			VecIndexes: map[string]*meta.VecIndex{
+				testFieldName: {
+					TargetType: vector.HNSW,
+					Dims:       2,
+					Count:      0,
+				},
+			},
+		},
+	}
+	index, err := MakeVecIndex(testHNSWIndex, testFieldName, testHNSWIndex.ref.VecIndexes[testFieldName])
+
+	assert.Nil(t, err)
+	idx := index.(*HNSWIndex)
+	return idx
+}
+
 const testIdxName = "testIdx"
 const testFieldName = "vec"
 
@@ -73,6 +95,33 @@ func clean() {
 	_ = metadata.Index.Delete(testIdxName)
 	store, _ := vector.GetVectorStorage()
 	_ = store.Remove(path.Join(testIdxName, testFieldName))
+}
+
+func initVecIdxManagerForTest(t *testing.T) {
+	t.Helper()
+
+	vecObjStore, err := vector.GetVectorStorage()
+	if err != nil {
+		t.Fatalf("get vector storage err: %v", err)
+	}
+	vecIdxManager = &VecIndexManager{
+		storage: vecObjStore,
+	}
+
+	baseTmpDir := path.Join(config.Global.DataPath, vector.VecPrefix, "tmp_test")
+	err = os.MkdirAll(baseTmpDir, os.ModePerm)
+	if err != nil {
+		t.Fatalf("create test tmp dir err: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp(baseTmpDir, "vecidx-*")
+	if err != nil {
+		t.Fatalf("create temp dir err: %v", err)
+	}
+	vecIdxManager.tmpDir = tmpDir
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 }
 
 func TestVecIndex(t *testing.T) {
@@ -109,6 +158,10 @@ func TestVecIndex(t *testing.T) {
 	t.Run("TestSearchHeap", testSearchHeap)
 
 	t.Run("TestSearchFloat16Flat", testSearch16FlatVectors)
+	t.Run("TestBrandNewHNSW", testBrandNewHNSW)
+	t.Run("TestSearchHNSWVectors", testSearchHNSWVectors)
+	t.Run("TestHNSWSearchByIDs", testHNSWSearchByIDs)
+	t.Run("TestReOpenHNSW", testReOpenHNSW)
 }
 
 func testBrandNewFlat(t *testing.T) {
@@ -279,21 +332,13 @@ func testSealIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	assert.EqualValues(t, 2, len(idx.ref.Segments))
@@ -331,19 +376,11 @@ func testAddAndRemoveWithSealedIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -402,21 +439,13 @@ func testSearchIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -448,20 +477,12 @@ func testFreeIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -499,20 +520,12 @@ func testReOpenIvfPq(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -553,21 +566,13 @@ func testRecall(t *testing.T) {
 	defer func() {
 		config.Global.VectorConfig.IvfPqThreshold = 100000
 	}()
-	vecObjStore, err := vector.GetVectorStorage()
-	assert.Nil(t, err)
-	vecIdxManager = &VecIndexManager{
-		storage: vecObjStore,
-	}
-	vecIdxManager.tmpDir = t.TempDir()
-	defer func() {
-		_ = os.RemoveAll(vecIdxManager.tmpDir)
-	}()
+	initVecIdxManagerForTest(t)
 
 	idx := makeIvfPqForTest(t)
 	defer idx.Free()
 
 	ids, xq := createTestVecs(4, 5100)
-	err = idx.Batch(xq, ids, nil)
+	err := idx.Batch(xq, ids, nil)
 	assert.Nil(t, err)
 
 	err = idx.SealSeg()
@@ -667,12 +672,104 @@ func testSearch16FlatVectors(t *testing.T) {
 		checkQ0[i] = float16.Fromfloat32(f).Float32()
 	}
 	d1, _ := L2Distance(checkQ0, q)
-	assert.EqualValues(t, d1, res[base62.Encode(1)])
+	assert.InDelta(t, d1, res[base62.Encode(1)], 1e-7)
 
 	checkQ1 := make([]float32, len(xq[1]))
 	for i, f := range xq[1] {
 		checkQ1[i] = float16.Fromfloat32(f).Float32()
 	}
 	d2, _ := L2Distance(checkQ1, q)
-	assert.EqualValues(t, d2, res[base62.Encode(2)])
+	assert.InDelta(t, d2, res[base62.Encode(2)], 1e-7)
+}
+
+func testBrandNewHNSW(t *testing.T) {
+	defer clean()
+	initVecIdxManagerForTest(t)
+
+	idx := makeHNSWForTest(t)
+	defer idx.Free()
+
+	err := idx.segment.load()
+	assert.Nil(t, err)
+	assert.True(t, idx.segment.loaded.Load())
+	assert.NotNil(t, idx.segment.writer)
+}
+
+func testSearchHNSWVectors(t *testing.T) {
+	defer clean()
+	initVecIdxManagerForTest(t)
+
+	idx := makeHNSWForTest(t)
+	defer idx.Free()
+
+	xq := make([][]float32, 4)
+	xq[0] = zutils.MinuteVector(1)
+	xq[1] = zutils.MinuteVector(2)
+	xq[2] = zutils.MinuteVector(3)
+	xq[3] = zutils.MinuteVector(4)
+	ids := []int64{1, 2, 3, 4}
+	err := idx.Batch(xq, ids, nil)
+	assert.Nil(t, err)
+
+	q := zutils.MinuteVector(0)
+	res, err := idx.Search(q, 2, 0)
+	assert.Nil(t, err)
+	assert.EqualValues(t, 2, len(res))
+
+	assert.Contains(t, res, base62.Encode(1))
+	assert.Contains(t, res, base62.Encode(2))
+}
+
+func testHNSWSearchByIDs(t *testing.T) {
+	defer clean()
+	initVecIdxManagerForTest(t)
+
+	idx := makeHNSWForTest(t)
+	defer idx.Free()
+
+	xq := make([][]float32, 4)
+	xq[0] = zutils.MinuteVector(1)
+	xq[1] = zutils.MinuteVector(2)
+	xq[2] = zutils.MinuteVector(3)
+	xq[3] = zutils.MinuteVector(4)
+	ids := []int64{1, 2, 3, 4}
+	err := idx.Batch(xq, ids, nil)
+	assert.Nil(t, err)
+
+	result, err := idx.SearchByIDs(
+		zutils.MinuteVector(0),
+		2,
+		[]string{base62.Encode(2), base62.Encode(3)},
+	)
+	assert.Nil(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, base62.Encode(2), result[0].DocID)
+	assert.Equal(t, base62.Encode(3), result[1].DocID)
+}
+
+func testReOpenHNSW(t *testing.T) {
+	defer clean()
+	initVecIdxManagerForTest(t)
+
+	idx := makeHNSWForTest(t)
+
+	xq := make([][]float32, 4)
+	xq[0] = zutils.MinuteVector(1)
+	xq[1] = zutils.MinuteVector(2)
+	xq[2] = zutils.MinuteVector(3)
+	xq[3] = zutils.MinuteVector(4)
+	ids := []int64{1, 2, 3, 4}
+	err := idx.Batch(xq, ids, nil)
+	assert.Nil(t, err)
+
+	idx.Free()
+
+	idx = makeHNSWForTest(t)
+	defer idx.Free()
+
+	res, err := idx.Search(zutils.MinuteVector(0), 2, 0)
+	assert.Nil(t, err)
+	assert.EqualValues(t, 2, len(res))
+	assert.Contains(t, res, base62.Encode(1))
+	assert.Contains(t, res, base62.Encode(2))
 }

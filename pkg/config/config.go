@@ -157,6 +157,7 @@ type walConfig struct {
 
 type vectorConfig struct {
 	IvfPqThreshold int64 `env:"SS_VECTOR_IVFPQ_THRESHOLD,default=100000"`
+	HNSWMaxLogs    int64 `env:"SS_VECTOR_HNSW_MAX_LOGS,default=10000"`
 }
 
 var Global = new(config)

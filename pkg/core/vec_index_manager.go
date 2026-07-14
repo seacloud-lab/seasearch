@@ -2,6 +2,7 @@ package core
 
 import "C"
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
+	"github.com/tidwall/btree"
 )
 
 var (
@@ -30,13 +33,15 @@ type sealTask struct {
 }
 
 type VecIndexManager struct {
-	cache      map[string]VectorIndex
-	ready      map[string]chan struct{}
-	sealTaskMp map[string]struct{}
-	sealCh     chan *sealTask
-	sealedLock sync.RWMutex
-	lock       sync.Mutex
-	storage    vector.ObjStore
+	cache               map[string]VectorIndex
+	ready               map[string]chan struct{}
+	sealTaskMp          map[string]struct{}
+	sealCh              chan *sealTask
+	sealedLock          sync.RWMutex
+	buildHNSWIndexTasks *btree.BTreeG[BuildHNSWIndexTask]
+	buildHNSWIndexChan  chan BuildHNSWIndexTask
+	lock                sync.Mutex
+	storage             vector.ObjStore
 	// path for saving temp file
 	tmpDir string
 	closer *z.Closer
@@ -61,13 +66,15 @@ func InitVecIndexManager() {
 		}
 	}
 	vecIdxManager = &VecIndexManager{
-		cache:      make(map[string]VectorIndex),
-		ready:      make(map[string]chan struct{}),
-		sealTaskMp: make(map[string]struct{}),
-		sealCh:     make(chan *sealTask, 10),
-		storage:    storage,
-		closer:     z.NewCloser(3),
-		tmpDir:     tmpDir,
+		cache:               make(map[string]VectorIndex),
+		ready:               make(map[string]chan struct{}),
+		sealTaskMp:          make(map[string]struct{}),
+		sealCh:              make(chan *sealTask, 10),
+		buildHNSWIndexTasks: btree.NewBTreeG(BuildHNSWIndexTask.less),
+		buildHNSWIndexChan:  make(chan BuildHNSWIndexTask),
+		storage:             storage,
+		closer:              z.NewCloser(4),
+		tmpDir:              tmpDir,
 	}
 
 	go backgroundGC()
@@ -77,6 +84,8 @@ func InitVecIndexManager() {
 	go backgroundSeal()
 
 	go lazyCloseSegmentWriter()
+
+	go backgroundBuildHNSWIndex()
 }
 
 func CloseVecIndexManager() {
@@ -152,7 +161,7 @@ func execGC() (bool, error) {
 func lazyCloseSegmentWriter() {
 	ticker := time.NewTicker(1 * time.Minute)
 	for range ticker.C {
-		closeList := make([]*VecSegment, 0)
+		closeList := make([]IndexSegment, 0)
 		vecIdxManager.lock.Lock()
 		for _, vec := range vecIdxManager.cache {
 			closeList = append(closeList, vec.ListSegment()...)
@@ -160,19 +169,7 @@ func lazyCloseSegmentWriter() {
 		vecIdxManager.lock.Unlock()
 
 		for _, segment := range closeList {
-			segment.writerLock.RLock()
-			w := segment.vecStoreWriter
-			refCount := segment.writerRefCount
-			closeTime := segment.closeTime
-			segment.writerLock.RUnlock()
-
-			if refCount == 0 && time.Since(closeTime) > 5*time.Minute && w != nil {
-				segment.writerLock.Lock()
-				segment.vecStoreWriter = nil
-				segment.writerLock.Unlock()
-				_ = w.Close()
-				log.Debug().Msgf("lazy close vec index segment writer %s", segment.getName())
-			}
+			segment.TryCloseIdleWriter(5 * time.Minute)
 		}
 	}
 }
@@ -314,7 +311,7 @@ func SealIndex(zincIndexName string, field string) error {
 	if !ok {
 		return ErrVecIndexNotExists
 	}
-	if vecIndex.TargetType != vector.IvfPQ {
+	if vecIndex.TargetType != vector.IVFPQ {
 		return fmt.Errorf("the vector index doesn't need to seal")
 	}
 
@@ -364,7 +361,7 @@ func backgroundSealCheck() {
 				continue
 			}
 			for field, vecIndex := range vecIndexes {
-				if vecIndex.TargetType != vector.IvfPQ {
+				if vecIndex.TargetType != vector.IVFPQ {
 					continue
 				}
 
@@ -440,4 +437,62 @@ func backgroundSeal() {
 			vecIdxManager.sealedLock.Unlock()
 		}
 	}
+}
+
+type BuildHNSWIndexTask struct {
+	index string
+	field string
+}
+
+func (task BuildHNSWIndexTask) less(other BuildHNSWIndexTask) bool {
+	return cmp.Or(
+		cmp.Compare(task.index, other.index),
+		cmp.Compare(task.field, other.field),
+	) < 0
+}
+
+func BuildHNSWIndex(index, field string) {
+	task := BuildHNSWIndexTask{index: index, field: field}
+	if _, ok := vecIdxManager.buildHNSWIndexTasks.Set(task); !ok {
+		vecIdxManager.buildHNSWIndexChan <- task
+	}
+}
+
+func backgroundBuildHNSWIndex() {
+	defer vecIdxManager.closer.Done()
+	for {
+		select {
+		case <-vecIdxManager.closer.HasBeenClosed():
+			return
+
+		case task := <-vecIdxManager.buildHNSWIndexChan:
+			err := buildHNSWIndex(task)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to create hnsw index")
+				continue
+			}
+		}
+	}
+}
+
+func buildHNSWIndex(task BuildHNSWIndexTask) error {
+	defer vecIdxManager.buildHNSWIndexTasks.Delete(task)
+
+	index, err := GetVectorIndex(task.index, task.field, false)
+	if err != nil {
+		return fmt.Errorf("failed to get vector index %v %v: %w", task.index, task.field, err)
+	}
+	defer CloseVectorIndex(index, false)
+
+	log.Debug().Msgf("start to build hnsw index for %v %v", task.index, task.field)
+
+	start := time.Now()
+	err = index.BuildHNSW(vecIdxManager.closer.Ctx())
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msgf("build hnsw index for %v %v finished. took %.2fs", task.index, task.field, time.Since(start).Seconds())
+
+	return nil
 }

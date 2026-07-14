@@ -209,7 +209,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 				for k := range lastLineMetaData {
 					delete(lastLineMetaData, k)
 				}
-				if k == "index" || k == "create" || k == "update" {
+				switch k {
+				case "index", "create", "update":
 					nextLineIsData = true
 					lastLineMetaData["operation"] = k
 
@@ -222,7 +223,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 						return nil, errors.New("bulk index data format error")
 					}
 					lastLineMetaData["_id"] = vm["_id"]
-				} else if k == "delete" {
+				case "delete":
 					nextLineIsData = false
 					docID := vm["_id"].(string)
 					indexName := target
@@ -251,7 +252,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 							indexDelDocMap[indexName] = []string{docID}
 						}
 					}
-				} else {
+				default:
 					lastLineMetaData["_index"] = target
 					lastLineMetaData["operation"] = "index"
 				}

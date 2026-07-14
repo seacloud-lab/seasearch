@@ -2,6 +2,11 @@ module github.com/zincsearch/zincsearch
 
 go 1.25.0
 
+// Keep the usearch Go binding in sync with usearch library v2.25.2.
+// This version corresponds to commit 29e5277
+// (installed via: go get github.com/unum-cloud/usearch/golang@29e5277).
+require github.com/unum-cloud/usearch/golang v0.0.0-20260502205332-29e527731957
+
 require (
 	github.com/DataIntelligenceCrew/go-faiss v0.2.0
 	github.com/blevesearch/mmap-go v1.0.4
@@ -36,6 +41,7 @@ require (
 	github.com/swaggo/files v0.0.0-20220728132757-551d4a08d97a
 	github.com/swaggo/gin-swagger v1.5.3
 	github.com/swaggo/swag v1.8.11
+	github.com/tidwall/btree v1.8.1
 	github.com/x448/float16 v0.8.4
 	github.com/zincsearch/go-gin-prometheus v0.1.1
 	github.com/zincsearch/wal v1.2.6

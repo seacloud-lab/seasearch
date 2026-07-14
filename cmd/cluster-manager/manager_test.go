@@ -26,13 +26,14 @@ func TestNewNodeDistribute(t *testing.T) {
 	count2 := 3
 	count1 := 4
 	for _, to := range result {
-		if to == 1 {
+		switch to {
+		case 1:
 			count1++
-		} else if to == 2 {
+		case 2:
 			count2++
-		} else if to == 3 {
+		case 3:
 			count3++
-		} else {
+		default:
 			t.FailNow()
 		}
 	}
@@ -59,11 +60,12 @@ func TestRemoveNodeDistribute(t *testing.T) {
 	count2 := 2
 	count1 := 3
 	for _, to := range result {
-		if to == 1 {
+		switch to {
+		case 1:
 			count1++
-		} else if to == 2 {
+		case 2:
 			count2++
-		} else {
+		default:
 			t.FailNow()
 		}
 	}
@@ -93,13 +95,14 @@ func TestChangeNodeDistribute(t *testing.T) {
 	count1 := 3
 
 	for _, to := range result {
-		if to == 1 {
+		switch to {
+		case 1:
 			count1++
-		} else if to == 2 {
+		case 2:
 			count2++
-		} else if to == 4 {
+		case 4:
 			count4++
-		} else {
+		default:
 			t.FailNow()
 		}
 	}
@@ -127,11 +130,12 @@ func TestTwoNodeJoinDistribute(t *testing.T) {
 	count2 := 0
 	count1 := 7
 	for _, to := range result {
-		if to == 1 {
+		switch to {
+		case 1:
 			count1++
-		} else if to == 2 {
+		case 2:
 			count2++
-		} else {
+		default:
 			t.FailNow()
 		}
 	}
@@ -184,11 +188,12 @@ func TestTwoNodesInit(t *testing.T) {
 	count1 := 0
 	count2 := 0
 	for _, to := range result {
-		if to == 1 {
+		switch to {
+		case 1:
 			count1++
-		} else if to == 2 {
+		case 2:
 			count2++
-		} else {
+		default:
 			t.FailNow()
 		}
 	}

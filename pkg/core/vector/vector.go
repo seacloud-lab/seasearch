@@ -18,8 +18,9 @@ const (
 	Delete Action = 2
 )
 
-const IvfPQ = "ivf_pq"
 const Flat = "flat"
+const IVFPQ = "ivf_pq"
+const HNSW = "hnsw"
 
 const StatusGrowing = "growing"
 const StatusSealed = "sealed"

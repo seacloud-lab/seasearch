@@ -478,7 +478,7 @@ func (c *LruCache) Lock(path string) (pid *os.File, err error) {
 	if err != nil {
 		return pid, fmt.Errorf("error truncating pid file: %w", err)
 	}
-	_, err = pid.Write([]byte(fmt.Sprintf("%d\n", os.Getpid())))
+	_, err = fmt.Fprintf(pid, "%d\n", os.Getpid())
 	if err != nil {
 		return pid, fmt.Errorf("error writing pid: %w", err)
 	}

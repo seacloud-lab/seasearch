@@ -176,7 +176,7 @@ func (b *OssBackend) Load(kind string, id uint64) (*segment.Data, io.Closer, err
 		return cf.LoadReadOnlyData()
 	}
 
-	reader, err := b.Client.Read(context.Background(), path.Join(b.prefix, key))
+	reader, err := b.Read(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
 		log.Error().Err(err).Msgf("Load index %s file err: Read file from oss err: ", b.prefix)
 		return nil, nil, fmt.Errorf("load file err: read file from oss err: %w", err)
@@ -213,7 +213,7 @@ func (b *OssBackend) Persist(kind string, id uint64, w index.WriterTo, closeCh c
 	n := stat.Size()
 	cacheF.Seek(0, io.SeekStart)
 
-	err = b.Client.Write(context.Background(), backendKey, cacheF, &objclient.WriteOptions{Size: n})
+	err = b.Write(context.Background(), backendKey, cacheF, &objclient.WriteOptions{Size: n})
 	if err != nil {
 		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 		return err

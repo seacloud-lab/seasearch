@@ -243,7 +243,7 @@ func (a *AutoDateHistogramCalculator) Finish() {
 			}
 		}
 		// check bucket size
-		if !(len(a.bucketsMap) > a.size && a.currentInterval < len(a.intervals)-1) {
+		if len(a.bucketsMap) <= a.size || a.currentInterval >= len(a.intervals)-1 {
 			break
 		}
 		a.currentInterval++

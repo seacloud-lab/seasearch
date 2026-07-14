@@ -125,11 +125,12 @@ func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analy
 	if config.Global.StorageType != storageType {
 		return cfg, fmt.Errorf("the storage backend of the configuration is %s, but try to get %s", config.Global.StorageType, storageType)
 	}
-	if storageType == "disk" {
+	switch storageType {
+	case "disk":
 		cfg = directory.GetDiskConfig(dataPath, name, timeRange...)
-	} else if storageType == "s3" {
+	case "s3":
 		cfg = directory.GetS3Config(dataPath, name, timeRange...)
-	} else if storageType == "oss" {
+	case "oss":
 		cfg = directory.GetOssConfig(dataPath, name, timeRange...)
 	}
 	if defaultSearchAnalyzer != nil {

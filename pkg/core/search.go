@@ -51,9 +51,9 @@ func (index *Index) SearchWithStats(query *meta.ZincQuery, stats *zincsearch.Uni
 	}
 
 	if stats != nil {
-		return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
+		return zincsearch.MultiZincSearch(ctx, query, mappings, analyzers, simpleSearchersToUnifiedSearcher(stats, searchers)...)
 	}
 
 	// dmi, err := bluge.MultiSearch(ctx, searchRequest, readers...)
-	return zincsearch.MultiSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
+	return zincsearch.MultiZincSearch(ctx, query, mappings, analyzers, simpleSearchersToSearcher(searchers)...)
 }
