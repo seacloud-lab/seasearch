@@ -19,6 +19,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/flex"
 
 	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 	usearch "github.com/unum-cloud/usearch/golang"
 )
 
@@ -273,7 +274,7 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 	}
 	count, err := seg.countDelta(addIDs, delIDs)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count deltas: %w", err)
+		log.Warn().Err(err).Msg("failed to count hnsw batch delta")
 	}
 
 	seg.latestLogID = latestLogID
@@ -291,14 +292,17 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 func (seg *HNSWSegment) countDelta(addIDs []int64, delIDs []int64) (int, error) {
 	docIDs := make(map[int64]int)
 	for _, docID := range delIDs {
-		docIDs[docID] = -1
+		docIDs[docID] = -1 // -1 for deletion
 	}
 	for _, docID := range addIDs {
-		docIDs[docID] = +1
+		docIDs[docID] = +1 // +1 for addition
 	}
 
 	var delta int
 	for docID, count := range docIDs {
+		// When a docID is present in the docIDIndex, it means that the
+		// document is currently added or updated. Therefore, we only consider
+		// deletions to the delta size.
 		_, ok := seg.cache.docIDIndex[docID]
 		if ok {
 			if count < 0 {
@@ -307,6 +311,9 @@ func (seg *HNSWSegment) countDelta(addIDs []int64, delIDs []int64) (int, error) 
 			continue
 		}
 
+		// Else, when a docID is present in the docTS, it means that the
+		// document has been deleted in the current view. Therefore, we only
+		// consider additions to the delta size.
 		_, ok = seg.docTS[docID]
 		if ok {
 			if count > 0 {
@@ -315,6 +322,9 @@ func (seg *HNSWSegment) countDelta(addIDs []int64, delIDs []int64) (int, error) 
 			continue
 		}
 
+		// Else, when the index is nil, it means that there is no HNSW snapshot
+		// available. In this case, we treat unknown documents as absent.
+		// Therefore, we only consider additions to the delta size.
 		if seg.index == nil {
 			if count > 0 {
 				delta += count
@@ -322,6 +332,10 @@ func (seg *HNSWSegment) countDelta(addIDs []int64, delIDs []int64) (int, error) 
 			continue
 		}
 
+		// Finally, we check the HNSW index to determine if the document is
+		// present or not. If the document is present in the index, we only
+		// consider deletions to the delta size. If the document is absent in
+		// the index, we only consider additions to the delta size.
 		ok, err := seg.index.Contains(usearch.Key(docID))
 		if err != nil {
 			return 0, fmt.Errorf("failed to check if index contains docID: %w", err)
@@ -613,8 +627,7 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 
 	// The limit is set to k + len(seg.docTS) to ensure that we can retrieve
 	// enough results from the HNSW index, even after filtering out any
-	// documents that have been deleted (i.e., those present in seg.docTS).
-	// This way, we can still return up to k valid results after filtering.
+	// documents that have been updated or deleted in unapplied logs.
 	limit := uint(k + int64(len(seg.docTS)))
 	keys, dts, err := seg.index.Search(query, limit)
 	if err != nil {
