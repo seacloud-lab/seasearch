@@ -740,12 +740,11 @@ func (index *HNSWIndex) Batch(vectors [][]float32, addIds, deleteIds []int64) er
 }
 
 func (index *HNSWIndex) BuildHNSW(ctx context.Context) error {
-	if !index.segment.NeedRebuildHNSW() {
-		return nil
-	}
-	err := index.segment.BuildHNSW(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to build hnsw: %w", err)
+	for index.segment.NeedRebuildHNSW() {
+		err := index.segment.BuildHNSW(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to build hnsw: %w", err)
+		}
 	}
 	return nil
 }
