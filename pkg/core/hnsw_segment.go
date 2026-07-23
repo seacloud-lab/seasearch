@@ -190,7 +190,7 @@ func (seg *HNSWSegment) loadHNSW() error {
 	if !exist {
 		return nil
 	}
-	name, closer, err := vecIdxManager.storage.LoadFile(path.Join(seg.store, "0000", "hnsw"))
+	name, closer, err := vecIdxManager.storage.LoadFile(name)
 	if err != nil {
 		return fmt.Errorf("failed to load file: %w", err)
 	}
@@ -629,19 +629,29 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 	// enough results from the HNSW index, even after filtering out any
 	// documents that have been updated or deleted in unapplied logs.
 	limit := uint(k + int64(len(seg.docTS)))
-	keys, dts, err := seg.index.Search(query, limit)
+	keys, _, err := seg.index.Search(query, limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to filtered search: %w", err)
+		return nil, nil, fmt.Errorf("failed to search: %w", err)
 	}
 
 	var docIDs []int64
-	var distances []float32
-	for i, key := range keys {
+	for _, key := range keys {
 		if _, ok := seg.docTS[int64(key)]; ok {
 			continue
 		}
 		docIDs = append(docIDs, int64(key))
-		distances = append(distances, dts[i])
+	}
+
+	// The HNSW index uses quantized vectors, so the distances returned from
+	// the index are not accurate. We need to re-calculate the distances using
+	// the exact vectors stored in Bluge.
+	docIDs, distances, err := seg.searchDocsByIDs(query, k, docIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to search docs by IDs: %w", err)
+	}
+	if len(docIDs) > int(k) {
+		docIDs = docIDs[:k]
+		distances = distances[:k]
 	}
 
 	return docIDs, distances, nil
