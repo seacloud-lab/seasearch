@@ -5,6 +5,7 @@ ENV FAISS_VERSION=1.8.0
 ENV USEARCH_VERSION=2.25.2
 
 RUN <<EOF
+    set -eux
     apt-get update
     apt-get install -y --no-install-recommends \
         curl ca-certificates unzip cmake make pkg-config g++ libopenblas-dev

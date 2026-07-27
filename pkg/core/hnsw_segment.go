@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/bluge/search"
@@ -21,6 +22,7 @@ import (
 	"github.com/blugelabs/bluge"
 	"github.com/rs/zerolog/log"
 	usearch "github.com/unum-cloud/usearch/golang"
+	"golang.org/x/time/rate"
 )
 
 type HNSWSegment struct {
@@ -39,6 +41,9 @@ type HNSWSegment struct {
 	// periodically apply those logs to the "doc/" family and rebuild the HNSW
 	// index.
 	writer *bluge.Writer
+	// throttler limits the write rate to avoid memory overflow when the number
+	// of unapplied logs exceeds the threshold.
+	throttler *rate.Limiter
 
 	// hnswLogID is the log id of the last applied log to HNSW index.
 	hnswLogID   int64
@@ -64,6 +69,7 @@ func newHNSWSegment(store string, dimensions int) *HNSWSegment {
 	var seg HNSWSegment
 	seg.store = store
 	seg.dimensions = dimensions
+	seg.throttler = rate.NewLimiter(rate.Every(time.Millisecond*30), 1)
 	seg.cache.docIDIndex = make(map[int64]int)
 	seg.docTS = make(map[int64]int64)
 	return &seg
@@ -221,6 +227,25 @@ func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int6
 
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
+
+	threshold := int64(float64(config.Global.VectorConfig.HNSWMaxLogs) * 1.2)
+	if seg.latestLogID-seg.hnswLogID > threshold {
+		// When the number of unapplied vector logs grows well past the HNSW
+		// rebuild threshold, temporarily release the lock and throttle writes.
+		// This keeps batch ingestion from racing ahead of background rebuilds
+		// and exhausting memory with too many pending logs.
+		seg.mutex.Unlock()
+
+		n := len(addIDs) + len(delIDs)
+		for range n {
+			err := seg.throttler.Wait(context.Background())
+			if err != nil {
+				return 0, fmt.Errorf("failed to wait for throttler: %w", err)
+			}
+		}
+
+		seg.mutex.Lock()
+	}
 
 	if len(addIDs) != len(vectors) {
 		return 0, fmt.Errorf("invalid parameters: size of docIDs and vectors not equal")
