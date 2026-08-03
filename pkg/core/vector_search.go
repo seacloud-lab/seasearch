@@ -52,7 +52,7 @@ func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error
 }
 
 func searchVector(index *Index, q *VectorQuery) ([]DocDistance, error) {
-	vecIndex, err := GetVectorIndex(index.GetName(), q.QueryField, false)
+	vecIndex, err := GetVectorIndex(index.GetName(), q.QueryField)
 	if errors.Is(err, ErrVecIndexNotExists) {
 		return nil, nil
 	} else if err != nil {
@@ -166,46 +166,6 @@ func retrieveVectorDocuments(indexes []*Index, q *VectorQuery, distances []DocDi
 	return resp, nil
 }
 
-type InternalVectorQuery struct {
-	Index      string    `json:"index"`
-	QueryField string    `json:"query_field"`
-	K          int       `json:"k"`
-	Vector     []float32 `json:"vector"`
-	Nprobe     int       `json:"nprobe"`
-	Segments   []int     `json:"segments"`
-}
-
-type InternalVectorSearchResponse struct {
-	MatchedIds map[string]float32 `json:"matched_ids"`
-}
-
-// InternalVectorSearch queries the specified vector index segments.
-func InternalVectorSearch(q *InternalVectorQuery) (*InternalVectorSearchResponse, error) {
-	vecIndex, err := GetVectorIndex(q.Index, q.QueryField, true)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		CloseVectorIndex(vecIndex, false)
-	}()
-	if vecIndex.Meta().Dims != len(q.Vector) {
-		return nil, fmt.Errorf("invalid query vector, the vector dims should be %d", vecIndex.Meta().Dims)
-	}
-	// If parallel search is not required,
-	// the request should be forwarded directly to the corresponding node.
-	if len(q.Segments) == 0 {
-		return nil, fmt.Errorf("invalid segment ids")
-	}
-
-	var vecResult map[string]float32
-	vecResult, err = vecIndex.PartialSearch(q.Vector, int64(q.K), q.Nprobe, q.Segments)
-	if err != nil {
-		return nil, err
-	}
-
-	return &InternalVectorSearchResponse{MatchedIds: vecResult}, nil
-}
-
 func VectorRecall(zincIndex *Index, field string, querySize int, k int64, nprobe int) (float32, error) {
 	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
 	if !ok {
@@ -216,7 +176,7 @@ func VectorRecall(zincIndex *Index, field string, querySize int, k int64, nprobe
 		return 1.0, nil
 	}
 
-	idx, err := GetVectorIndex(zincIndex.GetName(), field, false)
+	idx, err := GetVectorIndex(zincIndex.GetName(), field)
 	if err != nil {
 		return 0, err
 	}

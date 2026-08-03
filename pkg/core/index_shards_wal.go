@@ -597,7 +597,7 @@ func BatchVectors(actions []*vector.VecAction) error {
 		if len(acts) <= 0 {
 			continue
 		}
-		index, err := GetVectorIndex(acts[0].Index, acts[0].Field, false)
+		index, err := GetVectorIndex(acts[0].Index, acts[0].Field)
 		if err != nil {
 			return err
 		}

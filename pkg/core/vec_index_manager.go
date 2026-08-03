@@ -83,8 +83,6 @@ func InitVecIndexManager() {
 
 	go backgroundSeal()
 
-	go lazyCloseSegmentWriter()
-
 	go backgroundBuildHNSWIndex()
 }
 
@@ -158,25 +156,9 @@ func execGC() (bool, error) {
 	return true, nil
 }
 
-func lazyCloseSegmentWriter() {
-	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		closeList := make([]IndexSegment, 0)
-		vecIdxManager.lock.Lock()
-		for _, vec := range vecIdxManager.cache {
-			closeList = append(closeList, vec.ListSegment()...)
-		}
-		vecIdxManager.lock.Unlock()
-
-		for _, segment := range closeList {
-			segment.TryCloseIdleWriter(5 * time.Minute)
-		}
-	}
-}
-
 // GetVectorIndex
 // The caller should always call the CloseVectorIndex after obtaining the vector index.
-func GetVectorIndex(indexName string, fieldName string, forParallelSearch bool) (VectorIndex, error) {
+func GetVectorIndex(indexName string, fieldName string) (VectorIndex, error) {
 	cachedName := path.Join(indexName, fieldName)
 	for {
 		vecIdxManager.lock.Lock()
@@ -196,7 +178,7 @@ func GetVectorIndex(indexName string, fieldName string, forParallelSearch bool) 
 		vecIdxManager.ready[cachedName] = ready
 		vecIdxManager.lock.Unlock()
 
-		index, err := getVectorIndex(fieldName, indexName, forParallelSearch)
+		index, err := getVectorIndex(fieldName, indexName)
 		if err != nil {
 			vecIdxManager.lock.Lock()
 			close(ready)
@@ -259,21 +241,10 @@ func CloseVectorIndex(idx VectorIndex, wait bool) {
 }
 
 // getVectorIndex create a vector index, if forParallelSearch is true, we load zinc index from metadata storage.
-func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (VectorIndex, error) {
-	var zincIndex *Index
-	var err error
-	if forParallelSearch {
-		zincIndex, err = GetZincIndexFromMetadata(zincIndexName)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// get metadata
-		var ok bool
-		zincIndex, ok = GetIndex(zincIndexName)
-		if !ok {
-			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", zincIndexName, field)
-		}
+func getVectorIndex(field, zincIndexName string) (VectorIndex, error) {
+	zincIndex, ok := GetIndex(zincIndexName)
+	if !ok {
+		return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", zincIndexName, field)
 	}
 
 	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
@@ -286,7 +257,7 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 }
 
 func DeleteVecIndex(indexName string, fieldName string) error {
-	vecIndex, err := GetVectorIndex(indexName, fieldName, false)
+	vecIndex, err := GetVectorIndex(indexName, fieldName)
 	if err == nil {
 		CloseVectorIndex(vecIndex, true)
 	} else if !errors.Is(err, ErrVecIndexNotExists) && !errors.Is(err, ErrVecIndexCorruption) {
@@ -407,7 +378,7 @@ func backgroundSeal() {
 			vecIdxManager.sealedLock.Lock()
 			vecIdxManager.sealTaskMp[task.taskName] = struct{}{}
 			vecIdxManager.sealedLock.Unlock()
-			vecIndex, err := GetVectorIndex(task.index, task.field, false)
+			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
 				vecIdxManager.sealedLock.Lock()
 				delete(vecIdxManager.sealTaskMp, task.taskName)
@@ -478,7 +449,7 @@ func backgroundBuildHNSWIndex() {
 func buildHNSWIndex(task BuildHNSWIndexTask) error {
 	defer vecIdxManager.buildHNSWIndexTasks.Delete(task)
 
-	index, err := GetVectorIndex(task.index, task.field, false)
+	index, err := GetVectorIndex(task.index, task.field)
 	if err != nil {
 		return fmt.Errorf("failed to get vector index %v %v: %w", task.index, task.field, err)
 	}

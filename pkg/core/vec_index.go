@@ -26,9 +26,6 @@ type VectorIndex interface {
 	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
 	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
 	SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error)
-	// PartialSearch is used for parallel search. The proxy assigns specific segments to each node,
-	// and the local node performs the search based on the assigned segment IDs.
-	PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error)
 	Name() string
 	StoreName() string
 	Meta() *meta.VecIndex
@@ -40,12 +37,7 @@ type VectorIndex interface {
 	Free()
 	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
-	ListSegment() []IndexSegment
 	BuildHNSW(context.Context) error
-}
-
-type IndexSegment interface {
-	TryCloseIdleWriter(idleThreshold time.Duration) bool
 }
 
 type DocDistance struct {
@@ -235,26 +227,9 @@ func (f *FlatIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocD
 	return f.seg.SearchByIDs(vec, k, docIDs)
 }
 
-func (f *FlatIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
-	log.Warn().Msgf("ParallelSearch should not be called on flat index %s.", f.name)
-	return f.Search(vec, k, nprobe)
-}
-
 func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	log.Warn().Msgf("Recall should not be called on flat index %s.", f.name)
 	return 1, nil
-}
-
-func (f *FlatIndex) ListSegment() []IndexSegment {
-	f.lock.RLock()
-	seg := f.seg
-	f.lock.RUnlock()
-	if seg == nil {
-		return nil
-	}
-	res := make([]IndexSegment, 1)
-	res[0] = seg
-	return res
 }
 
 // IvfPqIndex has multiple segments, each contains at most 100K vectors.
@@ -352,11 +327,6 @@ func (v *IvfPqIndex) copySegments() ([]*IVFPQSegment, error) {
 	res := make([]*IVFPQSegment, len(v.segments))
 	copy(res, v.segments)
 	return res, nil
-}
-
-func (v *IvfPqIndex) copySegmentsWithIds(ids []int) ([]*IVFPQSegment, error) {
-	segments, err := v.loadSegments(ids)
-	return segments, err
 }
 
 func (v *IvfPqIndex) loadSegments(ids []int) ([]*IVFPQSegment, error) {
@@ -549,17 +519,6 @@ func (v *IvfPqIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]Doc
 	return distances, nil
 }
 
-func (v *IvfPqIndex) PartialSearch(vec []float32, k int64, nprobe int, segments []int) (map[string]float32, error) {
-	v.lock.Lock()
-	segs, err := v.copySegmentsWithIds(segments)
-	v.lock.Unlock()
-	if err != nil {
-		return nil, err
-	}
-
-	return searchSegments(vec, segs, k, nprobe)
-}
-
 func searchSegments(vec []float32, segs []*IVFPQSegment, k int64, nprobe int) (map[string]float32, error) {
 	searchHeap := &vecSearchHeap{}
 	heap.Init(searchHeap)
@@ -608,19 +567,6 @@ func searchSegments(vec []float32, segs []*IVFPQSegment, k int64, nprobe int) (m
 		result[res.id] = res.dis
 	}
 	return result, nil
-}
-
-func (v *IvfPqIndex) ListSegment() []IndexSegment {
-	v.lock.RLock()
-	defer v.lock.RUnlock()
-
-	res := make([]IndexSegment, 0, len(v.segments))
-	for _, seg := range v.segments {
-		if seg != nil {
-			res = append(res, seg)
-		}
-	}
-	return res
 }
 
 type vecSearchHeap struct {
@@ -789,10 +735,6 @@ func (index *HNSWIndex) PartialSearch(vec []float32, k int64, nprobe int, segmen
 
 func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	return 0, fmt.Errorf("recall is not supported for hnsw index")
-}
-
-func (index *HNSWIndex) ListSegment() []IndexSegment {
-	return nil
 }
 
 func (index *HNSWIndex) SealSeg() error {

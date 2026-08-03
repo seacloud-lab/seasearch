@@ -125,22 +125,3 @@ func VectorRecall(c *gin.Context) {
 	zutils.GinRenderJSON(c, http.StatusOK, result)
 
 }
-
-// InternalSearchVector queries the specified vector index segments and just returns the matched doc ids and the distances.
-// The proxy needs to perform an additional internal search based on the document IDs,
-// because the assignments of the vector index may differ from the assignments of the full-text index.
-func InternalSearchVector(c *gin.Context) {
-	query := &core.InternalVectorQuery{}
-	if err := zutils.GinBindJSON(c, query); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	res, err := core.InternalVectorSearch(query)
-	if err != nil {
-		log.Err(err).Msgf("internal vector search error:")
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
-		return
-	}
-	zutils.GinRenderJSON(c, http.StatusOK, res)
-}

@@ -2,12 +2,10 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,10 +40,8 @@ type IVFPQSegment struct {
 	// for sealed segment, the lock is used for avoiding concurrent read and write for faiss index.
 	sync.RWMutex
 
-	vecStoreWriter *bluge.Writer
-	writerLock     sync.RWMutex
-	writerRefCount int64
-	closeTime      time.Time
+	writer    *bluge.Writer
+	closeTime time.Time
 }
 
 func openIVFPQSegment(vecIndex VectorIndex, id int) (*IVFPQSegment, error) {
@@ -66,6 +62,29 @@ func openIVFPQSegment(vecIndex VectorIndex, id int) (*IVFPQSegment, error) {
 			return nil, fmt.Errorf("open seg faiss index err: %w", err)
 		}
 	}
+
+	dataPath := config.Global.DataPath
+	name := path.Join(vector.VecPrefix, vecIndex.StoreName(), fmt.Sprintf("%04x", ref.Id), "stored_vec")
+	var cfg bluge.Config
+	switch config.Global.StorageType {
+	case "disk":
+		cfg = directory.GetDiskConfig(dataPath, name)
+	case "s3":
+		cfg = directory.GetS3Config(dataPath, name)
+	case "oss":
+		cfg = directory.GetOssConfig(dataPath, name)
+	default:
+		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
+	}
+	writer, err := bluge.OpenWriter(cfg)
+	if err != nil {
+		if seg.index != nil {
+			seg.index.Delete()
+		}
+		return nil, err
+	}
+	seg.writer = writer
+
 	return seg, nil
 }
 
@@ -76,116 +95,6 @@ func (s *IVFPQSegment) initVecStorePath() error {
 		return fmt.Errorf("init path err: error creating directory '%s': %w", p, err)
 	}
 	return nil
-}
-
-func (s *IVFPQSegment) openVecStoreReader() (*bluge.Reader, error) {
-	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
-	var cfg bluge.Config
-	switch config.Global.StorageType {
-	case "disk":
-		cfg = directory.GetDiskConfig(dataPath, name)
-	case "s3":
-		cfg = directory.GetS3Config(dataPath, name)
-	case "oss":
-		cfg = directory.GetOssConfig(dataPath, name)
-	default:
-		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
-	}
-
-	var err error
-	var r *bluge.Reader
-	for i := 0; i < 3; i++ {
-		r, err = bluge.OpenReader(cfg)
-		if err != nil {
-			// it's a new empty index, without any document
-			if errors.Is(err, directory.ErrPathNotExists) {
-				return nil, nil
-			}
-			// When opening the reader, the writer may be writing and generating new snapshots concurrently.
-			// The snapshots listed by the reader may have expired and been cleaned up at this time.
-			// In this case, we should try to get the latest snapshot again.
-			if strings.Contains(err.Error(), "unable to find a usable snapshot") {
-				log.Warn().Msgf("failed to open reader for %s: %v, retrying", s.getName(), err)
-				time.Sleep(time.Duration(zutils.RandInt(100, 300)) * time.Millisecond)
-				continue
-			}
-			return nil, fmt.Errorf("open %s err: %w", s.getName(), err)
-		}
-		return r, nil
-	}
-	return r, err
-}
-
-func (s *IVFPQSegment) openVecStoreWriter() (*bluge.Writer, error) {
-	s.writerLock.Lock()
-	w := s.vecStoreWriter
-	s.writerLock.Unlock()
-	if w != nil {
-		curRef := atomic.AddInt64(&s.writerRefCount, 1)
-		log.Debug().Msgf("open vec segment %s, current ref count: %d", s.getName(), curRef)
-		return w, nil
-	}
-	dataPath := config.Global.DataPath
-	name := path.Join(vector.VecPrefix, s.baseIndex.StoreName(), fmt.Sprintf("%04x", s.ref.Id), "stored_vec")
-	var cfg bluge.Config
-	switch config.Global.StorageType {
-	case "disk":
-		cfg = directory.GetDiskConfig(dataPath, name)
-	case "s3":
-		cfg = directory.GetS3Config(dataPath, name)
-	case "oss":
-		cfg = directory.GetOssConfig(dataPath, name)
-	default:
-		return nil, fmt.Errorf("invalid storage type: %s", config.Global.StorageType)
-	}
-
-	writer, err := bluge.OpenWriter(cfg)
-	if err != nil {
-		return nil, err
-	}
-	s.writerLock.Lock()
-	s.vecStoreWriter = writer
-	s.writerLock.Unlock()
-	curRef := atomic.AddInt64(&s.writerRefCount, 1)
-	log.Debug().Msgf("open vec segment %s, current ref count: %d", s.getName(), curRef)
-	return writer, nil
-}
-
-func (s *IVFPQSegment) closeVecStoreWriter() {
-	s.writerLock.Lock()
-	s.closeTime = time.Now()
-	s.writerLock.Unlock()
-	curRef := atomic.AddInt64(&s.writerRefCount, -1)
-	log.Debug().Msgf("close vec segment %s, current ref count: %d", s.getName(), curRef)
-}
-
-func (s *IVFPQSegment) getName() string {
-	return fmt.Sprintf("%s_%d", s.baseIndex.Name(), s.ref.Id)
-}
-
-func (s *IVFPQSegment) TryCloseIdleWriter(idleThreshold time.Duration) bool {
-	s.writerLock.RLock()
-	w := s.vecStoreWriter
-	refCount := s.writerRefCount
-	closeTime := s.closeTime
-	s.writerLock.RUnlock()
-
-	if refCount != 0 || w == nil || time.Since(closeTime) <= idleThreshold {
-		return false
-	}
-
-	s.writerLock.Lock()
-	if s.vecStoreWriter != w || s.writerRefCount != 0 || time.Since(s.closeTime) <= idleThreshold {
-		s.writerLock.Unlock()
-		return false
-	}
-	s.vecStoreWriter = nil
-	s.writerLock.Unlock()
-
-	_ = w.Close()
-	log.Debug().Msgf("lazy close vec index segment writer %s", s.getName())
-	return true
 }
 
 func (s *IVFPQSegment) saveFaissIndex() error {
@@ -262,13 +171,8 @@ func (s *IVFPQSegment) addVectors(vectors [][]float32, ids []int64) error {
 		doc.AddField(bluge.NewStoredOnlyField(internalVecField, bts))
 		batch.Insert(doc)
 	}
-	writer, err := s.openVecStoreWriter()
-	if err != nil {
-		return err
-	}
-	defer s.closeVecStoreWriter()
 
-	err = writer.Batch(batch)
+	err := s.writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("add vectors to bluge err: %w", err)
 	}
@@ -293,12 +197,7 @@ func (s *IVFPQSegment) removeIDs(ids []int64) error {
 	for _, id := range ids {
 		batch.Delete(bluge.Identifier(base62.Encode(id)))
 	}
-	writer, err := s.openVecStoreWriter()
-	if err != nil {
-		return err
-	}
-	defer s.closeVecStoreWriter()
-	err = writer.Batch(batch)
+	err := s.writer.Batch(batch)
 	if err != nil {
 		return fmt.Errorf("remove seg bluge index err: %w", err)
 	}
@@ -308,16 +207,11 @@ func (s *IVFPQSegment) removeIDs(ids []int64) error {
 // GetExistsIds
 // Filter out the id that exists in this segment. It‘s lock free.
 func (s *IVFPQSegment) GetExistsIds(ids []int64) ([]int64, error) {
-	r, err := s.openVecStoreReader()
+	r, err := s.writer.Reader()
 	if err != nil {
 		return nil, err
 	}
-	if r == nil {
-		return []int64{}, nil
-	}
-	defer func() {
-		_ = r.Close()
-	}()
+	defer r.Close()
 	q := bluge.NewBooleanQuery()
 	for _, id := range ids {
 		sub := bluge.NewTermQuery(base62.Encode(id)).SetField("_id")
@@ -354,16 +248,11 @@ func (s *IVFPQSegment) save() error {
 		s.freeCache()
 
 		// update count
-		r, err := s.openVecStoreReader()
+		r, err := s.writer.Reader()
 		if err != nil {
 			return err
 		}
-		if r == nil {
-			return nil
-		}
-		defer func() {
-			_ = r.Close()
-		}()
+		defer r.Close()
 		c, err := r.Count()
 		if err != nil {
 			return err
@@ -379,11 +268,7 @@ func (s *IVFPQSegment) Free() {
 	if s.index != nil {
 		s.index.Delete()
 	}
-	s.writerLock.Lock()
-	if s.vecStoreWriter != nil {
-		_ = s.vecStoreWriter.Close()
-	}
-	s.writerLock.Unlock()
+	s.writer.Close()
 
 	s.Lock()
 	s.freeCache()
@@ -664,16 +549,11 @@ func (s *IVFPQSegment) getAllVectors() ([]float32, []int64, error) {
 }
 
 func (s *IVFPQSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([]float32, []int64, error) {
-	reader, err := s.openVecStoreReader()
+	reader, err := s.writer.Reader()
 	if err != nil {
 		return nil, nil, err
 	}
-	if reader == nil {
-		return []float32{}, []int64{}, nil
-	}
-	defer func() {
-		_ = reader.Close()
-	}()
+	defer reader.Close()
 
 	var (
 		vectors []float32
