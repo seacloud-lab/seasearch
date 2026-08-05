@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zincsearch/zincsearch/faiss_wrapper"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
@@ -31,6 +30,7 @@ type IVFPQSegment struct {
 	baseIndex VectorIndex
 	ref       *meta.VectorSegment
 	index     faiss.Index
+	indexSize int64
 	// cache for search
 	cachedVectorsCache []float32
 	// vector idx -> docId
@@ -111,6 +111,10 @@ func (s *IVFPQSegment) saveFaissIndex() error {
 	if err != nil {
 		return err
 	}
+	stat, err := os.Stat(f.Name())
+	if err == nil {
+		s.indexSize = stat.Size()
+	}
 	err = vecIdxManager.storage.SaveFile(f.Name(), s.getFaissIndexPath())
 	if err != nil {
 		return err
@@ -126,8 +130,17 @@ func (s *IVFPQSegment) loadFaissIndexFile() error {
 	defer func() {
 		_ = closer.Close()
 	}()
+
 	s.index, err = faiss.ReadIndex(localFile, faiss.IOFlagReadOnly)
-	return err
+	if err != nil {
+		return err
+	}
+	stat, err := os.Stat(localFile)
+	if err == nil {
+		s.indexSize = stat.Size()
+	}
+
+	return nil
 }
 
 func (s *IVFPQSegment) getFaissIndexPath() string {
@@ -303,7 +316,7 @@ func (s *IVFPQSegment) searchFlat(vec []float32, k int64) (map[string]float32, e
 		return make(map[string]float32), nil
 	}
 
-	return flatSearch(ids, xb, vec, int(k), s.baseIndex.Meta().Dims), nil
+	return flatSearch(ids, xb, vec, int(k), s.baseIndex.Meta().Dims)
 }
 
 // getVecCaches
@@ -327,17 +340,16 @@ func (s *IVFPQSegment) getVecCaches() ([]int64, []float32, error) {
 	return cacheIds, cacheVectors, nil
 }
 
-func flatSearch(baseIds []int64, base []float32, query []float32, k, dim int) map[string]float32 {
-	distances, ids := faiss_wrapper.Knn(query, base, 1, len(baseIds), k, dim)
+func flatSearch(baseIds []int64, base []float32, query []float32, k, dim int) (map[string]float32, error) {
+	ids, distances, err := ExactSearch(baseIds, base, query, dim, k)
+	if err != nil {
+		return nil, err
+	}
 	result := make(map[string]float32)
 	for i, id := range ids {
-		// it means there isn't enough K vectors.
-		if id == -1 {
-			break
-		}
-		result[base62.Encode(baseIds[id])] = distances[i]
+		result[base62.Encode(id)] = distances[i]
 	}
-	return result
+	return result, nil
 }
 
 func (s *IVFPQSegment) searchIvfPq(vec []float32, k int64, nprobe int) (map[string]float32, error) {
@@ -508,7 +520,10 @@ func (s *IVFPQSegment) Recall(count int, k int64, nprobe int) (float32, error) {
 			return 0, err
 		}
 
-		flatRes := flatSearch(idb, xb, q, int(k), s.baseIndex.Meta().Dims)
+		flatRes, err := flatSearch(idb, xb, q, int(k), s.baseIndex.Meta().Dims)
+		if err != nil {
+			return 0, err
+		}
 		total += len(flatRes)
 		for id := range results {
 			if _, ok := flatRes[id]; ok {
@@ -594,4 +609,18 @@ func (s *IVFPQSegment) getVectors(count int64, searchReq bluge.SearchRequest) ([
 	}
 
 	return vectors, ids, nil
+}
+
+func (s *IVFPQSegment) Size() int64 {
+	s.RLock()
+	defer s.RUnlock()
+
+	var total int64
+	if s.ref.Status == vector.StatusGrowing {
+		total += int64(len(s.ids) * 8)
+		total += int64(len(s.cachedVectorsCache) * 4)
+	} else {
+		total += s.indexSize
+	}
+	return total
 }

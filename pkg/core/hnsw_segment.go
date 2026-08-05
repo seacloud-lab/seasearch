@@ -219,6 +219,32 @@ func (seg *HNSWSegment) loadHNSW() error {
 	return nil
 }
 
+func (seg *HNSWSegment) Size() int64 {
+	seg.mutex.RLock()
+	defer seg.mutex.RUnlock()
+
+	var total int64
+
+	// The size of the in-memory cache is calculated as follows:
+	// 1. The size of the docIDs slice is len(docIDs) * 8 bytes (int64).
+	// 2. The size of the docVectors slice is len(docVectors) * 4 bytes (float32).
+	// 3. The size of the docIDIndex map is len(docIDIndex) * 16 bytes (int64 key + int value).
+	// 4. The size of the docTS map is len(docTS) * 16 bytes (int64 key + int64 value).
+	total += int64(len(seg.cache.docIDs) * 8)
+	total += int64(len(seg.cache.docVectors) * 4)
+	total += int64(len(seg.cache.docIDIndex) * 16)
+	total += int64(len(seg.docTS) * 16)
+
+	if seg.index != nil {
+		n, err := seg.index.MemoryUsage()
+		if err == nil {
+			total += int64(n)
+		}
+	}
+
+	return total
+}
+
 func (seg *HNSWSegment) Batch(addIDs []int64, vectors [][]float32, delIDs []int64) (int, error) {
 	err := seg.load()
 	if err != nil {
@@ -670,13 +696,14 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 	// The HNSW index uses quantized vectors, so the distances returned from
 	// the index are not accurate. We need to re-calculate the distances using
 	// the exact vectors stored in Bluge.
+	// We truncate the quantized HNSW results to 2*k before exact reranking
+	// which is an accuracy-for-I/O tradeoff.
+	if len(docIDs) > int(k*2) {
+		docIDs = docIDs[:k*2]
+	}
 	docIDs, distances, err := seg.searchDocsByIDs(query, k, docIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to search docs by IDs: %w", err)
-	}
-	if len(docIDs) > int(k) {
-		docIDs = docIDs[:k]
-		distances = distances[:k]
 	}
 
 	return docIDs, distances, nil

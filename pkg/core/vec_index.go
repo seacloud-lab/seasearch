@@ -11,32 +11,33 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blugelabs/bluge"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+
+	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
 type VectorIndex interface {
-	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
-	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
-	SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error)
+	Free()
+
+	Meta() *meta.VecIndex
 	Name() string
 	StoreName() string
-	Meta() *meta.VecIndex
-	SealSeg() error
-	AddRef()
-	ReduceRef()
-	RefCount() int
-	ATime() time.Time
-	Free()
-	Recall(count int, k int64, nprobe int) (float32, error)
 	UseFloat16() bool
+	Size() int64
+
+	Search(vec []float32, k int64, nprobe int) (map[string]float32, error)
+	SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocDistance, error)
+
+	Batch(addVectors [][]float32, addIds, deleteIds []int64) error
+	SealSeg() error
+	Recall(count int, k int64, nprobe int) (float32, error)
 	BuildHNSW(context.Context) error
 }
 
@@ -90,13 +91,15 @@ func (b *baseIndex) UseFloat16() bool {
 	return b.ref.StoreWithFloat16
 }
 
-func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {
-	var subPath string
-	if vecIndexMeta.StoreWithHash {
-		subPath = zutils.GetHashEncode(field)
-	} else {
-		subPath = field
+func makeVecIndexStoreName(indexStoreName, field string, storeWithHash bool) string {
+	if storeWithHash {
+		return path.Join(indexStoreName, zutils.GetHashEncode(field))
 	}
+	return path.Join(indexStoreName, field)
+}
+
+func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (VectorIndex, error) {
+	storeName := makeVecIndexStoreName(zincIndex.GetStoreName(), field, vecIndexMeta.StoreWithHash)
 
 	switch vecIndexMeta.TargetType {
 	case vector.Flat:
@@ -104,7 +107,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
 				name:      path.Join(zincIndex.GetName(), field),
-				storeName: path.Join(zincIndex.GetStoreName(), subPath),
+				storeName: storeName,
 				field:     field,
 				ref:       vecIndexMeta,
 				refCount:  1,
@@ -117,7 +120,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
 				name:      path.Join(zincIndex.GetName(), field),
-				storeName: path.Join(zincIndex.GetStoreName(), subPath),
+				storeName: storeName,
 				field:     field,
 				ref:       vecIndexMeta,
 				refCount:  1,
@@ -136,7 +139,7 @@ func MakeVecIndex(zincIndex *Index, field string, vecIndexMeta *meta.VecIndex) (
 			baseIndex: baseIndex{
 				zincIndex: zincIndex,
 				name:      path.Join(zincIndex.GetName(), field),
-				storeName: path.Join(zincIndex.GetStoreName(), subPath),
+				storeName: storeName,
 				field:     field,
 				ref:       vecIndexMeta,
 				refCount:  1,
@@ -230,6 +233,14 @@ func (f *FlatIndex) SearchByIDs(vec []float32, k int64, docIDs []string) ([]DocD
 func (f *FlatIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	log.Warn().Msgf("Recall should not be called on flat index %s.", f.name)
 	return 1, nil
+}
+
+func (f *FlatIndex) Size() int64 {
+	err := f.loadSegment()
+	if err != nil {
+		return 0
+	}
+	return f.seg.Size()
 }
 
 // IvfPqIndex has multiple segments, each contains at most 100K vectors.
@@ -659,6 +670,20 @@ func (v *IvfPqIndex) Recall(count int, k int64, nprobe int) (float32, error) {
 	return total / float32(len(segs)), nil
 }
 
+func (v *IvfPqIndex) Size() int64 {
+	v.lock.RLock()
+	defer v.lock.RUnlock()
+
+	var total int64
+	for _, segment := range v.segments {
+		if segment == nil {
+			continue
+		}
+		total += segment.Size()
+	}
+	return total
+}
+
 type HNSWIndex struct {
 	baseIndex
 
@@ -739,4 +764,8 @@ func (index *HNSWIndex) Recall(count int, k int64, nprobe int) (float32, error) 
 
 func (index *HNSWIndex) SealSeg() error {
 	return fmt.Errorf("SealSeg should not be called on hnsw index %s", index.name)
+}
+
+func (index *HNSWIndex) Size() int64 {
+	return index.segment.Size()
 }

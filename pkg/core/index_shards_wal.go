@@ -597,7 +597,7 @@ func BatchVectors(actions []*vector.VecAction) error {
 		if len(acts) <= 0 {
 			continue
 		}
-		index, err := GetVectorIndex(acts[0].Index, acts[0].Field)
+		index, err := OpenVectorIndex(acts[0].Index, acts[0].Field)
 		if err != nil {
 			return err
 		}
@@ -622,10 +622,10 @@ func BatchVectors(actions []*vector.VecAction) error {
 		}
 		err = index.Batch(insertList, insertIdList, deleteIdList)
 		if err != nil {
-			CloseVectorIndex(index, false)
+			CloseVectorIndex(index)
 			return err
 		}
-		CloseVectorIndex(index, false)
+		CloseVectorIndex(index)
 	}
 
 	return nil

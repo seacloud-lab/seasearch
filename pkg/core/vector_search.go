@@ -52,13 +52,13 @@ func VectorSearch(indexes []*Index, q *VectorQuery) (*meta.SearchResponse, error
 }
 
 func searchVector(index *Index, q *VectorQuery) ([]DocDistance, error) {
-	vecIndex, err := GetVectorIndex(index.GetName(), q.QueryField)
+	vecIndex, err := OpenVectorIndex(index.GetName(), q.QueryField)
 	if errors.Is(err, ErrVecIndexNotExists) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	defer CloseVectorIndex(vecIndex, false)
+	defer CloseVectorIndex(vecIndex)
 
 	if vecIndex.Meta().Dims != len(q.Vector) {
 		return nil, fmt.Errorf("invalid query vector, the vector dims should be %d", vecIndex.Meta().Dims)
@@ -176,13 +176,11 @@ func VectorRecall(zincIndex *Index, field string, querySize int, k int64, nprobe
 		return 1.0, nil
 	}
 
-	idx, err := GetVectorIndex(zincIndex.GetName(), field)
+	idx, err := OpenVectorIndex(zincIndex.GetName(), field)
 	if err != nil {
 		return 0, err
 	}
-	defer func() {
-		CloseVectorIndex(idx, false)
-	}()
+	defer CloseVectorIndex(idx)
 	vecIndex, ok := idx.(*IvfPqIndex)
 	if !ok {
 		return 0, fmt.Errorf("invlaid vec index type: %T", idx)
