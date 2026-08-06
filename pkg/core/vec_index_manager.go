@@ -33,11 +33,13 @@ var (
 )
 
 type VecIndexManager struct {
-	locker VectorIndexLocker
-	cache  VectorIndexCache
-
 	storage vector.ObjStore
 	tmpDir  string // path for saving temp file
+
+	// locker provides per-index locking to synchronize opening and closing of
+	// vector indexes. It keeps the state of cache and storage consistent.
+	locker VectorIndexLocker
+	cache  VectorIndexCache
 
 	closer *z.Closer
 
@@ -70,11 +72,11 @@ func InitVecIndexManager() {
 	}
 
 	vecIdxManager = new(VecIndexManager)
+	vecIdxManager.storage = storage
+	vecIdxManager.tmpDir = tmpDir
 	vecIdxManager.locker.locks = make(map[string]*sync.Mutex)
 	vecIdxManager.cache.items = make(map[string]*VectorIndexCacheItem)
 	vecIdxManager.cache.evict = list.New()
-	vecIdxManager.storage = storage
-	vecIdxManager.tmpDir = tmpDir
 	vecIdxManager.closer = z.NewCloser(4)
 	vecIdxManager.sealTaskMp = make(map[string]struct{})
 	vecIdxManager.sealCh = make(chan *sealTask, 10)

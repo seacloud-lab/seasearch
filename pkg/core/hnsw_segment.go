@@ -696,8 +696,9 @@ func (seg *HNSWSegment) searchHNSW(query []float32, k int64) ([]int64, []float32
 	// The HNSW index uses quantized vectors, so the distances returned from
 	// the index are not accurate. We need to re-calculate the distances using
 	// the exact vectors stored in Bluge.
-	// We truncate the quantized HNSW results to 2*k before exact reranking
-	// which is an accuracy-for-I/O tradeoff.
+	// The 2*k limit is choosen to balance between accuracy and performance.
+	// Too small limit may result in missing some of the nearest neighbors,
+	// while too large limit may result in unnecessary computation.
 	if len(docIDs) > int(k*2) {
 		docIDs = docIDs[:k*2]
 	}
