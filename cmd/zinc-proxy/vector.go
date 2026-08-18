@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -72,9 +73,10 @@ func SearchVector(c *gin.Context) {
 	}
 	if !needParallelSearch {
 		bodyBytes, _ := json.Marshal(query)
-		body := io.NopCloser(bytes.NewBuffer(bodyBytes))
-		// rewind body
-		c.Request.Body = body
+		contentLength := int64(len(bodyBytes))
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		c.Request.ContentLength = contentLength
+		c.Request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 		directForwarding(c)
 		return
 	}

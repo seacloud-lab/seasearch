@@ -170,7 +170,10 @@ func Create(c *gin.Context) {
 		return
 	}
 
+	contentLength := int64(len(data))
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = contentLength
+	c.Request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	addr, err := GetAddrByIndex(newIndex.Name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})

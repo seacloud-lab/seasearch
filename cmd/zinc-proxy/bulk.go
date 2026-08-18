@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -271,8 +272,10 @@ func BulkV2(c *gin.Context) {
 		return
 	}
 
-	// rewind body
+	contentLength := int64(len(data))
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = contentLength
+	c.Request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	addr, err := GetAddrByIndex(target)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
