@@ -272,6 +272,8 @@ func BulkV2(c *gin.Context) {
 		return
 	}
 
+	// After changing the request body, we need to reset the Content-Length
+	// field and header. Otherwise, the request will be broken.
 	contentLength := int64(len(data))
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
 	c.Request.ContentLength = contentLength

@@ -73,6 +73,8 @@ func SearchVector(c *gin.Context) {
 	}
 	if !needParallelSearch {
 		bodyBytes, _ := json.Marshal(query)
+		// After changing the request body, we need to reset the Content-Length
+		// field and header. Otherwise, the request will be broken.
 		contentLength := int64(len(bodyBytes))
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		c.Request.ContentLength = contentLength
