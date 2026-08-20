@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -72,9 +73,12 @@ func SearchVector(c *gin.Context) {
 	}
 	if !needParallelSearch {
 		bodyBytes, _ := json.Marshal(query)
-		body := io.NopCloser(bytes.NewBuffer(bodyBytes))
-		// rewind body
-		c.Request.Body = body
+		// After changing the request body, we need to reset the Content-Length
+		// field and header. Otherwise, the request will be broken.
+		contentLength := int64(len(bodyBytes))
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		c.Request.ContentLength = contentLength
+		c.Request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 		directForwarding(c)
 		return
 	}

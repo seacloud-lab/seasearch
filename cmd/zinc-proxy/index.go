@@ -170,7 +170,12 @@ func Create(c *gin.Context) {
 		return
 	}
 
+	// After changing the request body, we need to reset the Content-Length
+	// field and header. Otherwise, the request will be broken.
+	contentLength := int64(len(data))
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = contentLength
+	c.Request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	addr, err := GetAddrByIndex(newIndex.Name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
