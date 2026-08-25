@@ -36,7 +36,7 @@ func DeleteIndex(name string) error {
 	// delete vecIndexes
 	vecIndexes := index.GetVecIndexes()
 	for vecIndex := range vecIndexes {
-		err := DeleteVecIndex(name, vecIndex)
+		err := DeleteVectorIndex(name, vecIndex)
 		if err != nil {
 			return fmt.Errorf("delete vec index err: %w", err)
 		}

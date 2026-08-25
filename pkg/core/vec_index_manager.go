@@ -1,8 +1,8 @@
 package core
 
-import "C"
 import (
 	"cmp"
+	"container/list"
 	"errors"
 	"fmt"
 	"os"
@@ -19,35 +19,40 @@ import (
 	"github.com/tidwall/btree"
 )
 
+const (
+	cacheTTL = 30 * time.Minute
+)
+
 var (
 	ErrVecIndexNotExists  = errors.New("index not found")
 	ErrVecIndexCorruption = errors.New("index file is corrupted")
 	ErrInvalidVec         = errors.New("invalid vectors")
 	ErrInvalidArguments   = errors.New("invalid arguments")
+
+	vecIdxManager *VecIndexManager
 )
 
-type sealTask struct {
-	index    string
-	field    string
-	taskName string
-}
-
 type VecIndexManager struct {
-	cache               map[string]VectorIndex
-	ready               map[string]chan struct{}
-	sealTaskMp          map[string]struct{}
-	sealCh              chan *sealTask
-	sealedLock          sync.RWMutex
+	storage vector.ObjStore
+	tmpDir  string // path for saving temp file
+
+	// locker provides per-index locking to synchronize opening and closing of
+	// vector indexes. It keeps the state of cache and storage consistent.
+	locker VectorIndexLocker
+	cache  VectorIndexCache
+
+	closer *z.Closer
+
+	sealTaskMp map[string]struct{}
+	sealedLock sync.RWMutex
+	sealCh     chan *sealTask
+
+	// buildHNSWIndexTasks uses a thread-safe BTree to store queued and running
+	// tasks. It ensures that each task is unique and prevents duplicate tasks
+	// from being queued.
 	buildHNSWIndexTasks *btree.BTreeG[BuildHNSWIndexTask]
 	buildHNSWIndexChan  chan BuildHNSWIndexTask
-	lock                sync.Mutex
-	storage             vector.ObjStore
-	// path for saving temp file
-	tmpDir string
-	closer *z.Closer
 }
-
-var vecIdxManager *VecIndexManager
 
 func InitVecIndexManager() {
 	storage, err := vector.GetVectorStorage()
@@ -65,25 +70,24 @@ func InitVecIndexManager() {
 			log.Fatal().Err(err).Msgf("init vector manager error")
 		}
 	}
-	vecIdxManager = &VecIndexManager{
-		cache:               make(map[string]VectorIndex),
-		ready:               make(map[string]chan struct{}),
-		sealTaskMp:          make(map[string]struct{}),
-		sealCh:              make(chan *sealTask, 10),
-		buildHNSWIndexTasks: btree.NewBTreeG(BuildHNSWIndexTask.less),
-		buildHNSWIndexChan:  make(chan BuildHNSWIndexTask),
-		storage:             storage,
-		closer:              z.NewCloser(4),
-		tmpDir:              tmpDir,
-	}
 
-	go backgroundGC()
+	vecIdxManager = new(VecIndexManager)
+	vecIdxManager.storage = storage
+	vecIdxManager.tmpDir = tmpDir
+	vecIdxManager.locker.locks = make(map[string]*sync.Mutex)
+	vecIdxManager.cache.items = make(map[string]*VectorIndexCacheItem)
+	vecIdxManager.cache.evict = list.New()
+	vecIdxManager.closer = z.NewCloser(4)
+	vecIdxManager.sealTaskMp = make(map[string]struct{})
+	vecIdxManager.sealCh = make(chan *sealTask, 10)
+	vecIdxManager.buildHNSWIndexTasks = btree.NewBTreeG(BuildHNSWIndexTask.less)
+	vecIdxManager.buildHNSWIndexChan = make(chan BuildHNSWIndexTask)
+
+	go cacheCleaner()
 
 	go backgroundSealCheck()
 
 	go backgroundSeal()
-
-	go lazyCloseSegmentWriter()
 
 	go backgroundBuildHNSWIndex()
 }
@@ -92,212 +96,267 @@ func CloseVecIndexManager() {
 	vecIdxManager.closer.SignalAndWait()
 }
 
-// backgroundGC for free memory
-func backgroundGC() {
-	defer vecIdxManager.closer.Done()
-	var err error
-	var previousFound bool
-	timer := time.NewTimer(time.Hour)
-	for {
-		select {
-		case <-timer.C:
-		case <-vecIdxManager.closer.HasBeenClosed():
-			timer.Stop()
-			return
-		}
+func OpenVectorIndex(indexName string, fieldName string) (VectorIndex, error) {
+	key := path.Join(indexName, fieldName)
 
-		if previousFound, err = execGC(); err != nil {
-			log.Error().Err(err).Msgf("background vector index GC err: ")
-		}
+	vecIdxManager.locker.Lock(key)
+	defer vecIdxManager.locker.Unlock(key)
 
-		if previousFound {
-			timer.Reset(time.Minute)
-		} else {
-			timer.Reset(time.Hour)
-		}
-	}
-}
-
-func execGC() (bool, error) {
-	log.Debug().Msg("start vector index gc")
-
-	vecIdxManager.lock.Lock()
-
-	var expired VectorIndex
-	for _, index := range vecIdxManager.cache {
-		if index.RefCount() == 0 && time.Since(index.ATime()) > time.Hour {
-			expired = index
-			break
-		}
-	}
-	if expired == nil {
-		vecIdxManager.lock.Unlock()
-		log.Debug().Msg("end vec index gc, no expired index")
-		return false, nil
-	}
-
-	if _, ok := vecIdxManager.ready[expired.Name()]; ok {
-		vecIdxManager.lock.Unlock()
-		log.Debug().Msgf("end vector index gc, index %v is opening/closing", expired.Name())
-		return true, nil
-	}
-
-	delete(vecIdxManager.cache, expired.Name())
-	ready := make(chan struct{})
-	vecIdxManager.ready[expired.Name()] = ready
-	vecIdxManager.lock.Unlock()
-
-	log.Debug().Msgf("free vector index memory %v", expired.Name())
-	expired.Free()
-
-	vecIdxManager.lock.Lock()
-	close(ready) // wakes all goroutines waiting on the channel
-	delete(vecIdxManager.ready, expired.Name())
-	vecIdxManager.lock.Unlock()
-
-	return true, nil
-}
-
-func lazyCloseSegmentWriter() {
-	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		closeList := make([]IndexSegment, 0)
-		vecIdxManager.lock.Lock()
-		for _, vec := range vecIdxManager.cache {
-			closeList = append(closeList, vec.ListSegment()...)
-		}
-		vecIdxManager.lock.Unlock()
-
-		for _, segment := range closeList {
-			segment.TryCloseIdleWriter(5 * time.Minute)
-		}
-	}
-}
-
-// GetVectorIndex
-// The caller should always call the CloseVectorIndex after obtaining the vector index.
-func GetVectorIndex(indexName string, fieldName string, forParallelSearch bool) (VectorIndex, error) {
-	cachedName := path.Join(indexName, fieldName)
-	for {
-		vecIdxManager.lock.Lock()
-		if index, ok := vecIdxManager.cache[cachedName]; ok {
-			index.AddRef()
-			vecIdxManager.lock.Unlock()
-			return index, nil
-		}
-
-		if ready, ok := vecIdxManager.ready[cachedName]; ok {
-			vecIdxManager.lock.Unlock()
-			<-ready
-			continue
-		}
-
-		ready := make(chan struct{})
-		vecIdxManager.ready[cachedName] = ready
-		vecIdxManager.lock.Unlock()
-
-		index, err := getVectorIndex(fieldName, indexName, forParallelSearch)
-		if err != nil {
-			vecIdxManager.lock.Lock()
-			close(ready)
-			delete(vecIdxManager.ready, cachedName)
-			vecIdxManager.lock.Unlock()
-			return nil, fmt.Errorf("load index error: %w", err)
-		}
-
-		vecIdxManager.lock.Lock()
-		close(ready) // wakes all goroutines waiting on the channel
-		vecIdxManager.cache[cachedName] = index
-		delete(vecIdxManager.ready, cachedName)
-		vecIdxManager.lock.Unlock()
-
+	index, ok := vecIdxManager.cache.Acquire(key)
+	if ok {
 		return index, nil
 	}
+
+	index, err := openVectorIndex(fieldName, indexName)
+	if err != nil {
+		return nil, err
+	}
+	vecIdxManager.cache.Set(key, index)
+
+	return index, nil
 }
 
-// CloseVectorIndex
-// Close the vector index.
-func CloseVectorIndex(idx VectorIndex, wait bool) {
-	vecIdxManager.lock.Lock()
-	idx.ReduceRef()
-	vecIdxManager.lock.Unlock()
-	if !wait {
-		return
+func openVectorIndex(fieldName, indexName string) (VectorIndex, error) {
+	zincIndex, ok := GetIndex(indexName)
+	if !ok {
+		return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", indexName, fieldName)
 	}
 
-	last := time.Now().Unix()
-	onlyOnce := true
-
-	for {
-		vecIdxManager.lock.Lock()
-		if idx.RefCount() == 0 {
-			if _, ok := vecIdxManager.ready[idx.Name()]; ok {
-				vecIdxManager.lock.Unlock()
-				return
-			}
-			ready := make(chan struct{})
-			vecIdxManager.ready[idx.Name()] = ready
-			delete(vecIdxManager.cache, idx.Name())
-			vecIdxManager.lock.Unlock()
-
-			// free index memory
-			idx.Free()
-
-			vecIdxManager.lock.Lock()
-			close(ready) // wakes all goroutines waiting on the channel
-			delete(vecIdxManager.ready, idx.Name())
-			vecIdxManager.lock.Unlock()
-			return
-		}
-		vecIdxManager.lock.Unlock()
-		if onlyOnce && time.Now().Unix()-last > 10 {
-			onlyOnce = false
-			log.Warn().Msgf("can't close index %s, because the refCount of index is %d", idx.Name(), idx.RefCount())
-		}
-		time.Sleep(time.Second)
-	}
-}
-
-// getVectorIndex create a vector index, if forParallelSearch is true, we load zinc index from metadata storage.
-func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (VectorIndex, error) {
-	var zincIndex *Index
-	var err error
-	if forParallelSearch {
-		zincIndex, err = GetZincIndexFromMetadata(zincIndexName)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// get metadata
-		var ok bool
-		zincIndex, ok = GetIndex(zincIndexName)
-		if !ok {
-			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", zincIndexName, field)
-		}
-	}
-
-	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
+	vecIndexMeta, ok := zincIndex.GetVecIndex(fieldName)
 	if !ok {
 		// the vector index metadata should always exist unless the field not exists, or it's not a vector field.
 		return nil, ErrVecIndexNotExists
 	}
 
-	return MakeVecIndex(zincIndex, field, vecIndexMeta)
+	return MakeVecIndex(zincIndex, fieldName, vecIndexMeta)
 }
 
-func DeleteVecIndex(indexName string, fieldName string) error {
-	vecIndex, err := GetVectorIndex(indexName, fieldName, false)
-	if err == nil {
-		CloseVectorIndex(vecIndex, true)
-	} else if !errors.Is(err, ErrVecIndexNotExists) && !errors.Is(err, ErrVecIndexCorruption) {
-		return fmt.Errorf("failed to get vector index %s/%s: %w", indexName, fieldName, err)
+func CloseVectorIndex(index VectorIndex) {
+	key := index.Name()
+
+	vecIdxManager.locker.Lock(key)
+	defer vecIdxManager.locker.Unlock(key)
+
+	vecIdxManager.cache.Release(key)
+}
+
+func DeleteVectorIndex(indexName string, fieldName string) error {
+	zincIndex, ok := GetIndex(indexName)
+	if !ok {
+		return fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", indexName, fieldName)
 	}
-	err = vecIdxManager.storage.Remove(vecIndex.StoreName())
+	vecIndexMeta, ok := zincIndex.GetVecIndex(fieldName)
+	if !ok {
+		return nil
+	}
+	storeName := makeVecIndexStoreName(zincIndex.GetStoreName(), fieldName, vecIndexMeta.StoreWithHash)
+
+	key := path.Join(indexName, fieldName)
+	for i := 0; ; i++ {
+		if i >= 10 {
+			return fmt.Errorf("failed to close vector index %s, ref count is not zero", key)
+		}
+
+		vecIdxManager.locker.Lock(key)
+		ok := vecIdxManager.cache.TryDelete(key)
+		if ok {
+			defer vecIdxManager.locker.Unlock(key)
+			break
+		}
+		vecIdxManager.locker.Unlock(key)
+
+		time.Sleep(time.Millisecond * (10 << i))
+	}
+
+	err := vecIdxManager.storage.Remove(storeName)
 	if err != nil {
 		return fmt.Errorf("failed to remove index %s/%s: %w", indexName, fieldName, err)
 	}
-
 	return nil
+}
+
+type VectorIndexLocker struct {
+	mutex sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func (locker *VectorIndexLocker) Lock(key string) {
+	locker.mutex.Lock()
+	m, ok := locker.locks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		locker.locks[key] = m
+	}
+	locker.mutex.Unlock()
+
+	m.Lock()
+}
+
+func (locker *VectorIndexLocker) Unlock(key string) {
+	locker.mutex.Lock()
+	m, ok := locker.locks[key]
+	locker.mutex.Unlock()
+	if !ok {
+		return
+	}
+
+	m.Unlock()
+}
+
+type VectorIndexCache struct {
+	mutex sync.Mutex
+	items map[string]*VectorIndexCacheItem
+	evict *list.List
+	size  int64
+}
+
+type VectorIndexCacheItem struct {
+	index VectorIndex
+	elem  *list.Element
+	atime time.Time
+	size  int64
+	ref   int
+}
+
+func (cache *VectorIndexCache) Acquire(key string) (VectorIndex, bool) {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+
+	item, ok := cache.items[key]
+	if !ok {
+		return nil, false
+	}
+
+	if item.elem != nil {
+		cache.evict.Remove(item.elem)
+		item.elem = nil
+	}
+	item.atime = time.Now()
+	item.ref++
+
+	return item.index, true
+}
+
+func (cache *VectorIndexCache) Release(key string) {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+
+	item, ok := cache.items[key]
+	if !ok {
+		return
+	}
+
+	item.ref--
+	if item.ref == 0 {
+		size := item.index.Size()
+		if size != item.size {
+			cache.size += size - item.size
+			item.size = size
+		}
+		item.elem = cache.evict.PushBack(item)
+		cache.restrictSize()
+	}
+}
+
+func (cache *VectorIndexCache) Set(key string, index VectorIndex) {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+
+	var item VectorIndexCacheItem
+	item.index = index
+	item.atime = time.Now()
+	item.size = index.Size()
+	item.ref = 1
+
+	cache.items[key] = &item
+	cache.size += item.size
+
+	cache.restrictSize()
+}
+
+func (cache *VectorIndexCache) TryDelete(key string) bool {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+
+	item, ok := cache.items[key]
+	if !ok {
+		return true
+	}
+	if item.ref != 0 {
+		return false
+	}
+
+	cache.evictItem(item)
+
+	return true
+}
+
+func (cache *VectorIndexCache) Clean() {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+
+	now := time.Now()
+	for _, item := range cache.items {
+		// Update the size of the index in case it has changed since it was
+		// last cached.
+		size := item.index.Size()
+		if size != item.size {
+			cache.size += size - item.size
+			item.size = size
+		}
+
+		if item.ref != 0 {
+			continue
+		}
+		if now.Sub(item.atime) <= cacheTTL {
+			continue
+		}
+		// Evict the item from the cache if it has exceeded the TTL.
+		cache.evictItem(item)
+	}
+
+	cache.restrictSize()
+}
+
+func (cache *VectorIndexCache) restrictSize() {
+	for cache.size > config.Global.VectorConfig.CacheSize && cache.evict.Len() > 0 {
+		elem := cache.evict.Front()
+		item := elem.Value.(*VectorIndexCacheItem)
+		cache.evictItem(item)
+	}
+}
+
+func (cache *VectorIndexCache) evictItem(item *VectorIndexCacheItem) {
+	if item.elem != nil {
+		cache.evict.Remove(item.elem)
+		item.elem = nil
+	}
+	delete(cache.items, item.index.Name())
+	cache.size -= item.size
+
+	item.index.Free()
+}
+
+// cacheCleaner evicts bases which have exceeded the cacheTTL.
+func cacheCleaner() {
+	defer vecIdxManager.closer.Done()
+
+	ticker := time.NewTicker(time.Minute * 5)
+	for {
+		select {
+		case <-ticker.C:
+			vecIdxManager.cache.Clean()
+
+		case <-vecIdxManager.closer.HasBeenClosed():
+			return
+		}
+	}
+}
+
+type sealTask struct {
+	index    string
+	field    string
+	taskName string
 }
 
 // SealIndex
@@ -407,7 +466,7 @@ func backgroundSeal() {
 			vecIdxManager.sealedLock.Lock()
 			vecIdxManager.sealTaskMp[task.taskName] = struct{}{}
 			vecIdxManager.sealedLock.Unlock()
-			vecIndex, err := GetVectorIndex(task.index, task.field, false)
+			vecIndex, err := OpenVectorIndex(task.index, task.field)
 			if err != nil {
 				vecIdxManager.sealedLock.Lock()
 				delete(vecIdxManager.sealTaskMp, task.taskName)
@@ -425,11 +484,11 @@ func backgroundSeal() {
 				vecIdxManager.sealedLock.Lock()
 				delete(vecIdxManager.sealTaskMp, task.taskName)
 				vecIdxManager.sealedLock.Unlock()
-				CloseVectorIndex(vecIndex, false)
+				CloseVectorIndex(vecIndex)
 				log.Error().Err(err).Msgf("failed to seal segment for vector index %s error: %s", task.taskName, err)
 				continue
 			}
-			CloseVectorIndex(vecIndex, false)
+			CloseVectorIndex(vecIndex)
 			log.Debug().Msgf("seal segment for vector index %s finished. took %.2fs", task.taskName, time.Since(start).Seconds())
 
 			vecIdxManager.sealedLock.Lock()
@@ -478,11 +537,11 @@ func backgroundBuildHNSWIndex() {
 func buildHNSWIndex(task BuildHNSWIndexTask) error {
 	defer vecIdxManager.buildHNSWIndexTasks.Delete(task)
 
-	index, err := GetVectorIndex(task.index, task.field, false)
+	index, err := OpenVectorIndex(task.index, task.field)
 	if err != nil {
 		return fmt.Errorf("failed to get vector index %v %v: %w", task.index, task.field, err)
 	}
-	defer CloseVectorIndex(index, false)
+	defer CloseVectorIndex(index)
 
 	log.Debug().Msgf("start to build hnsw index for %v %v", task.index, task.field)
 

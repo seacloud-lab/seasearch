@@ -156,6 +156,7 @@ type walConfig struct {
 }
 
 type vectorConfig struct {
+	CacheSize      int64 `env:"SS_VECTOR_CACHE_SIZE,default=1GB"`
 	IvfPqThreshold int64 `env:"SS_VECTOR_IVFPQ_THRESHOLD,default=100000"`
 	HNSWMaxLogs    int64 `env:"SS_VECTOR_HNSW_MAX_LOGS,default=10000"`
 }
