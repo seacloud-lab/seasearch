@@ -4,6 +4,12 @@ linters:
   enable:
     - govet
     - staticcheck
+  exclusions:
+    rules:
+      - path: cmd/zincsearch/main.go
+        text: SA1019
+      - path: pkg/uquery/query/query.go
+        text: SA4023
 formatters:
   enable:
     - gofmt
