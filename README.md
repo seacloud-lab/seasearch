@@ -50,3 +50,5 @@ To support queries against indexes that are larger than the available local disk
 With this design, clients typically experience higher latency only for the first request after an index segment has been evicted or when a node starts up. Once the cache is warmed up, subsequent requests can be served at speeds comparable to those of local storage.
 
 In our experience, the warm-up latency can be further reduced by taking advantage of the high network bandwidth available in modern data centers. During the warm-up stage, multiple index segments can be retrieved from S3 in parallel, significantly accelerating index loading.
+
+**Distributed Query Execution**: To further improve the ability to serve queries against very large indexes, SeaSearch can automatically distribute a search query across multiple compute nodes. Each node loads and searches a portion of the index data in parallel, and the results are then aggregated. This approach not only accelerates query execution but also reduces cache pressure on individual nodes, allowing SeaSearch to efficiently serve indexes that are significantly larger than the local disk capacity of a single node.
