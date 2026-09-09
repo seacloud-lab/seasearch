@@ -121,6 +121,7 @@ func RemoveS3Index(indexName string) error {
 			return fmt.Errorf("failed to remove object: %w", err)
 		}
 	}
+	keyCache.Invalidate(indexName)
 	return nil
 }
 
@@ -141,7 +142,7 @@ func S3Exists(indexName string) (bool, error) {
 func (b *S3Backend) Setup(readOnly bool) error {
 	if readOnly {
 		// read only, check if there are any objects here.
-		keys, err := b.Client.List(context.Background(), b.prefix)
+		keys, err := keyCache.List(context.Background(), b.Client, b.prefix)
 		if err != nil {
 			log.Error().Err(err).Msgf("Setup index %s err: ", b.prefix)
 			return fmt.Errorf("setup backend err: %w", err)
@@ -157,18 +158,18 @@ func (b *S3Backend) Setup(readOnly bool) error {
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {
-	items, err := b.Client.List(context.Background(), b.prefix)
+	keys, err := keyCache.List(context.Background(), b.Client, b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, fmt.Errorf("list objects err: %w", err)
 	}
 	var itemList uint64Slice
 
-	for _, item := range items {
-		if filepath.Ext(item.Key) != kind {
+	for _, key := range keys {
+		if filepath.Ext(key) != kind {
 			continue
 		}
-		stringID := filepath.Base(item.Key)
+		stringID := filepath.Base(key)
 		stringID = stringID[:len(stringID)-len(kind)]
 		parsedID, err := strconv.ParseUint(stringID, 16, 64)
 		if err != nil {
@@ -229,6 +230,8 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 		return err
 	}
+
+	keyCache.Invalidate(b.prefix)
 	return nil
 }
 
@@ -244,6 +247,8 @@ func (b *S3Backend) Remove(kind string, id uint64) error {
 		log.Error().Err(err).Msgf("Remove index file %s from obj store err: ", path.Join(b.prefix, key))
 		return fmt.Errorf("remove object err: %w", err)
 	}
+
+	keyCache.Invalidate(b.prefix)
 	return nil
 }
 
