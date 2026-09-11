@@ -2,13 +2,15 @@ package directory
 
 import (
 	"context"
+	"io"
+	"strings"
 	"sync"
 
 	"github.com/haiwen/goutils/objclient"
 )
 
 var (
-	keyCache = newObjectKeyCache()
+	defaultKeyCache = newObjectKeyCache()
 )
 
 // objectKeyCache reduces the calls of objclient.List() by caching the keys of
@@ -64,9 +66,20 @@ func (cache *objectKeyCache) List(ctx context.Context, client objclient.Client, 
 	return keys, nil
 }
 
-func (cache *objectKeyCache) Invalidate(prefix string) {
+func (cache *objectKeyCache) Invalidate(keys ...string) {
 	cache.mutex.Lock()
-	if item, ok := cache.items[prefix]; ok {
+	for prefix, item := range cache.items {
+		var match bool
+		for _, key := range keys {
+			if strings.HasPrefix(key, prefix) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+
 		if item.ready {
 			delete(cache.items, prefix)
 		} else {
@@ -74,4 +87,34 @@ func (cache *objectKeyCache) Invalidate(prefix string) {
 		}
 	}
 	cache.mutex.Unlock()
+}
+
+// KeyCacheClient wraps an objclient.Client and invalidates the cached keys
+// when the objects are changed.
+type KeyCacheClient struct {
+	objclient.Client
+}
+
+func NewKeyCacheClient(backend objclient.Client) *KeyCacheClient {
+	var client KeyCacheClient
+	client.Client = backend
+	return &client
+}
+
+func (client *KeyCacheClient) Write(ctx context.Context, key string, r io.Reader, o *objclient.WriteOptions) error {
+	err := client.Client.Write(ctx, key, r, o)
+	defaultKeyCache.Invalidate(key)
+	return err
+}
+
+func (client *KeyCacheClient) Remove(ctx context.Context, keys ...string) error {
+	err := client.Client.Remove(ctx, keys...)
+	defaultKeyCache.Invalidate(keys...)
+	return err
+}
+
+func (client *KeyCacheClient) Copy(ctx context.Context, src, dst string) error {
+	err := client.Client.Copy(ctx, src, dst)
+	defaultKeyCache.Invalidate(dst)
+	return err
 }
