@@ -30,6 +30,6 @@ jobs:
           context: .
           file: ./ci/Dockerfile
           push: true
-          tags: ghcr.io/seafileltd/seasearch-ci:latest
+          tags: ghcr.io/seacloud-lab/seasearch-ci:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

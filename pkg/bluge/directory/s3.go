@@ -87,6 +87,7 @@ func createS3Client() (objclient.Client, error) {
 		objConf.SSECKey = config.Global.S3.SsecKey
 		objConf.PartSize = config.Global.S3.PartSize
 		s3cli, err = objclient.NewS3Client(objConf)
+		s3cli = NewKeyCacheClient(s3cli)
 	})
 
 	return s3cli, err
@@ -113,8 +114,6 @@ func RemoveS3Index(indexName string) error {
 			return err
 		}
 	}
-	// remove object key cache
-	objectKeys.Remove(indexName)
 	// remove obj storage
 	for _, obj := range objs {
 		err = s3.Remove(context.Background(), obj.Key)
@@ -143,7 +142,7 @@ func S3Exists(indexName string) (bool, error) {
 func (b *S3Backend) Setup(readOnly bool) error {
 	if readOnly {
 		// read only, check if there are any objects here.
-		keys, err := objectKeys.List(context.Background(), b.Client, b.prefix)
+		keys, err := defaultKeyCache.List(context.Background(), b.Client, b.prefix)
 		if err != nil {
 			log.Error().Err(err).Msgf("Setup index %s err: ", b.prefix)
 			return fmt.Errorf("setup backend err: %w", err)
@@ -159,7 +158,7 @@ func (b *S3Backend) Setup(readOnly bool) error {
 }
 
 func (b *S3Backend) List(kind string) ([]uint64, error) {
-	keys, err := objectKeys.List(context.Background(), b.Client, b.prefix)
+	keys, err := defaultKeyCache.List(context.Background(), b.Client, b.prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("List index %s err: ", b.prefix)
 		return nil, fmt.Errorf("list objects err: %w", err)
@@ -231,7 +230,6 @@ func (b *S3Backend) Persist(kind string, id uint64, w index.WriterTo, closeCh ch
 		log.Error().Err(err).Msgf("Persist index %s error: persist to obj store err: ", b.prefix)
 		return err
 	}
-	objectKeys.Insert(backendKey)
 	return nil
 }
 
@@ -241,8 +239,6 @@ func (b *S3Backend) Remove(kind string, id uint64) error {
 	if err != nil {
 		return err
 	}
-
-	objectKeys.Remove(path.Join(b.prefix, key))
 
 	err = b.Client.Remove(context.Background(), path.Join(b.prefix, key))
 	if err != nil {
