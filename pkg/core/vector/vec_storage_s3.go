@@ -9,6 +9,7 @@ import (
 
 	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
@@ -157,5 +158,10 @@ func createS3Client() (objclient.Client, error) {
 	objConf.SSECKey = config.Global.S3.SsecKey
 	objConf.PartSize = config.Global.S3.PartSize
 
-	return objclient.NewS3Client(objConf)
+	cli, err := objclient.NewS3Client(objConf)
+	if err != nil {
+		return nil, err
+	}
+	cli = directory.NewKeyCacheClient(cli)
+	return cli, nil
 }

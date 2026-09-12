@@ -2,96 +2,119 @@ package directory
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/google/btree"
 	"github.com/haiwen/goutils/objclient"
 )
 
 var (
-	objectKeys *objectKeyCache = newObjectKeyCache()
+	defaultKeyCache = newObjectKeyCache()
 )
 
-// objectKeyCache caches object keys and "fully cached" prefixes.
+// objectKeyCache reduces the calls of objclient.List() by caching the keys of
+// objects in memory.
 type objectKeyCache struct {
-	mutex sync.RWMutex
+	mutex sync.Mutex
+	items map[string]*objectKeyCacheItem
+}
 
-	// prefixes stores path prefixes that are known to be fully listed in the
-	// cache.
-	prefixes map[string]int64
-
-	keys *btree.BTreeG[string]
+type objectKeyCacheItem struct {
+	// ready will be true once the keys are ready to be used.
+	ready bool
+	// invalid indicates that an invalidation request has been made while the
+	// keys are being fetched. In this case, the keys will not be cached.
+	invalid bool
+	// keys is the cached keys of objects with the given prefix.
+	keys []string
 }
 
 func newObjectKeyCache() *objectKeyCache {
 	var cache objectKeyCache
-	cache.prefixes = make(map[string]int64)
-	cache.keys = btree.NewOrderedG[string](32)
+	cache.items = make(map[string]*objectKeyCacheItem)
 	return &cache
 }
 
-func (cache *objectKeyCache) Insert(key string) {
-	cache.mutex.Lock()
-	cache.keys.ReplaceOrInsert(key)
-	cache.mutex.Unlock()
-}
-
-func (cache *objectKeyCache) Remove(path string) {
-	cache.mutex.Lock()
-	cache.keys.Clone().AscendGreaterOrEqual(path, func(key string) bool {
-		if !strings.HasPrefix(key, path) {
-			return false
-		}
-		cache.keys.Delete(key)
-		return true
-	})
-	cache.mutex.Unlock()
-}
-
 func (cache *objectKeyCache) List(ctx context.Context, client objclient.Client, prefix string) ([]string, error) {
-	cache.mutex.RLock()
-
-	var keys []string
-	if _, cached := cache.prefixes[prefix]; cached {
-		cache.keys.AscendGreaterOrEqual(prefix, func(key string) bool {
-			if !strings.HasPrefix(key, prefix) {
-				return false
-			}
-			keys = append(keys, key)
-			return true
-		})
-		cache.mutex.RUnlock()
-		return keys, nil
+	cache.mutex.Lock()
+	item, ok := cache.items[prefix]
+	if ok && item.ready {
+		cache.mutex.Unlock()
+		return item.keys, nil
 	}
-	cache.mutex.RUnlock()
+	item = new(objectKeyCacheItem)
+	cache.items[prefix] = item
+	cache.mutex.Unlock()
 
-	items, err := client.List(ctx, prefix)
+	objs, err := client.List(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range items {
-		keys = append(keys, item.Key)
+	keys := make([]string, len(objs))
+	for i, obj := range objs {
+		keys[i] = obj.Key
 	}
 
 	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-
-	// Remove keys under `prefix` from the main keys b-tree (they will be
-	// replaced by the freshly fetched keys below).
-	cache.keys.Clone().AscendGreaterOrEqual(prefix, func(key string) bool {
-		if !strings.HasPrefix(key, prefix) {
-			return false
-		}
-		cache.keys.Delete(key)
-		return true
-	})
-	for _, key := range keys {
-		cache.keys.ReplaceOrInsert(key)
+	// If another List() was called, the item will be replaced.
+	if cache.items[prefix] == item && !item.invalid {
+		item.ready = true
+		item.keys = keys
 	}
-
-	cache.prefixes[prefix] = time.Now().Unix()
-
+	cache.mutex.Unlock()
 	return keys, nil
+}
+
+func (cache *objectKeyCache) Invalidate(keys ...string) {
+	cache.mutex.Lock()
+	for prefix, item := range cache.items {
+		var match bool
+		for _, key := range keys {
+			if strings.HasPrefix(key, prefix) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+
+		if item.ready {
+			delete(cache.items, prefix)
+		} else {
+			item.invalid = true
+		}
+	}
+	cache.mutex.Unlock()
+}
+
+// KeyCacheClient wraps an objclient.Client and invalidates the cached keys
+// when the objects are changed.
+type KeyCacheClient struct {
+	objclient.Client
+}
+
+func NewKeyCacheClient(backend objclient.Client) *KeyCacheClient {
+	var client KeyCacheClient
+	client.Client = backend
+	return &client
+}
+
+func (client *KeyCacheClient) Write(ctx context.Context, key string, r io.Reader, o *objclient.WriteOptions) error {
+	err := client.Client.Write(ctx, key, r, o)
+	defaultKeyCache.Invalidate(key)
+	return err
+}
+
+func (client *KeyCacheClient) Remove(ctx context.Context, keys ...string) error {
+	err := client.Client.Remove(ctx, keys...)
+	defaultKeyCache.Invalidate(keys...)
+	return err
+}
+
+func (client *KeyCacheClient) Copy(ctx context.Context, src, dst string) error {
+	err := client.Client.Copy(ctx, src, dst)
+	defaultKeyCache.Invalidate(dst)
+	return err
 }

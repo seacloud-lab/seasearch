@@ -9,6 +9,7 @@ import (
 
 	"github.com/haiwen/goutils/objclient"
 	"github.com/rs/zerolog/log"
+	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 )
@@ -135,6 +136,9 @@ func createOssClient() (objclient.Client, error) {
 	objConf.Key = config.Global.Oss.AccessSecret
 	objConf.Bucket = config.Global.Oss.Bucket
 	objConf.Endpoint = config.Global.Oss.Endpoint
-
-	return objclient.NewOSSClient(objConf)
+	client, err := objclient.NewOSSClient(objConf)
+	if err != nil {
+		return nil, err
+	}
+	return directory.NewKeyCacheClient(client), nil
 }
