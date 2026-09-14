@@ -434,10 +434,11 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 				_ = searcher.Close()
 			}()
 			dmi, err := searcher.Search(ctx, request)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					return nil
-				}
+			if errors.Is(err, context.Canceled) {
+				// The context.Canceled error is ignored, because another
+				// concurrent searcher has found the shard.
+				return nil
+			} else if err != nil {
 				log.Error().Err(err).
 					Str("index", s.GetIndexName()).
 					Str("shard", s.GetID()).
@@ -479,7 +480,11 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 				_ = searcher.Close()
 			}()
 			dmi, err := searcher.Search(ctx, request)
-			if err != nil {
+			if errors.Is(err, context.Canceled) {
+				// The context.Canceled error is ignored, because another
+				// concurrent searcher has found the document.
+				return nil
+			} else if err != nil {
 				log.Error().Err(err).
 					Str("index", s.GetIndexName()).
 					Str("shard", s.GetID()).
