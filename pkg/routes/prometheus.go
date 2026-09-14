@@ -28,6 +28,6 @@ func SetPrometheus(app *gin.Engine) {
 		return
 	}
 
-	p := ginprometheus.NewPrometheus("zinc", []*ginprometheus.Metric{core.ZINC_METRICS})
+	p := ginprometheus.NewPrometheus("ss", []*ginprometheus.Metric{core.ZINC_METRICS})
 	p.Use(app)
 }

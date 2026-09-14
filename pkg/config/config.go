@@ -53,7 +53,7 @@ type config struct {
 	ProfilerAPIKey            string        `env:"ZINC_PROFILER_API_KEY,default=psx-AfPbC5Bh6gI4dHkCMpoxM2Qd7Xblsqhip5nlwvHdhAE1"`
 	ProfilerFriendlyProfileID string        `env:"ZINC_PROFILER_FRIENDLY_PROFILE_ID"`
 	TelemetryEnable           bool          `env:"ZINC_TELEMETRY,default=false"`
-	PrometheusEnable          bool          `env:"ZINC_PROMETHEUS_ENABLE,default=false"`
+	PrometheusEnable          bool          `env:"SS_PROMETHEUS_ENABLE,default=false"`
 	EnableTextKeywordMapping  bool          `env:"ZINC_ENABLE_TEXT_KEYWORD_MAPPING,default=false"`
 	BatchSize                 int           `env:"ZINC_BATCH_SIZE,default=1024"`
 	MaxResults                int           `env:"ZINC_MAX_RESULTS,default=10000"`
@@ -80,7 +80,7 @@ type config struct {
 type logConfig struct {
 	LogToStd bool   `env:"SS_LOG_TO_STDOUT"`
 	LogDir   string `env:"SS_LOG_DIR,default=./log"`
-	LogLevel string `env:"SS_LOG_LEVEL,default=debug"`
+	LogLevel string `env:"SS_LOG_LEVEL,default=INFO"`
 }
 
 type objCache struct {
