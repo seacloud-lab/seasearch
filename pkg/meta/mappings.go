@@ -72,7 +72,6 @@ func NewProperty(typ string) Property {
 		Sortable:       true,
 		Aggregatable:   true,
 		Highlightable:  false,
-		Fields:         make(map[string]Property),
 	}
 	if typ == "text" {
 		p.Sortable = false
@@ -106,6 +105,9 @@ func (p *Property) DeepClone() Property {
 	prop.Highlightable = p.Highlightable
 
 	if p.Fields != nil {
+		if len(p.Fields) > 0 {
+			prop.Fields = make(map[string]Property, len(p.Fields))
+		}
 		for k, v := range p.Fields {
 			prop.Fields[k] = v.DeepClone()
 		}

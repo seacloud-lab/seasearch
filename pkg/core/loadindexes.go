@@ -16,7 +16,6 @@
 package core
 
 import (
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -56,7 +55,6 @@ func LoadZincIndexFromMetadata(version string, readIndex *meta.Index) error {
 	for _, shd := range index.ref.Shards {
 		totalShardNum += len(shd.Shards)
 	}
-	log.Info().Msgf("Loading index... [%s:%s] shards[%d:%d]", index.ref.Name, index.ref.StorageType, index.ref.ShardNum, totalShardNum)
 
 	// load in memory
 	ZINC_INDEX_LIST.Add(index)
@@ -108,7 +106,7 @@ func formatIndex(readIndex *meta.Index) (*Index, error) {
 
 	// init shards
 	index.ref.ShardNum = readIndex.ShardNum
-	index.ref.Shards = make(map[string]*meta.IndexShard, index.shardNum)
+	index.ref.Shards = make(map[string]*meta.IndexShard)
 	for id := range readIndex.Shards {
 		index.ref.Shards[id] = &meta.IndexShard{
 			ID:       readIndex.Shards[id].ID,
