@@ -18,14 +18,15 @@ package core
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 
@@ -59,13 +60,7 @@ func InitIndexList() {
 	ZINC_INDEX_LIST.Indexes = make(map[string]*Index)
 	ZINC_INDEX_LIST.gcCloser = z.NewCloser(1)
 
-	go ZINC_INDEX_LIST.StartGC()
 	go LazyCloseSecondIndexShardWriters()
-
-	err := LoadZincIndexesFromMetadata(string(version))
-	if err != nil {
-		log.Fatal().Err(err).Msg("Error loading index")
-	}
 
 	// update version
 	if string(version) != meta.Version {
@@ -75,16 +70,15 @@ func InitIndexList() {
 		}
 	}
 
-	ZINC_INDEX_ALIAS_LIST.Aliases, err = metadata.Alias.Get()
+	aliases, err := metadata.Alias.Get()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error loading alias")
 	}
+	ZINC_INDEX_ALIAS_LIST.Aliases = aliases
 
-	if !config.Global.Cluster.Enable {
-		return
+	if config.Global.Cluster.Enable {
+		go watchIndexUpdate()
 	}
-
-	go watchIndexUpdate()
 }
 
 func (t *IndexList) Add(index *Index) {
@@ -105,22 +99,33 @@ func (t *IndexList) Get(name string) (*Index, bool) {
 }
 
 func (t *IndexList) GetOrCreate(name string) (*Index, bool, error) {
-	t.lock.RLock()
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	idx, ok := t.Indexes[name]
-	t.lock.RUnlock()
 	if ok {
 		atomic.StoreInt64(&idx.atime, time.Now().Unix())
 		return idx, true, nil
 	}
-	t.lock.Lock()
-	defer t.lock.Unlock()
+
+	index, err := GetZincIndexFromMetadata(name)
+	if errors.Is(err, errors.ErrKeyNotFound) {
+		// continue
+	} else if err != nil {
+		return nil, false, err
+	} else {
+		t.Indexes[index.GetName()] = index
+		index.atime = time.Now().Unix()
+		return index, true, nil
+	}
+
 	// maybe someone else created it while we were waiting for the lock
 	idx, ok = t.Indexes[name]
 	if ok {
 		return idx, true, nil
 	}
 	// okay, let's create new index
-	idx, err := NewIndex(name)
+	idx, err = NewIndex(name)
 	if err != nil {
 		return nil, false, err
 	}
@@ -153,43 +158,20 @@ func (t *IndexList) Len() int {
 	return n
 }
 
-func (t *IndexList) List() []*Index {
+func (t *IndexList) ListCached() []*Index {
 	t.lock.RLock()
-	indexes := make([]*Index, 0, len(t.Indexes))
-	for _, index := range t.Indexes {
-		indexes = append(indexes, index)
-	}
-	t.lock.RUnlock()
+	defer t.lock.RUnlock()
+	indexes := slices.Collect(maps.Values(t.Indexes))
 	return indexes
-}
-
-func (t *IndexList) ListMap() map[string]*Index {
-	items := t.List()
-
-	indexes := make(map[string]*Index, len(items))
-	for _, index := range items {
-		indexes[index.ref.Name] = index
-	}
-
-	return indexes
-}
-
-func (t *IndexList) ListStat() []*Index {
-	items := t.List()
-	return items
 }
 
 func (t *IndexList) ListName() []string {
-	items := t.List()
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].GetName() < items[j].GetName()
-	})
-
-	names := make([]string, 0, len(items))
-	for _, index := range items {
-		names = append(names, index.GetName())
+	names, err := metadata.Index.ListNames(0, 0)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to list names in metadata")
+		return nil
 	}
-
+	slices.Sort(names)
 	return names
 }
 
@@ -209,55 +191,6 @@ func (t *IndexList) Close() error {
 	return eg.Wait()
 }
 
-func (t *IndexList) StartGC() {
-	defer t.gcCloser.Done()
-
-	ticker := time.NewTicker(600 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-		case <-t.gcCloser.HasBeenClosed():
-			ticker.Stop()
-			return
-		}
-		err := t.GC()
-		if err != nil {
-			log.Error().Err(err).Msg("Index GC err: ")
-		}
-	}
-}
-
-const indexExpire = 24 * 60 * 60
-
-// GC auto close unused indexes when inactive for a long time (24h)
-// In order to avoid error caused by close an index that is in using,
-// the expiration time is 24 hours.
-// It can be assumed that the index which is not used after this time can be safely close.
-func (t *IndexList) GC() error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	var indexList = make([]*Index, 0, len(t.Indexes))
-	for _, index := range t.Indexes {
-		indexList = append(indexList, index)
-	}
-	sort.Slice(indexList, func(i, j int) bool {
-		return atomic.LoadInt64(&indexList[i].atime) < atomic.LoadInt64(&indexList[j].atime)
-	})
-
-	now := time.Now().Unix()
-	for _, index := range indexList {
-		if now-atomic.LoadInt64(&index.atime) < indexExpire {
-			break
-		}
-		err := index.Close()
-		if err != nil {
-			return fmt.Errorf("close index %s error: %w", index.GetName(), err)
-		}
-	}
-	return nil
-}
-
 // LazyCloseSecondIndexShardWriters
 // We close all unused indexSecondShard writers in a delayed manner,
 // which is to ensure that the finishing work inside the writer can proceed normally,
@@ -266,7 +199,7 @@ func LazyCloseSecondIndexShardWriters() {
 	ticker := time.NewTicker(1 * time.Minute)
 	for range ticker.C {
 		secondShardList := make([]*tempSecondShd, 0)
-		for _, idx := range ZINC_INDEX_LIST.List() {
+		for _, idx := range ZINC_INDEX_LIST.ListCached() {
 			for _, shd := range idx.shards {
 				shd.lock.RLock()
 				for _, secondShd := range shd.shards {
@@ -324,39 +257,16 @@ func updateIndexList(unassignMap map[string]struct{}) error {
 	// The index list only contains indexes managed by the current node.
 	// When the allocation of shards changes, we need to close the indexes that are not managed by this node
 	// and delete them from the index list
-	curIndexList := ZINC_INDEX_LIST.List()
-	for _, index := range curIndexList {
-		sum := md5.Sum([]byte(index.GetName()))
+	indexNames := ZINC_INDEX_LIST.ListName()
+	for _, name := range indexNames {
+		sum := md5.Sum([]byte(name))
 		str := hex.EncodeToString(sum[:])
 		partition := str[:2]
 
 		// the index not assign to us, we should close it.
 		if _, ok := unassignMap[partition]; ok {
-			log.Debug().Msgf("unload index: %s not assign to current node", index.GetName())
-			ZINC_INDEX_LIST.Delete(index.GetName())
-		}
-	}
-	// When the assign of partition changes, some partition and indexes may be reassigned to this node.
-	// We load the indexes of these partitions.
-	// Note that in daily operation, the partition assign does not change,
-	// the creation and deletion of index are done at the node responsible for the partition,
-	// and the index list is automatically updated.
-	fullIndexes, err := metadata.Index.List(0, 0)
-	if err != nil {
-		return fmt.Errorf("list full index err: %w", err)
-	}
-
-	for _, index := range fullIndexes {
-		// already here
-		if _, ok := ZINC_INDEX_LIST.Get(index.Name); ok {
-			continue
-		}
-		if cluster.AssignCheck(index.Name) {
-			// the index assign to us, so we load it.
-			err := LoadZincIndexFromMetadata(string(version), index)
-			if err != nil {
-				return fmt.Errorf("reload %s metadata error: %w", index.Name, err)
-			}
+			log.Debug().Msgf("unload index: %s not assign to current node", name)
+			ZINC_INDEX_LIST.Delete(name)
 		}
 	}
 	return nil

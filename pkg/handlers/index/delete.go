@@ -40,17 +40,16 @@ import (
 // @Failure 500 {object} meta.HTTPResponseError
 // @Router /api/index/{index} [delete]
 func Delete(c *gin.Context) {
-	indexNames := c.Param("target")
-	if indexNames == "" {
+	target := c.Param("target")
+	if target == "" {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index name cannot be empty"})
 		return
 	}
 
-	indexList := core.ZINC_INDEX_LIST.List()
-
-	for _, indexName := range strings.Split(indexNames, ",") {
+	indexNames := core.ZINC_INDEX_LIST.ListName()
+	for _, indexName := range strings.Split(target, ",") {
 		if strings.Contains(indexName, "*") { // check for wildcard
-			err := deleteIndexWithWildcard(indexName, indexList)
+			err := deleteIndexWithWildcard(indexName, indexNames)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 				return
@@ -68,8 +67,8 @@ func Delete(c *gin.Context) {
 	})
 }
 
-func deleteIndexWithWildcard(indexName string, indexList []*core.Index) error {
-	parts := strings.Split(indexName, "*")
+func deleteIndexWithWildcard(name string, indexNames []string) error {
+	parts := strings.Split(name, "*")
 	pattern := ""
 	for i, part := range parts {
 		pattern += part
@@ -83,9 +82,9 @@ func deleteIndexWithWildcard(indexName string, indexList []*core.Index) error {
 		return err
 	}
 
-	for _, i := range indexList {
-		if p.MatchString(i.GetName()) {
-			if err := core.DeleteIndex(i.GetName()); err != nil {
+	for _, indexName := range indexNames {
+		if p.MatchString(indexName) {
+			if err := core.DeleteIndex(indexName); err != nil {
 				return err
 			}
 		}

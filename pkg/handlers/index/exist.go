@@ -7,6 +7,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 // @Id Exists
@@ -21,8 +22,11 @@ import (
 func Exists(c *gin.Context) {
 	indexName := c.Param("target")
 
-	_, exists := core.GetIndex(indexName)
-	if !exists {
+	_, exists, err := core.LoadIndex(indexName)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if !exists {
 		c.Status(http.StatusNotFound)
 		return
 	}

@@ -113,7 +113,10 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 		return core.ErrIndexServerMismatch
 	}
 
-	if _, ok := core.GetIndex(newIndex.Name); ok {
+	_, ok, err := core.LoadIndex(newIndex.Name)
+	if err != nil {
+		return err
+	} else if ok {
 		return errors.New("index [" + newIndex.Name + "] already exists")
 	}
 

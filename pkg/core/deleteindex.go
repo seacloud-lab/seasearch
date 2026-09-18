@@ -29,8 +29,10 @@ import (
 
 func DeleteIndex(name string) error {
 	// 1. Check if index exists
-	index, exists := GetIndex(name)
-	if !exists {
+	index, exists, err := LoadIndex(name)
+	if err != nil {
+		return err
+	} else if !exists {
 		return errors.New("index " + name + " does not exists")
 	}
 	// delete vecIndexes
@@ -42,7 +44,7 @@ func DeleteIndex(name string) error {
 		}
 	}
 	// remove the parent dir containing all vec indexes for this index.
-	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
+	err = os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
 	if err != nil {
 		return fmt.Errorf("delete vec index err: %w", err)
 	}

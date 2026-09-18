@@ -22,6 +22,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 // @Id Refresh
@@ -35,8 +36,11 @@ import (
 // @Router /api/index/{index}/refresh [post]
 func Refresh(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, exists, err := core.LoadIndex(indexName)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if !exists {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}

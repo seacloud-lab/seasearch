@@ -22,6 +22,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 // @Id DeleteDocument
@@ -43,13 +44,16 @@ func Delete(c *gin.Context) {
 	}
 
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, exists, err := core.LoadIndex(indexName)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if !exists {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index does not exists"})
 		return
 	}
 
-	err := index.DeleteDocument(docID)
+	err = index.DeleteDocument(docID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

@@ -72,6 +72,21 @@ func Test_boltStorage_List(t *testing.T) {
 	}
 }
 
+func Test_boltStorage_ListKeys(t *testing.T) {
+	config.InitConfig()
+	store := New("/zincsearch/listkeys")
+	defer store.Close()
+
+	assert.NoError(t, store.Set("/index/logs", []byte("logs")))
+	assert.NoError(t, store.Set("/index/users", []byte("users")))
+	assert.NoError(t, store.Set("/other/value", []byte("value")))
+
+	keys, err := store.ListKeys("/index/", 0, 0)
+
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, [][]byte{[]byte("logs"), []byte("users")}, keys)
+}
+
 func Test_boltStorage_Get(t *testing.T) {
 	type args struct {
 		key string

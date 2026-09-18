@@ -35,8 +35,10 @@ import (
 )
 
 func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {
-	matchedIndexes := GetMatchedIndexes(indexNames)
-	if len(matchedIndexes) == 0 {
+	matchedIndexes, err := GetMatchedIndexes(indexNames)
+	if err != nil {
+		return nil, err
+	} else if len(matchedIndexes) == 0 {
 		return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
 	}
 	var mappings *meta.Mappings
@@ -144,26 +146,36 @@ func isMatchIndex(zincIndexName, indexName string) bool {
 
 // GetMatchedIndexes
 // return all matched indexes,if input indexNames is empty, we return all indexes
-func GetMatchedIndexes(indexNames []string) []*Index {
-	if len(indexNames) == 0 {
-		return ZINC_INDEX_LIST.List()
-	}
+func GetMatchedIndexes(target []string) ([]*Index, error) {
 	searchIndex := make([]*Index, 0)
-	for _, index := range ZINC_INDEX_LIST.List() {
-		for _, indexName := range indexNames {
-			isMatched := isMatchIndex(index.GetName(), indexName)
+	for _, name := range ZINC_INDEX_LIST.ListName() {
+		if len(target) == 0 {
+			index, ok, err := LoadIndex(name)
+			if err != nil {
+				return nil, err
+			} else if ok {
+				searchIndex = append(searchIndex, index)
+			}
+			continue
+		}
+		for _, indexName := range target {
+			isMatched := isMatchIndex(name, indexName)
 			if isMatched {
 				// this index should not handle by this server
-				if !cluster.AssignCheck(index.GetName()) {
+				if !cluster.AssignCheck(name) {
 					continue
 				}
-				searchIndex = append(searchIndex, index)
+				index, ok, err := LoadIndex(name)
+				if err != nil {
+					return nil, err
+				} else if ok {
+					searchIndex = append(searchIndex, index)
+				}
 				break
 			}
 		}
 	}
-
-	return searchIndex
+	return searchIndex, nil
 }
 
 type PartialIndexes map[string][]int

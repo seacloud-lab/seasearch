@@ -39,8 +39,11 @@ import (
 // @Router /api/{index}/_mapping [get]
 func GetMapping(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, exists, err := core.LoadIndex(indexName)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if !exists {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}

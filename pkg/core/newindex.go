@@ -16,7 +16,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -35,7 +35,7 @@ import (
 )
 
 var indexNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
-var ErrIndexServerMismatch = errors.New("requested index is not handled by this server")
+var ErrIndexServerMismatch = fmt.Errorf("requested index is not handled by this server")
 
 func CheckIndexName(name string) error {
 	if name == "" {
@@ -182,13 +182,34 @@ func storeIndex(index *Index) error {
 	return nil
 }
 
-func GetIndex(name string) (*Index, bool) {
-	return ZINC_INDEX_LIST.Get(name)
-}
+// func GetIndex(name string) (*Index, bool) {
+// 	return ZINC_INDEX_LIST.Get(name)
+// }
 
 func GetOrCreateIndex(name string) (*Index, bool, error) {
 	if !cluster.AssignCheck(name) {
 		return nil, false, ErrIndexServerMismatch
 	}
 	return ZINC_INDEX_LIST.GetOrCreate(name)
+}
+
+func LoadIndex(name string) (*Index, bool, error) {
+	if !cluster.AssignCheck(name) {
+		return nil, false, ErrIndexServerMismatch
+	}
+
+	index, ok := ZINC_INDEX_LIST.Get(name)
+	if ok {
+		return index, true, nil
+	}
+
+	index, err := GetZincIndexFromMetadata(name)
+	if errors.Is(err, errors.ErrKeyNotFound) {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	ZINC_INDEX_LIST.Add(index)
+
+	return index, true, nil
 }

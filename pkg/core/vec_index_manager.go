@@ -270,8 +270,10 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 	} else {
 		// get metadata
 		var ok bool
-		zincIndex, ok = GetIndex(zincIndexName)
-		if !ok {
+		zincIndex, ok, err = LoadIndex(zincIndexName)
+		if err != nil {
+			return nil, err
+		} else if !ok {
 			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", zincIndexName, field)
 		}
 	}
@@ -303,8 +305,10 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 // SealIndex
 // submits a task to seal the growing segment of the index.
 func SealIndex(zincIndexName string, field string) error {
-	index, ok := GetIndex(zincIndexName)
-	if !ok {
+	index, ok, err := LoadIndex(zincIndexName)
+	if err != nil {
+		return err
+	} else if !ok {
 		return fmt.Errorf("zinc index not exists")
 	}
 	vecIndex, ok := index.GetVecIndex(field)
@@ -355,7 +359,14 @@ func backgroundSealCheck() {
 			timer.Stop()
 			return
 		}
-		for _, index := range ZINC_INDEX_LIST.List() {
+		for _, name := range ZINC_INDEX_LIST.ListName() {
+			index, ok, err := LoadIndex(name)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to load index")
+				continue
+			} else if !ok {
+				continue
+			}
 			vecIndexes := index.GetVecIndexes()
 			if len(vecIndexes) <= 0 {
 				continue

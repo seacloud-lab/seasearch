@@ -37,18 +37,9 @@ func TestIndexList_List(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, rs)
 
-	got1 := ZINC_INDEX_LIST.List()
-	assert.NotNil(t, got1)
-
 	got2 := ZINC_INDEX_LIST.ListName()
-	assert.NotNil(t, got2)
-
-	got3 := ZINC_INDEX_LIST.ListStat()
-	assert.NotNil(t, got3)
+	assert.Contains(t, got2, indexName)
 
 	err = DeleteIndex(indexName)
-	assert.NoError(t, err)
-
-	err = ZINC_INDEX_LIST.GC()
 	assert.NoError(t, err)
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 // @Id ListIndexes
@@ -45,16 +46,20 @@ func List(c *gin.Context) {
 	desc, _ := strconv.ParseBool(c.DefaultQuery("desc", "false"))
 	name := c.DefaultQuery("name", "")
 
-	items := core.ZINC_INDEX_LIST.ListStat()
-
+	var items []*core.Index
+	indexNames := core.ZINC_INDEX_LIST.ListName()
 	if len(name) > 0 {
-		var res []*core.Index
-		for _, item := range items {
-			if strings.Contains(item.GetName(), name) {
-				res = append(res, item)
+		for _, indexName := range indexNames {
+			if strings.Contains(indexName, name) {
+				index, ok, err := core.LoadIndex(name)
+				if err != nil {
+					zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+					return
+				} else if ok {
+					items = append(items, index)
+				}
 			}
 		}
-		items = res
 	}
 
 	switch sortBy {

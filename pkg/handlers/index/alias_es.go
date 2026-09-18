@@ -63,18 +63,18 @@ func AddOrRemoveESAlias(c *gin.Context) {
 	addMap := map[string][]string{}
 	removeMap := map[string][]string{}
 
-	indexList := core.ZINC_INDEX_LIST.List()
+	indexNames := core.ZINC_INDEX_LIST.ListName()
 
 	for _, action := range alias.Actions {
 		if action.Add != nil {
 			if action.Add.Index != "" {
-				matchAndAddToMap(indexList, action.Add.Index, addMap, action.Add)
+				matchAndAddToMap(indexNames, action.Add.Index, addMap, action.Add)
 				continue
 			}
 
 			// index is empty, try the indices field
 			for _, indexName := range action.Add.Indices {
-				matchAndAddToMap(indexList, indexName, addMap, action.Add)
+				matchAndAddToMap(indexNames, indexName, addMap, action.Add)
 			}
 
 			continue // this was an add action, don't bother checking action.Remove
@@ -82,13 +82,13 @@ func AddOrRemoveESAlias(c *gin.Context) {
 
 		if action.Remove != nil {
 			if action.Remove.Index != "" {
-				matchAndAddToMap(indexList, action.Remove.Index, removeMap, action.Remove)
+				matchAndAddToMap(indexNames, action.Remove.Index, removeMap, action.Remove)
 				continue
 			}
 
 			// index is empty, try the indices field
 			for _, indexName := range action.Remove.Indices {
-				matchAndAddToMap(indexList, indexName, removeMap, action.Remove)
+				matchAndAddToMap(indexNames, indexName, removeMap, action.Remove)
 			}
 		}
 	}
@@ -170,7 +170,7 @@ func getRegex(s string) (*regexp.Regexp, error) {
 	return p, nil
 }
 
-func matchAndAddToMap(indexList []*core.Index, indexName string, m map[string][]string, b *base) {
+func matchAndAddToMap(indexNames []string, indexName string, m map[string][]string, b *base) {
 	var n string // reuse same string variable
 
 	if !strings.Contains(indexName, "*") {
@@ -192,8 +192,7 @@ func matchAndAddToMap(indexList []*core.Index, indexName string, m map[string][]
 	}
 
 	// indexName contains a wildcard(*) r, range over the entire indexlist looking for matches
-	for _, index := range indexList {
-		n = index.GetName()
+	for _, n := range indexNames {
 		if indexNameMatches(indexName, n) {
 			if b.Alias != "" { // alias takes precedence over aliases
 				m[b.Alias] = append(m[b.Alias], n)

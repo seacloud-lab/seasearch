@@ -122,7 +122,7 @@ func TestGetIndex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := GetIndex(tt.args.name)
+			got, got1, _ := LoadIndex(tt.args.name)
 			if !tt.want1 {
 				assert.False(t, got1)
 				return

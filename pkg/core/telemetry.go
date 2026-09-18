@@ -150,8 +150,8 @@ func (t *telemetry) runEvents() {
 
 func (t *telemetry) TotalIndexSize() uint64 {
 	TotalIndexSize := uint64(0)
-	for _, idx := range ZINC_INDEX_LIST.List() {
-		TotalIndexSize += t.GetIndexSize(idx.GetName())
+	for _, name := range ZINC_INDEX_LIST.ListName() {
+		TotalIndexSize += t.GetIndexSize(name)
 	}
 	return TotalIndexSize
 }

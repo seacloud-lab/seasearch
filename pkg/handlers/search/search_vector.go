@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
 
 func SearchVector(c *gin.Context) {
@@ -21,8 +22,11 @@ func SearchVector(c *gin.Context) {
 		return
 	}
 
-	indexes := core.GetMatchedIndexes(indexNames)
-	if len(indexes) == 0 {
+	indexes, err := core.GetMatchedIndexes(indexNames)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if len(indexes) == 0 {
 		err := fmt.Errorf("vector search error: index not found")
 		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -74,8 +78,11 @@ func VectorRecall(c *gin.Context) {
 		return
 	}
 
-	zincIndex, ok := core.GetIndex(indexName)
-	if !ok {
+	zincIndex, ok, err := core.LoadIndex(indexName)
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	} else if !ok {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: index %s not found", indexName).Error()})
 		return
 	}
@@ -84,7 +91,7 @@ func VectorRecall(c *gin.Context) {
 		QueryCount: 100,
 		K:          10,
 	}
-	err := zutils.GinBindJSON(c, request)
+	err = zutils.GinBindJSON(c, request)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
