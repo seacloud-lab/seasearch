@@ -38,18 +38,18 @@ import (
 // @Router /api/{index}/_settings [get]
 func GetSettings(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.GetIndexMetadata(indexName)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
 
-	settings := index.GetSettings()
+	settings := index.Settings
 	if settings == nil {
 		settings = new(meta.IndexSettings)
 	}
 
-	c.JSON(http.StatusOK, gin.H{index.GetName(): gin.H{"settings": settings}})
+	c.JSON(http.StatusOK, gin.H{index.Name: gin.H{"settings": settings}})
 }
 
 // @Id SetSettings

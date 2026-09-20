@@ -269,10 +269,9 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 		}
 	} else {
 		// get metadata
-		var ok bool
-		zincIndex, ok = GetIndex(zincIndexName)
-		if !ok {
-			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s, but zinc index not exists", zincIndexName, field)
+		zincIndex, err = LoadIndex(zincIndexName)
+		if err != nil {
+			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s: %w", zincIndexName, field, err)
 		}
 	}
 
@@ -303,9 +302,9 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 // SealIndex
 // submits a task to seal the growing segment of the index.
 func SealIndex(zincIndexName string, field string) error {
-	index, ok := GetIndex(zincIndexName)
-	if !ok {
-		return fmt.Errorf("zinc index not exists")
+	index, err := LoadIndex(zincIndexName)
+	if err != nil {
+		return fmt.Errorf("zinc index not exists: %w", err)
 	}
 	vecIndex, ok := index.GetVecIndex(field)
 	if !ok {
@@ -355,8 +354,13 @@ func backgroundSealCheck() {
 			timer.Stop()
 			return
 		}
-		for _, index := range ZINC_INDEX_LIST.List() {
-			vecIndexes := index.GetVecIndexes()
+		indexes, err := ListIndexMetadata()
+		if err != nil {
+			log.Error().Err(err).Msg("cannot list index metadata for vector seal check")
+			continue
+		}
+		for _, index := range indexes {
+			vecIndexes := index.VecIndexes
 			if len(vecIndexes) <= 0 {
 				continue
 			}
@@ -377,7 +381,7 @@ func backgroundSealCheck() {
 					continue
 				}
 
-				taskName := path.Join(index.GetName(), field)
+				taskName := path.Join(index.Name, field)
 				vecIdxManager.sealedLock.RLock()
 				if _, ok := vecIdxManager.sealTaskMp[taskName]; ok {
 					vecIdxManager.sealedLock.RUnlock()
@@ -387,7 +391,7 @@ func backgroundSealCheck() {
 
 				vecIdxManager.sealCh <- &sealTask{
 					taskName: taskName,
-					index:    index.GetName(),
+					index:    index.Name,
 					field:    field,
 				}
 			}

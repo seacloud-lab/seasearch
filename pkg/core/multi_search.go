@@ -35,7 +35,10 @@ import (
 )
 
 func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchResponse, error) {
-	matchedIndexes := GetMatchedIndexes(indexNames)
+	matchedIndexes, err := GetMatchedIndexes(indexNames)
+	if err != nil {
+		return nil, err
+	}
 	if len(matchedIndexes) == 0 {
 		return nil, fmt.Errorf("core.MultiSearchV2: error accessing reader: no index found")
 	}
@@ -77,14 +80,15 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		if !cluster.AssignCheck(indexName) {
 			return nil, ErrIndexServerMismatch
 		}
-		index, ok := ZINC_INDEX_LIST.Get(indexName)
-		if ok {
-			if mappings == nil {
-				mappings = index.GetMappings()
-				analyzers = index.GetAnalyzers()
-			}
-			searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
+		index, err := LoadIndex(indexName)
+		if err != nil {
+			return nil, err
 		}
+		if mappings == nil {
+			mappings = index.GetMappings()
+			analyzers = index.GetAnalyzers()
+		}
+		searchers = append(searchers, index.GetSearchers(timeMin, timeMax)...)
 	}
 
 	if len(searchers) == 0 {
@@ -144,26 +148,31 @@ func isMatchIndex(zincIndexName, indexName string) bool {
 
 // GetMatchedIndexes
 // return all matched indexes,if input indexNames is empty, we return all indexes
-func GetMatchedIndexes(indexNames []string) []*Index {
-	if len(indexNames) == 0 {
-		return ZINC_INDEX_LIST.List()
+func GetMatchedIndexes(indexNames []string) ([]*Index, error) {
+	names, err := ListIndexNames()
+	if err != nil {
+		return nil, err
 	}
 	searchIndex := make([]*Index, 0)
-	for _, index := range ZINC_INDEX_LIST.List() {
+	for _, name := range names {
+		matched := len(indexNames) == 0
 		for _, indexName := range indexNames {
-			isMatched := isMatchIndex(index.GetName(), indexName)
-			if isMatched {
-				// this index should not handle by this server
-				if !cluster.AssignCheck(index.GetName()) {
-					continue
-				}
-				searchIndex = append(searchIndex, index)
+			if isMatchIndex(name, indexName) {
+				matched = true
 				break
 			}
 		}
+		if !matched || !cluster.AssignCheck(name) {
+			continue
+		}
+		index, err := LoadIndex(name)
+		if err != nil {
+			return nil, err
+		}
+		searchIndex = append(searchIndex, index)
 	}
 
-	return searchIndex
+	return searchIndex, nil
 }
 
 type PartialIndexes map[string][]int

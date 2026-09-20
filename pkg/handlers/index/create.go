@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
 	"github.com/zincsearch/zincsearch/pkg/uquery/mappings"
@@ -113,8 +114,10 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 		return core.ErrIndexServerMismatch
 	}
 
-	if _, ok := core.GetIndex(newIndex.Name); ok {
+	if _, err := core.GetIndexMetadata(newIndex.Name); err == nil {
 		return errors.New("index [" + newIndex.Name + "] already exists")
+	} else if !errors.Is(err, zincerrors.ErrKeyNotFound) {
+		return err
 	}
 
 	if newIndex.Settings == nil {
@@ -145,7 +148,7 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 	_ = index.SetMappings(mappings)
 
 	// store index
-	if err = core.StoreIndex(index); err != nil {
+	if err = core.CreateIndex(index); err != nil {
 		return errors.New(err.Error())
 	}
 

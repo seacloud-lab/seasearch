@@ -46,7 +46,11 @@ func Delete(c *gin.Context) {
 		return
 	}
 
-	indexList := core.ZINC_INDEX_LIST.List()
+	indexList, err := core.ListIndexNames()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
 
 	for _, indexName := range strings.Split(indexNames, ",") {
 		if strings.Contains(indexName, "*") { // check for wildcard
@@ -68,7 +72,7 @@ func Delete(c *gin.Context) {
 	})
 }
 
-func deleteIndexWithWildcard(indexName string, indexList []*core.Index) error {
+func deleteIndexWithWildcard(indexName string, indexList []string) error {
 	parts := strings.Split(indexName, "*")
 	pattern := ""
 	for i, part := range parts {
@@ -83,9 +87,9 @@ func deleteIndexWithWildcard(indexName string, indexList []*core.Index) error {
 		return err
 	}
 
-	for _, i := range indexList {
-		if p.MatchString(i.GetName()) {
-			if err := core.DeleteIndex(i.GetName()); err != nil {
+	for _, name := range indexList {
+		if p.MatchString(name) {
+			if err := core.DeleteIndex(name); err != nil {
 				return err
 			}
 		}

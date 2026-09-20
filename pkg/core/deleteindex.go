@@ -22,17 +22,37 @@ import (
 	"path"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 )
 
 func DeleteIndex(name string) error {
-	// 1. Check if index exists
-	index, exists := GetIndex(name)
-	if !exists {
+	if !cluster.AssignCheck(name) {
+		return ErrIndexServerMismatch
+	}
+	ZINC_INDEX_LIST.lifecycleLock.Lock()
+	if !cluster.AssignCheck(name) {
+		ZINC_INDEX_LIST.lifecycleLock.Unlock()
+		return ErrIndexServerMismatch
+	}
+
+	index, err := ZINC_INDEX_LIST.loadLocked(name)
+	if errors.Is(err, zincerrors.ErrKeyNotFound) {
+		ZINC_INDEX_LIST.lifecycleLock.Unlock()
 		return errors.New("index " + name + " does not exists")
 	}
+	if err != nil {
+		ZINC_INDEX_LIST.lifecycleLock.Unlock()
+		return err
+	}
+	if ZINC_INDEX_LIST.invalidated == nil {
+		ZINC_INDEX_LIST.invalidated = make(map[string]bool)
+	}
+	ZINC_INDEX_LIST.invalidated[name] = true
+	ZINC_INDEX_LIST.lifecycleLock.Unlock()
 	// delete vecIndexes
 	vecIndexes := index.GetVecIndexes()
 	for vecIndex := range vecIndexes {
@@ -42,7 +62,7 @@ func DeleteIndex(name string) error {
 		}
 	}
 	// remove the parent dir containing all vec indexes for this index.
-	err := os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
+	err = os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix, index.GetStoreName()))
 	if err != nil {
 		return fmt.Errorf("delete vec index err: %w", err)
 	}
