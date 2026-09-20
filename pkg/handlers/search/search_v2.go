@@ -206,9 +206,9 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		if !cluster.AssignCheck(indexName) {
 			return nil, core.ErrIndexServerMismatch
 		}
-		index, exists := core.GetIndex(indexName)
-		if !exists {
-			return nil, fmt.Errorf("index %s does not exists", indexName)
+		index, loadErr := core.LoadIndex(indexName)
+		if loadErr != nil {
+			return nil, fmt.Errorf("index %s does not exists: %w", indexName, loadErr)
 		}
 		resp, err = index.Search(query)
 	}
@@ -267,9 +267,9 @@ func UnifiedSearch(c *gin.Context) {
 	for _, q := range req.IndexQueries {
 		q := q
 		eg.Go(func() error {
-			index, exists := core.GetIndex(q.Index)
+			index, loadErr := core.LoadIndex(q.Index)
 			// some index not exists, we ignore
-			if !exists {
+			if loadErr != nil {
 				return nil
 			}
 			res, err := index.SearchWithStats(q.Query, stats)

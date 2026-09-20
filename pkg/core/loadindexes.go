@@ -98,6 +98,7 @@ func formatIndex(readIndex *meta.Index) (*Index, error) {
 	index := new(Index)
 	index.ref = new(meta.Index)
 	index.ref.Name = readIndex.Name
+	index.ref.Version = readIndex.Version
 	index.ref.StorageType = readIndex.StorageType
 	index.ref.Settings = readIndex.Settings
 	index.ref.Mappings = readIndex.Mappings
@@ -112,6 +113,7 @@ func formatIndex(readIndex *meta.Index) (*Index, error) {
 	for id := range readIndex.Shards {
 		index.ref.Shards[id] = &meta.IndexShard{
 			ID:       readIndex.Shards[id].ID,
+			NodeID:   readIndex.Shards[id].NodeID,
 			ShardNum: readIndex.Shards[id].ShardNum,
 			Stats:    readIndex.Shards[id].Stats,
 		}

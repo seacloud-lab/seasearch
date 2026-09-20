@@ -160,7 +160,7 @@ func (s *IndexShard) NewShard() error {
 	s.root.lock.Unlock()
 
 	// store update
-	if err := storeIndex(s.root); err != nil {
+	if err := StoreIndex(s.root); err != nil {
 		return err
 	}
 	return nil

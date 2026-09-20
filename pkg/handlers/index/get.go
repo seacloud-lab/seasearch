@@ -16,11 +16,13 @@
 package index
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
@@ -40,9 +42,13 @@ func Get(c *gin.Context) {
 		return
 	}
 
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.GetIndexMetadata(indexName)
+	if errors.Is(err, zincerrors.ErrKeyNotFound) || errors.Is(err, core.ErrIndexServerMismatch) {
 		c.JSON(http.StatusNotFound, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 
