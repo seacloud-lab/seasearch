@@ -97,7 +97,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 
@@ -178,7 +178,7 @@ func TestIndex_UpdateDocument(t *testing.T) {
 		index, err = NewIndex("TestIndex_UpdateDocument.index_1")
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 		prop := meta.NewProperty("date")
 		mappings := index.GetMappings()
@@ -242,7 +242,7 @@ func TestIndex_GetDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 
 		err = index.CreateDocument("1", map[string]interface{}{
@@ -303,7 +303,7 @@ func TestIndex_DeleteDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 
 		err = index.CreateDocument("1", map[string]interface{}{
@@ -481,7 +481,7 @@ func TestIndex_CreateUpdateDocumentWithDateField(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

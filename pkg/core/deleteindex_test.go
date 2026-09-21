@@ -51,7 +51,7 @@ func TestDeleteIndex(t *testing.T) {
 		index, err := NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

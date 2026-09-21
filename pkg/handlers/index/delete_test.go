@@ -102,6 +102,6 @@ func prepareIndex(t *testing.T, name, storageType string) {
 	assert.NoError(t, err)
 	assert.NotNil(t, index)
 
-	err = core.StoreIndex(index)
+	err = core.CreateIndex(index)
 	assert.NoError(t, err)
 }

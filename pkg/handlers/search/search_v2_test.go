@@ -79,7 +79,7 @@ func TestSearchDSL(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.StoreIndex(index)
+		err = core.CreateIndex(index)
 		assert.NoError(t, err)
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
@@ -150,7 +150,7 @@ func TestMultipleSearch(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.StoreIndex(index)
+		err = core.CreateIndex(index)
 		assert.NoError(t, err)
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{

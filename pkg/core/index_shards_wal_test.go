@@ -65,7 +65,7 @@ func Test_walMergeDocs_WriteTo(t *testing.T) {
 		err = index.SetMappings(mappings)
 		assert.NoError(t, err)
 
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

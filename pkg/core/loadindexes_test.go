@@ -40,7 +40,7 @@ func TestLoadIndexes(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

@@ -16,12 +16,12 @@
 package wal
 
 import (
-	"log"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 var l *Log
@@ -29,20 +29,24 @@ var l *Log
 const name = "walTest"
 
 func TestMain(m *testing.M) {
-	config.InitConfig()
-	var err error
-	l, err = Open(name)
-	if err != nil {
-		log.Fatal(err)
+	start := func() error {
+		var err error
+		config.InitConfig()
+		l, err = Open(name)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	stop := func() error {
+		err := l.Close()
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
-	m.Run()
-
-	if err = l.Close(); err != nil {
-		log.Fatal(err)
-	}
-
-	os.Exit(0)
+	os.Exit(utils.RunMain(m, start, stop))
 }
 
 func TestOpenClose(t *testing.T) {

@@ -70,7 +70,7 @@ func TestSearchV1(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.StoreIndex(index)
+		err = core.CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

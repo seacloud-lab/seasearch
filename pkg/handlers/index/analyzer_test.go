@@ -248,7 +248,7 @@ func TestAnalyze(t *testing.T) {
 		err = index.SetMappings(mapping)
 		assert.NoError(t, err)
 
-		err = core.StoreIndex(index)
+		err = core.CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

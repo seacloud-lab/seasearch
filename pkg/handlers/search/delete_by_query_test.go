@@ -103,7 +103,7 @@ func TestDeleteByQuery(t *testing.T) {
 				failure: failure{
 					statusCode: 400,
 					body: body{
-						is: `{"error":"index noneMatchingIndex does not exists"}`,
+						is: `{"error":"index noneMatchingIndex does not exists: key not found"}`,
 					},
 				},
 			},
@@ -113,7 +113,7 @@ func TestDeleteByQuery(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			index, err := core.NewIndex("TestDeleteByQuery.index")
 			assert.NoError(t, err)
-			assert.NoError(t, core.StoreIndex(index))
+			assert.NoError(t, core.CreateIndex(index))
 			id := ider.Generate()
 			assert.NoError(t, index.CreateDocument(id, test.arg.doc, false))
 			time.Sleep(time.Second)

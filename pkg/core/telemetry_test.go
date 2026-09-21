@@ -29,7 +29,7 @@ func TestTelemetry(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = StoreIndex(index)
+		err = CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

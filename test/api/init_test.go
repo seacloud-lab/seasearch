@@ -17,15 +17,11 @@ package api
 
 import (
 	"io"
-
-	"os"
-	"testing"
-
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
-
-	"github.com/gin-gonic/gin"
+	"testing"
 
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
@@ -35,6 +31,9 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
+	"github.com/zincsearch/zincsearch/test/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -113,20 +112,26 @@ func request(method, api string, body io.Reader) *httptest.ResponseRecorder {
 }
 
 func TestMain(m *testing.M) {
-	os.Setenv("ZINC_FIRST_ADMIN_USER", username)
-	os.Setenv("ZINC_FIRST_ADMIN_PASSWORD", password)
-
-	config.InitConfig()
-	ider.InitIder()
-	metadata.InitMetaStorage()
-	auth.InitFirstUser()
-	chs.InitGse()
-	core.InitWalList()
-	// init lruCache
-	lru_cache.Init()
-	// init assign watch
-	core.InitIndexList()
-	// init vector index
-	core.InitVecIndexManager()
-	os.Exit(m.Run())
+	start := func() error {
+		config.InitConfig()
+		ider.InitIder()
+		metadata.InitMetaStorage()
+		auth.InitFirstUser()
+		chs.InitGse()
+		core.InitWalList()
+		// init lruCache
+		lru_cache.Init()
+		// init assign watch
+		core.InitIndexList()
+		// init vector index
+		core.InitVecIndexManager()
+		return nil
+	}
+	stop := func() error {
+		_ = core.ZINC_INDEX_LIST.Close()
+		core.CloseIndexList()
+		core.CloseVecIndexManager()
+		return metadata.Close()
+	}
+	os.Exit(utils.RunMain(m, start, stop))
 }
