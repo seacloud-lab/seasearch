@@ -62,7 +62,7 @@ func TestRefresh(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.StoreIndex(index)
+		err = core.CreateIndex(index)
 		assert.NoError(t, err)
 	})
 

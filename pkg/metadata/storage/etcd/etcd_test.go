@@ -22,15 +22,18 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func TestMain(m *testing.M) {
-	config.InitConfig()
 	if config.Global.Etcd.Endpoints == nil {
-		os.Exit(0)
 		return
 	}
-	os.Exit(m.Run())
+	start := func() error {
+		config.InitConfig()
+		return nil
+	}
+	os.Exit(utils.RunMain(m, start, nil))
 }
 
 func Test_etcdStorage_List(t *testing.T) {
