@@ -151,7 +151,9 @@ require (
 )
 
 replace (
-	github.com/blugelabs/bluge => github.com/seafileltd/bluge v1.0.8
-	github.com/blugelabs/bluge_segment_api => github.com/zincsearch/bluge_segment_api v1.0.0
-	github.com/blugelabs/ice => github.com/zincsearch/ice v1.1.3
+	github.com/blugelabs/bluge => github.com/seacloud-lab/bluge v1.0.8
+	github.com/blugelabs/bluge_segment_api => github.com/seacloud-lab/bluge_segment_api v1.0.0
+	github.com/blugelabs/ice => github.com/seacloud-lab/ice v1.1.3
+	github.com/zincsearch/go-gin-prometheus => github.com/seacloud-lab/go-gin-prometheus v0.1.1
+	github.com/zincsearch/wal => github.com/seacloud-lab/wal v1.2.6
 )
