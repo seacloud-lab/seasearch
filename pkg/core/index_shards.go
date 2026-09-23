@@ -23,18 +23,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blugelabs/bluge"
-	"github.com/blugelabs/bluge/analysis"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
 	"github.com/zincsearch/zincsearch/pkg/wal"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/blugelabs/bluge"
+	"github.com/blugelabs/bluge/analysis"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -416,9 +416,6 @@ func (s *IndexShard) SetTimestamp(t int64) {
 
 // FindShardByDocID finds docID in which shard and returns the shard id
 func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
-	query := bluge.NewBooleanQuery()
-	query.AddMust(bluge.NewTermQuery(docID).SetField("_id"))
-	request := bluge.NewTopNSearch(1, query).WithStandardAggregations()
 	ctx := context.Background()
 
 	// check id store by which shard
@@ -433,6 +430,9 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 			defer func() {
 				_ = searcher.Close()
 			}()
+			query := bluge.NewBooleanQuery()
+			query.AddMust(bluge.NewTermQuery(docID).SetField("_id"))
+			request := bluge.NewTopNSearch(1, query).WithStandardAggregations()
 			dmi, err := searcher.Search(ctx, request)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -461,9 +461,6 @@ func (s *IndexShard) FindShardByDocID(docID string) (int64, error) {
 
 // FindDocumentByDocID finds docID and returns the document
 func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
-	query := bluge.NewBooleanQuery()
-	query.AddMust(bluge.NewTermQuery(docID).SetField("_id"))
-	request := bluge.NewTopNSearch(1, query).WithStandardAggregations()
 	ctx := context.Background()
 
 	// check id store by which shard
@@ -478,6 +475,9 @@ func (s *IndexShard) FindDocumentByDocID(docID string) (*meta.Hit, error) {
 			defer func() {
 				_ = searcher.Close()
 			}()
+			query := bluge.NewBooleanQuery()
+			query.AddMust(bluge.NewTermQuery(docID).SetField("_id"))
+			request := bluge.NewTopNSearch(1, query).WithStandardAggregations()
 			dmi, err := searcher.Search(ctx, request)
 			if err != nil {
 				log.Error().Err(err).
