@@ -82,7 +82,7 @@ func SetMapping(c *gin.Context) {
 		return
 	}
 
-	index, exists, err := core.GetOrCreateIndex(indexName)
+	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -134,7 +134,7 @@ func SetMapping(c *gin.Context) {
 	}
 
 	// store index
-	if err := core.StoreIndex(index); err != nil {
+	if err := core.IndexMgr.Store(index); err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

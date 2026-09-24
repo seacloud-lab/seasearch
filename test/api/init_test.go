@@ -128,7 +128,6 @@ func TestMain(m *testing.M) {
 		return nil
 	}
 	stop := func() error {
-		_ = core.ZINC_INDEX_LIST.Close()
 		core.CloseIndexList()
 		core.CloseVecIndexManager()
 		return metadata.Close()

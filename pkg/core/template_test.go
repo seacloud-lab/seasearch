@@ -425,10 +425,10 @@ func TestUseTemplate(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, index)
 
-				err = CreateIndex(index)
+				err = IndexMgr.Store(index)
 				assert.NoError(t, err)
 
-				err = DeleteIndex(indexName)
+				err = IndexMgr.Delete(indexName)
 				assert.NoError(t, err)
 			})
 		})

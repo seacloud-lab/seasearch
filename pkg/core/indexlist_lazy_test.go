@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"sync"
 	"testing"
 
@@ -12,13 +14,29 @@ import (
 
 func persistUnloadedIndex(t *testing.T, name string) *Index {
 	t.Helper()
+	IndexMgr.DropCache(name)
 	index, err := NewIndex(name)
 	require.NoError(t, err)
 	data, err := index.MarshalJSON()
 	require.NoError(t, err)
 	require.NoError(t, metadata.Index.Set(name, data))
-	ZINC_INDEX_LIST.Delete(name)
 	return index
+}
+
+func TestDropCacheRemovesCachedIndex(t *testing.T) {
+	const name = "TestDropCacheRemovesCachedIndex.index"
+	mgr := newIndexManager()
+	index := &Index{}
+	mgr.cache[name] = index
+
+	dropped, ok := mgr.DropCache(name)
+	require.True(t, ok)
+	require.Same(t, index, dropped)
+	assert.Empty(t, mgr.GetCached())
+
+	dropped, ok = mgr.DropCache(name)
+	assert.False(t, ok)
+	assert.Nil(t, dropped)
 }
 
 func TestLoadIndexLoadsOnlyRequestedIndex(t *testing.T) {
@@ -27,23 +45,23 @@ func TestLoadIndexLoadsOnlyRequestedIndex(t *testing.T) {
 	persistUnloadedIndex(t, nameA)
 	persistUnloadedIndex(t, nameB)
 	t.Cleanup(func() {
-		_ = DeleteIndex(nameA)
-		_ = DeleteIndex(nameB)
+		_ = IndexMgr.Delete(nameA)
+		_ = IndexMgr.Delete(nameB)
 	})
 
-	index, err := LoadIndex(nameA)
+	index, err := IndexMgr.Get(nameA)
 	require.NoError(t, err)
 	assert.Equal(t, nameA, index.GetName())
-	_, loadedA := GetResidentIndex(nameA)
-	_, loadedB := GetResidentIndex(nameB)
-	assert.True(t, loadedA)
-	assert.False(t, loadedB)
+	_, errA := IndexMgr.Get(nameA)
+	_, errB := IndexMgr.Get(nameB)
+	assert.Nil(t, errA)
+	assert.Nil(t, errB)
 }
 
 func TestConcurrentLoadIndexReturnsCanonicalObject(t *testing.T) {
 	name := "TestConcurrentLoadIndexReturnsCanonicalObject.index"
 	persistUnloadedIndex(t, name)
-	t.Cleanup(func() { _ = DeleteIndex(name) })
+	t.Cleanup(func() { _ = IndexMgr.Delete(name) })
 
 	const workers = 16
 	indexes := make([]*Index, workers)
@@ -55,7 +73,7 @@ func TestConcurrentLoadIndexReturnsCanonicalObject(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			indexes[i], errs[i] = LoadIndex(name)
+			indexes[i], errs[i] = IndexMgr.Get(name)
 		}(i)
 	}
 	close(start)
@@ -77,9 +95,9 @@ func TestGetOrCreateLoadsExistingMetadata(t *testing.T) {
 	data, err := stored.MarshalJSON()
 	require.NoError(t, err)
 	require.NoError(t, metadata.Index.Set(name, data))
-	t.Cleanup(func() { _ = DeleteIndex(name) })
+	t.Cleanup(func() { _ = IndexMgr.Delete(name) })
 
-	loaded, existed, err := GetOrCreateIndex(name)
+	loaded, existed, err := IndexMgr.GetOrCreate(name)
 	require.NoError(t, err)
 	assert.True(t, existed)
 	assert.Equal(t, "preserved-version", loaded.ref.Version)
@@ -87,7 +105,7 @@ func TestGetOrCreateLoadsExistingMetadata(t *testing.T) {
 		assert.Equal(t, "preserved-node", shard.NodeID)
 	}
 
-	require.NoError(t, StoreIndex(loaded))
+	require.NoError(t, IndexMgr.Store(loaded))
 	readBack, err := metadata.Index.Get(name)
 	require.NoError(t, err)
 	assert.Equal(t, "preserved-version", readBack.Version)
@@ -96,15 +114,25 @@ func TestGetOrCreateLoadsExistingMetadata(t *testing.T) {
 	}
 }
 
-func TestGCLeavesResidentIndexLoaded(t *testing.T) {
-	name := "TestGCLeavesResidentIndexLoaded.index"
-	index, _, err := GetOrCreateIndex(name)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = DeleteIndex(name) })
-	index.atime = 0
+func TestUpdateIndexListEvictsUnassignedIndex(t *testing.T) {
+	name := "TestUpdateIndexListEvictsUnassignedIndex.index"
+	persistUnloadedIndex(t, name)
+	t.Cleanup(func() { _ = IndexMgr.Delete(name) })
 
-	require.NoError(t, ZINC_INDEX_LIST.GC())
-	resident, ok := GetResidentIndex(name)
-	assert.True(t, ok)
-	assert.Same(t, index, resident)
+	cachedIndex, err := IndexMgr.Get(name)
+	require.NoError(t, err)
+
+	sum := md5.Sum([]byte(name))
+	partition := hex.EncodeToString(sum[:])[:2]
+	require.NoError(t, updateIndexList(map[string]struct{}{partition: {}}))
+
+	for _, index := range IndexMgr.GetCached() {
+		assert.NotEqual(t, name, index.GetName())
+	}
+	_, err = metadata.Index.Get(name)
+	require.NoError(t, err)
+
+	reloadedIndex, err := IndexMgr.Get(name)
+	require.NoError(t, err)
+	assert.NotSame(t, cachedIndex, reloadedIndex)
 }

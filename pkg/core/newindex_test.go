@@ -74,11 +74,11 @@ func TestNewIndex(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, got)
 
-			err = CreateIndex(got)
+			err = IndexMgr.Store(got)
 			assert.NoError(t, err)
 
 			t.Run("cleanup", func(t *testing.T) {
-				err := DeleteIndex(tt.args.name)
+				err := IndexMgr.Delete(tt.args.name)
 				assert.NoError(t, err)
 			})
 		})
@@ -116,24 +116,24 @@ func TestGetIndex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = CreateIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := GetIndex(tt.args.name)
+			got, err := IndexMgr.Get(tt.args.name)
 			if !tt.want1 {
-				assert.False(t, got1)
+				assert.ErrorIs(t, err, ErrIndexNotFound)
 				return
 			}
-			assert.True(t, got1)
+			assert.Nil(t, err)
 			assert.NotNil(t, got)
 		})
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := DeleteIndex("TestGetIndex.index_1")
+		err := IndexMgr.Delete("TestGetIndex.index_1")
 		assert.NoError(t, err)
 	})
 }

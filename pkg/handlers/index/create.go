@@ -148,7 +148,7 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 	_ = index.SetMappings(mappings)
 
 	// store index
-	if err = core.CreateIndex(index); err != nil {
+	if err = core.IndexMgr.Store(index); err != nil {
 		return errors.New(err.Error())
 	}
 

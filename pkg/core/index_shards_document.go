@@ -257,7 +257,7 @@ func (s *IndexShard) CheckDocumentOperation(docID string, doc map[string]interfa
 		if err = s.root.SetMappings(mappings); err != nil {
 			return nil, err
 		}
-		if err = StoreIndex(s.root); err != nil {
+		if err = IndexMgr.Store(s.root); err != nil {
 			return nil, err
 		}
 	}

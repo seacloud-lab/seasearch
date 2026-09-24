@@ -88,7 +88,7 @@ func SetSettings(c *gin.Context) {
 		return
 	}
 
-	index, exists, err := core.GetOrCreateIndex(indexName)
+	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -103,7 +103,7 @@ func SetSettings(c *gin.Context) {
 			return
 		}
 		// store index
-		if err := core.StoreIndex(index); err != nil {
+		if err := core.IndexMgr.Store(index); err != nil {
 			c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -119,7 +119,7 @@ func SetSettings(c *gin.Context) {
 	_ = index.SetAnalyzers(analyzers)
 
 	// store index
-	if err := core.StoreIndex(index); err != nil {
+	if err := core.IndexMgr.Store(index); err != nil {
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

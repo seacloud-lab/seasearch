@@ -16,7 +16,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
-	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
@@ -31,8 +30,8 @@ func SearchVector(c *gin.Context) {
 	}
 	auth := c.Request.Header.Get("Authorization")
 	var clientErr *HttpClientError
-	zincIndex, err := core.GetZincIndexFromMetadata(indexName)
-	if errors.Is(err, zincerrors.ErrKeyNotFound) {
+	zincIndex, err := core.IndexMgr.Get(indexName)
+	if errors.Is(err, core.ErrIndexNotFound) {
 		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not found"})
 		return
 	} else if errors.As(err, &clientErr) {

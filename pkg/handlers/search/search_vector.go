@@ -78,7 +78,7 @@ func VectorRecall(c *gin.Context) {
 		return
 	}
 
-	zincIndex, err := core.LoadIndex(indexName)
+	zincIndex, err := core.IndexMgr.Get(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: index %s not found: %w", indexName, err).Error()})
 		return
