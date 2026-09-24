@@ -70,7 +70,7 @@ func TestSearchV1(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.CreateIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -86,7 +86,7 @@ func TestSearchV1(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex(indexName)
+		err := core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

@@ -91,7 +91,7 @@ const testFieldName = "vec"
 
 func clean() {
 	// clear
-	ZINC_INDEX_LIST.Delete(testIdxName)
+	IndexMgr.Delete(testIdxName)
 	_ = os.RemoveAll(path.Join(config.Global.DataPath, vector.VecPrefix))
 	_ = metadata.Index.Delete(testIdxName)
 	store, _ := vector.GetVectorStorage()
@@ -543,7 +543,7 @@ func testReOpenIvfPq(t *testing.T) {
 
 	// close idx
 	idx.Free()
-	ZINC_INDEX_LIST.Delete(testIdxName)
+	IndexMgr.DropCache(testIdxName)
 	// reopen
 	idx = makeIvfPqForTest(t)
 	defer idx.Free()

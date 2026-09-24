@@ -21,17 +21,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/hash/rendezvous"
 )
 
@@ -138,110 +134,4 @@ func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analy
 		cfg.DefaultSearchAnalyzer = defaultSearchAnalyzer
 	}
 	return cfg, nil
-}
-
-// storeIndex stores the index to metadata
-func StoreIndex(index *Index) error {
-	name := index.GetName()
-	ZINC_INDEX_LIST.lifecycleLock.Lock()
-	defer ZINC_INDEX_LIST.lifecycleLock.Unlock()
-	if ZINC_INDEX_LIST.invalidated == nil {
-		ZINC_INDEX_LIST.invalidated = make(map[string]bool)
-	}
-	if !cluster.AssignCheck(name) {
-		return ErrIndexServerMismatch
-	}
-	if deleting, invalidated := ZINC_INDEX_LIST.invalidated[name]; invalidated && deleting {
-		return fmt.Errorf("index [%s] is no longer active", name)
-	}
-	if current, ok := ZINC_INDEX_LIST.Get(name); ok && current != index {
-		return fmt.Errorf("index [%s] runtime has been replaced", name)
-	}
-	// check index
-	checkIndex(index)
-	// store index
-	if err := storeIndex(index); err != nil {
-		return err
-	}
-	// cache index
-	ZINC_INDEX_LIST.Add(index)
-	return nil
-}
-
-func CreateIndex(index *Index) error {
-	name := index.GetName()
-	if !cluster.AssignCheck(name) {
-		return ErrIndexServerMismatch
-	}
-	ZINC_INDEX_LIST.lifecycleLock.Lock()
-	defer ZINC_INDEX_LIST.lifecycleLock.Unlock()
-
-	if _, ok := ZINC_INDEX_LIST.Get(name); ok {
-		return fmt.Errorf("index [%s] already exists", name)
-	}
-	if _, err := metadata.Index.Get(name); err == nil {
-		return fmt.Errorf("index [%s] already exists", name)
-	} else if !errors.Is(err, zincerrors.ErrKeyNotFound) {
-		return err
-	}
-	checkIndex(index)
-	if err := storeIndex(index); err != nil {
-		return err
-	}
-	if !cluster.AssignCheck(name) {
-		_ = metadata.Index.Delete(name)
-		return ErrIndexServerMismatch
-	}
-	delete(ZINC_INDEX_LIST.invalidated, name)
-	ZINC_INDEX_LIST.Add(index)
-	return nil
-}
-
-func checkIndex(index *Index) {
-	index.lock.Lock()
-
-	if index.ref.Settings == nil {
-		index.ref.Settings = new(meta.IndexSettings)
-	}
-	if index.ref.Mappings == nil {
-		// set default mappings
-		index.ref.Mappings = meta.NewMappings()
-		index.ref.Mappings.SetProperty(meta.TimeFieldName, meta.NewProperty("date"))
-	}
-	if index.analyzers == nil {
-		index.analyzers = make(map[string]*analysis.Analyzer)
-	}
-
-	index.lock.Unlock()
-}
-
-func storeIndex(index *Index) error {
-	data, err := index.MarshalJSON()
-	if err != nil {
-		return fmt.Errorf("core.storeIndex: index: %s, error: %s", index.ref.Name, err.Error())
-	}
-	err = metadata.Index.Set(index.GetName(), data)
-	if err != nil {
-		return fmt.Errorf("core.storeIndex: index: %s, error: %s", index.ref.Name, err.Error())
-	}
-	return nil
-}
-
-func GetIndex(name string) (*Index, bool) {
-	return ZINC_INDEX_LIST.Get(name)
-}
-
-func GetResidentIndex(name string) (*Index, bool) {
-	return ZINC_INDEX_LIST.Get(name)
-}
-
-func LoadIndex(name string) (*Index, error) {
-	return ZINC_INDEX_LIST.Load(name)
-}
-
-func GetOrCreateIndex(name string) (*Index, bool, error) {
-	if !cluster.AssignCheck(name) {
-		return nil, false, ErrIndexServerMismatch
-	}
-	return ZINC_INDEX_LIST.GetOrCreate(name)
 }

@@ -113,7 +113,7 @@ func TestDeleteByQuery(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			index, err := core.NewIndex("TestDeleteByQuery.index")
 			assert.NoError(t, err)
-			assert.NoError(t, core.CreateIndex(index))
+			assert.NoError(t, core.IndexMgr.Store(index))
 			id := ider.Generate()
 			assert.NoError(t, index.CreateDocument(id, test.arg.doc, false))
 			time.Sleep(time.Second)
@@ -131,7 +131,7 @@ func TestDeleteByQuery(t *testing.T) {
 				assertHTTPResponse(t, w, test.want.failure.statusCode, test.want.failure.body)
 			}
 
-			assert.NoError(t, core.DeleteIndex(index.GetName()))
+			assert.NoError(t, core.IndexMgr.Delete(index.GetName()))
 		})
 
 	}

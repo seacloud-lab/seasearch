@@ -33,7 +33,7 @@ func TestList(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.CreateIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -75,7 +75,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex("TestIndexList.index_1")
+		err := core.IndexMgr.Delete("TestIndexList.index_1")
 		assert.NoError(t, err)
 	})
 }
@@ -86,7 +86,7 @@ func TestIndexNameList(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.CreateIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -109,7 +109,7 @@ func TestIndexNameList(t *testing.T) {
 	})
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex("TestIndexNameList.index_1")
+		err := core.IndexMgr.Delete("TestIndexNameList.index_1")
 		assert.NoError(t, err)
 	})
 }

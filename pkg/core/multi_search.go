@@ -18,6 +18,7 @@ package core
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -80,8 +81,10 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 		if !cluster.AssignCheck(indexName) {
 			return nil, ErrIndexServerMismatch
 		}
-		index, err := LoadIndex(indexName)
-		if err != nil {
+		index, err := IndexMgr.Get(indexName)
+		if errors.Is(err, ErrIndexNotFound) {
+			continue
+		} else if err != nil {
 			return nil, err
 		}
 		if mappings == nil {
@@ -92,7 +95,7 @@ func QueryStatsInfo(indexNames []string, query *meta.ZincQuery) (*zincsearch.Uni
 	}
 
 	if len(searchers) == 0 {
-		return nil, nil
+		return &zincsearch.UnifiedStats{}, nil
 	}
 
 	termList, err := query2.QueryTerms(query.Query, mappings, analyzers)
@@ -165,7 +168,7 @@ func GetMatchedIndexes(indexNames []string) ([]*Index, error) {
 		if !matched || !cluster.AssignCheck(name) {
 			continue
 		}
-		index, err := LoadIndex(name)
+		index, err := IndexMgr.Get(name)
 		if err != nil {
 			return nil, err
 		}
@@ -241,7 +244,7 @@ func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQu
 	timeMin, timeMax := timerange.Query(query.Query)
 
 	for idx, secondIds := range indexes {
-		index, err := GetZincIndexFromMetadata(idx)
+		index, err := IndexMgr.Get(idx)
 		if err != nil {
 			return nil, err
 		}

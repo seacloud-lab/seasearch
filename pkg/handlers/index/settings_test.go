@@ -31,7 +31,7 @@ func TestSettings(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.CreateIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -176,7 +176,7 @@ func TestSettings(t *testing.T) {
 
 	t.Run("delete index", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			_ = core.DeleteIndex(fmt.Sprintf("TestSettings.index_%d", i))
+			_ = core.IndexMgr.Delete(fmt.Sprintf("TestSettings.index_%d", i))
 		}
 	})
 }

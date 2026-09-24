@@ -75,7 +75,7 @@ func Bulkv2(c *gin.Context) {
 func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 	var err error
 	var count int64
-	newIndex, _, err := core.GetOrCreateIndex(indexName)
+	newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
 	if err != nil {
 		return count, err
 	}

@@ -277,12 +277,12 @@ func newIndex(t *testing.T, indexName string) (*core.Index, func()) {
 	index, err := core.NewIndex(indexName)
 	require.NoError(t, err)
 
-	err = core.CreateIndex(index)
+	err = core.IndexMgr.Store(index)
 	require.NoError(t, err)
 
 	return index, func() {
 		require.NoError(t, metadata.Alias.Set(map[string][]string{}))
 		core.ZINC_INDEX_ALIAS_LIST = *core.NewAliasList()
-		require.NoError(t, core.DeleteIndex(indexName))
+		require.NoError(t, core.IndexMgr.Delete(indexName))
 	}
 }

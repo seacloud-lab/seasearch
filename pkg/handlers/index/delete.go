@@ -61,7 +61,7 @@ func Delete(c *gin.Context) {
 			}
 			continue
 		}
-		if err := core.DeleteIndex(indexName); err != nil {
+		if err := core.IndexMgr.Delete(indexName); err != nil {
 			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -89,7 +89,7 @@ func deleteIndexWithWildcard(indexName string, indexList []string) error {
 
 	for _, name := range indexList {
 		if p.MatchString(name) {
-			if err := core.DeleteIndex(name); err != nil {
+			if err := core.IndexMgr.Delete(name); err != nil {
 				return err
 			}
 		}

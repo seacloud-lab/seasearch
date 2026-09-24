@@ -13,6 +13,8 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core/vector"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
@@ -263,13 +265,13 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 	var zincIndex *Index
 	var err error
 	if forParallelSearch {
-		zincIndex, err = GetZincIndexFromMetadata(zincIndexName)
+		zincIndex, err = IndexMgr.Get(zincIndexName)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// get metadata
-		zincIndex, err = LoadIndex(zincIndexName)
+		zincIndex, err = IndexMgr.Get(zincIndexName)
 		if err != nil {
 			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s: %w", zincIndexName, field, err)
 		}
@@ -284,16 +286,64 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 	return MakeVecIndex(zincIndex, field, vecIndexMeta)
 }
 
-func DeleteVecIndex(indexName string, fieldName string) error {
-	vecIndex, err := GetVectorIndex(indexName, fieldName, false)
-	if err == nil {
-		CloseVectorIndex(vecIndex, true)
-	} else if !errors.Is(err, ErrVecIndexNotExists) && !errors.Is(err, ErrVecIndexCorruption) {
-		return fmt.Errorf("failed to get vector index %s/%s: %w", indexName, fieldName, err)
+func getVecIndexStoreName(zincIndex *Index, fieldName string, vecIndexMeta *meta.VecIndex) string {
+	subPath := fieldName
+	if vecIndexMeta.StoreWithHash {
+		subPath = zutils.GetHashEncode(fieldName)
 	}
-	err = vecIdxManager.storage.Remove(vecIndex.StoreName())
+	return path.Join(zincIndex.GetStoreName(), subPath)
+}
+
+func deleteVecIndexFromIndex(zincIndex *Index, fieldName string) error {
+	vecIndexMeta, ok := zincIndex.GetVecIndex(fieldName)
+	if !ok {
+		return ErrVecIndexNotExists
+	}
+
+	cachedName := path.Join(zincIndex.GetName(), fieldName)
+	var vecIndex VectorIndex
+	hasCache := false
+	if vecIdxManager != nil {
+		vecIdxManager.lock.Lock()
+		if vecIdxManager.cache != nil {
+			vecIndex, hasCache = vecIdxManager.cache[cachedName]
+			if hasCache {
+				vecIndex.AddRef()
+			}
+		}
+		vecIdxManager.lock.Unlock()
+	}
+
+	if hasCache {
+		CloseVectorIndex(vecIndex, true)
+	}
+
+	store := vecIdxManager.storage
+	if store == nil {
+		var err error
+		store, err = vector.GetVectorStorage()
+		if err != nil {
+			return fmt.Errorf("failed to init vector storage for %s/%s: %w", zincIndex.GetName(), fieldName, err)
+		}
+	}
+
+	storeName := getVecIndexStoreName(zincIndex, fieldName, vecIndexMeta)
+	if err := store.Remove(storeName); err != nil {
+		return fmt.Errorf("failed to remove index %s/%s: %w", zincIndex.GetName(), fieldName, err)
+	}
+
+	return nil
+}
+
+func DeleteVecIndex(indexName string, fieldName string) error {
+	zincIndex, err := IndexMgr.Get(indexName)
 	if err != nil {
-		return fmt.Errorf("failed to remove index %s/%s: %w", indexName, fieldName, err)
+		return fmt.Errorf("failed to get index %s: %w", indexName, err)
+	}
+
+	err = deleteVecIndexFromIndex(zincIndex, fieldName)
+	if err != nil && !errors.Is(err, ErrVecIndexNotExists) {
+		return err
 	}
 
 	return nil
@@ -302,7 +352,7 @@ func DeleteVecIndex(indexName string, fieldName string) error {
 // SealIndex
 // submits a task to seal the growing segment of the index.
 func SealIndex(zincIndexName string, field string) error {
-	index, err := LoadIndex(zincIndexName)
+	index, err := IndexMgr.Get(zincIndexName)
 	if err != nil {
 		return fmt.Errorf("zinc index not exists: %w", err)
 	}

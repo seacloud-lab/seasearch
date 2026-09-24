@@ -13,7 +13,7 @@ func SealVectorIndex(c *gin.Context) {
 	indexName := c.Param("target")
 	fieldName := c.Param("field")
 
-	index, err := core.LoadIndex(indexName)
+	index, err := core.IndexMgr.Get(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not exists"})
 		return

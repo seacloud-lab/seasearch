@@ -48,7 +48,7 @@ func DeleteByQuery(c *gin.Context) {
 	failures := []string{}
 	for i, hit := range resp.Hits.Hits {
 		if config.Global.EnableWal {
-			index, err := core.LoadIndex(hit.Index)
+			index, err := core.IndexMgr.Get(hit.Index)
 			if err != nil {
 				failures = append(failures, hit.ID)
 				continue
@@ -62,7 +62,7 @@ func DeleteByQuery(c *gin.Context) {
 		}
 	}
 	if !config.Global.EnableWal {
-		index, err := core.LoadIndex(indexName)
+		index, err := core.IndexMgr.Get(indexName)
 		if err == nil {
 			err = index.DeleteDocuments(deleteIds)
 		}
