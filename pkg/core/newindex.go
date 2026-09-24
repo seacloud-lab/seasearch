@@ -21,8 +21,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 
@@ -30,7 +28,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/zutils/hash/rendezvous"
 )
 
@@ -137,58 +134,4 @@ func getOpenConfig(name string, storageType string, defaultSearchAnalyzer *analy
 		cfg.DefaultSearchAnalyzer = defaultSearchAnalyzer
 	}
 	return cfg, nil
-}
-
-// storeIndex stores the index to metadata
-func StoreIndex(index *Index) error {
-	// check index
-	checkIndex(index)
-	// store index
-	if err := storeIndex(index); err != nil {
-		return err
-	}
-	// cache index
-	ZINC_INDEX_LIST.Add(index)
-	return nil
-}
-
-func checkIndex(index *Index) {
-	index.lock.Lock()
-
-	if index.ref.Settings == nil {
-		index.ref.Settings = new(meta.IndexSettings)
-	}
-	if index.ref.Mappings == nil {
-		// set default mappings
-		index.ref.Mappings = meta.NewMappings()
-		index.ref.Mappings.SetProperty(meta.TimeFieldName, meta.NewProperty("date"))
-	}
-	if index.analyzers == nil {
-		index.analyzers = make(map[string]*analysis.Analyzer)
-	}
-
-	index.lock.Unlock()
-}
-
-func storeIndex(index *Index) error {
-	data, err := index.MarshalJSON()
-	if err != nil {
-		return fmt.Errorf("core.storeIndex: index: %s, error: %s", index.ref.Name, err.Error())
-	}
-	err = metadata.Index.Set(index.GetName(), data)
-	if err != nil {
-		return fmt.Errorf("core.storeIndex: index: %s, error: %s", index.ref.Name, err.Error())
-	}
-	return nil
-}
-
-func GetIndex(name string) (*Index, bool) {
-	return ZINC_INDEX_LIST.Get(name)
-}
-
-func GetOrCreateIndex(name string) (*Index, bool, error) {
-	if !cluster.AssignCheck(name) {
-		return nil, false, ErrIndexServerMismatch
-	}
-	return ZINC_INDEX_LIST.GetOrCreate(name)
 }

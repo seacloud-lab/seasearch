@@ -41,8 +41,8 @@ import (
 // @Router /api/{index}/_search [post]
 func SearchV1(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.IndexMgr.Get(indexName)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}

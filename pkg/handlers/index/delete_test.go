@@ -67,9 +67,9 @@ func TestDelete(t *testing.T) {
 		{
 			name: "index does not exist",
 			args: args{
-				code:   http.StatusBadRequest,
+				code:   http.StatusOK,
 				params: map[string]string{"target": "Index-Not-Exists"},
-				result: "index Index-Not-Exists does not exists",
+				result: "deleted",
 			},
 			wantErr: false,
 		},
@@ -102,6 +102,6 @@ func prepareIndex(t *testing.T, name, storageType string) {
 	assert.NoError(t, err)
 	assert.NotNil(t, index)
 
-	err = core.StoreIndex(index)
+	err = core.IndexMgr.Store(index)
 	assert.NoError(t, err)
 }

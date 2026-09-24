@@ -20,7 +20,7 @@ func TestESMapping_GetConverted(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.StoreIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -159,7 +159,7 @@ func TestESMapping_GetConverted(t *testing.T) {
 
 	t.Run("delete index", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			_ = core.DeleteIndex(fmt.Sprintf("TestEsMapping.index_%d", i))
+			_ = core.IndexMgr.Delete(fmt.Sprintf("TestEsMapping.index_%d", i))
 		}
 	})
 

@@ -92,7 +92,7 @@ func TestMultiSearch(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, index)
 
-			err = StoreIndex(index)
+			err = IndexMgr.Store(index)
 			assert.NoError(t, err)
 		}
 	})
@@ -117,7 +117,7 @@ func TestMultiSearch(t *testing.T) {
 
 	t.Run("cleanup", func(t *testing.T) {
 		for _, indexName := range indexNames {
-			err := DeleteIndex(indexName)
+			err := IndexMgr.Delete(indexName)
 			assert.NoError(t, err)
 		}
 	})

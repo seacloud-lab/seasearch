@@ -115,7 +115,7 @@ func TestGet(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex(indexName)
+		err := core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

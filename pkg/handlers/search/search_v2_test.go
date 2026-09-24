@@ -79,7 +79,7 @@ func TestSearchDSL(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.StoreIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
@@ -99,7 +99,7 @@ func TestSearchDSL(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex(indexName)
+		err := core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
@@ -150,7 +150,7 @@ func TestMultipleSearch(t *testing.T) {
 		index, err := core.NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.StoreIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
@@ -170,7 +170,7 @@ func TestMultipleSearch(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex(indexName)
+		err := core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

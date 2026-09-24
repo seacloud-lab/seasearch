@@ -39,16 +39,16 @@ import (
 // @Router /api/{index}/_mapping [get]
 func GetMapping(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.GetIndexMetadata(indexName)
+	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
 
 	// format mappings
-	mappings := index.GetMappings()
+	mappings := index.Mappings
 
-	zutils.GinRenderJSON(c, http.StatusOK, gin.H{index.GetName(): gin.H{"mappings": mappings}})
+	zutils.GinRenderJSON(c, http.StatusOK, gin.H{index.Name: gin.H{"mappings": mappings}})
 }
 
 // @Id SetMapping
@@ -82,7 +82,7 @@ func SetMapping(c *gin.Context) {
 		return
 	}
 
-	index, exists, err := core.GetOrCreateIndex(indexName)
+	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -134,7 +134,7 @@ func SetMapping(c *gin.Context) {
 	}
 
 	// store index
-	if err := core.StoreIndex(index); err != nil {
+	if err := core.IndexMgr.Store(index); err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}

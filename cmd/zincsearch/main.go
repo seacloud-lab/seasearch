@@ -132,9 +132,6 @@ func main() {
 		}
 
 		log.Info().Msg("Index closing...")
-		// close indexes
-		err := core.ZINC_INDEX_LIST.Close()
-		log.Info().Err(err).Msgf("Index closed")
 		// close metadata update
 		core.CloseAsyncMetaDataUpdate()
 		// close index list update
@@ -149,7 +146,7 @@ func main() {
 		lru_cache.ShutDown()
 		log.Info().Msgf("LruCache closed")
 		// close metadata
-		err = metadata.Close()
+		err := metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
 		// close wal
 		if config.Global.EnableWal {

@@ -65,7 +65,7 @@ func Test_walMergeDocs_WriteTo(t *testing.T) {
 		err = index.SetMappings(mappings)
 		assert.NoError(t, err)
 
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -82,7 +82,7 @@ func Test_walMergeDocs_WriteTo(t *testing.T) {
 	})
 
 	t.Run("Cleanup", func(t *testing.T) {
-		err := DeleteIndex("Test_walMergeDocs_WriteTo.index_1")
+		err := IndexMgr.Delete("Test_walMergeDocs_WriteTo.index_1")
 		assert.NoError(t, err)
 	})
 }

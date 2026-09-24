@@ -45,12 +45,16 @@ func List(c *gin.Context) {
 	desc, _ := strconv.ParseBool(c.DefaultQuery("desc", "false"))
 	name := c.DefaultQuery("name", "")
 
-	items := core.ZINC_INDEX_LIST.ListStat()
+	items, err := core.ListIndexMetadata()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
 
 	if len(name) > 0 {
-		var res []*core.Index
+		var res []*meta.Index
 		for _, item := range items {
-			if strings.Contains(item.GetName(), name) {
+			if strings.Contains(item.Name, name) {
 				res = append(res, item)
 			}
 		}
@@ -61,41 +65,41 @@ func List(c *gin.Context) {
 	case "doc_num":
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetStats().DocNum > items[j].GetStats().DocNum
+				return items[i].Stats.DocNum > items[j].Stats.DocNum
 			} else {
-				return items[i].GetStats().DocNum < items[j].GetStats().DocNum
+				return items[i].Stats.DocNum < items[j].Stats.DocNum
 			}
 		})
 	case "shard_num":
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetShardNum() > items[j].GetShardNum()
+				return items[i].ShardNum > items[j].ShardNum
 			} else {
-				return items[i].GetShardNum() < items[j].GetShardNum()
+				return items[i].ShardNum < items[j].ShardNum
 			}
 		})
 	case "storage_size":
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetStats().StorageSize > items[j].GetStats().StorageSize
+				return items[i].Stats.StorageSize > items[j].Stats.StorageSize
 			} else {
-				return items[i].GetStats().StorageSize < items[j].GetStats().StorageSize
+				return items[i].Stats.StorageSize < items[j].Stats.StorageSize
 			}
 		})
 	case "storage_type":
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetStorageType() > items[j].GetStorageType()
+				return items[i].StorageType > items[j].StorageType
 			} else {
-				return items[i].GetStorageType() < items[j].GetStorageType()
+				return items[i].StorageType < items[j].StorageType
 			}
 		})
 	case "wal_size":
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetWALSize() > items[j].GetWALSize()
+				return items[i].Stats.WALSize > items[j].Stats.WALSize
 			} else {
-				return items[i].GetWALSize() < items[j].GetWALSize()
+				return items[i].Stats.WALSize < items[j].Stats.WALSize
 			}
 		})
 	case "name":
@@ -103,9 +107,9 @@ func List(c *gin.Context) {
 	default:
 		sort.Slice(items, func(i, j int) bool {
 			if desc {
-				return items[i].GetName() > items[j].GetName()
+				return items[i].Name > items[j].Name
 			} else {
-				return items[i].GetName() < items[j].GetName()
+				return items[i].Name < items[j].Name
 			}
 		})
 	}
@@ -115,7 +119,7 @@ func List(c *gin.Context) {
 	if endIndex > 0 {
 		items = items[startIndex:endIndex]
 	} else {
-		items = []*core.Index{}
+		items = []*meta.Index{}
 	}
 
 	c.JSON(http.StatusOK, IndexListResponse{
@@ -135,7 +139,12 @@ func List(c *gin.Context) {
 func IndexNameList(c *gin.Context) {
 	queryName := strings.ToLower(c.DefaultQuery("name", ""))
 	var items []string
-	names := core.ZINC_INDEX_LIST.ListName()
+	names, err := core.ListIndexNames()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	sort.Strings(names)
 	if queryName == "" {
 		items = names
 	} else {
@@ -155,6 +164,6 @@ func IndexNameList(c *gin.Context) {
 }
 
 type IndexListResponse struct {
-	List []*core.Index `json:"list"`
+	List []*meta.Index `json:"list"`
 	Page *meta.Page    `json:"page"`
 }

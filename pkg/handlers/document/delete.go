@@ -43,13 +43,13 @@ func Delete(c *gin.Context) {
 	}
 
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.IndexMgr.Get(indexName)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index does not exists"})
 		return
 	}
 
-	err := index.DeleteDocument(docID)
+	err = index.DeleteDocument(docID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

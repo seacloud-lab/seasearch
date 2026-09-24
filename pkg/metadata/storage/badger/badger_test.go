@@ -16,10 +16,12 @@
 package badger
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func Test_badgerStorage_List(t *testing.T) {
@@ -194,4 +196,8 @@ func Test_badgerStorage_Delete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMain(m *testing.M) {
+	os.Exit(utils.RunMain(m, nil, nil))
 }

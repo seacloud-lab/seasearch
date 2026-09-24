@@ -38,18 +38,18 @@ import (
 // @Router /api/{index}/_settings [get]
 func GetSettings(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.GetIndexMetadata(indexName)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
 
-	settings := index.GetSettings()
+	settings := index.Settings
 	if settings == nil {
 		settings = new(meta.IndexSettings)
 	}
 
-	c.JSON(http.StatusOK, gin.H{index.GetName(): gin.H{"settings": settings}})
+	c.JSON(http.StatusOK, gin.H{index.Name: gin.H{"settings": settings}})
 }
 
 // @Id SetSettings
@@ -88,7 +88,7 @@ func SetSettings(c *gin.Context) {
 		return
 	}
 
-	index, exists, err := core.GetOrCreateIndex(indexName)
+	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -103,7 +103,7 @@ func SetSettings(c *gin.Context) {
 			return
 		}
 		// store index
-		if err := core.StoreIndex(index); err != nil {
+		if err := core.IndexMgr.Store(index); err != nil {
 			c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -119,7 +119,7 @@ func SetSettings(c *gin.Context) {
 	_ = index.SetAnalyzers(analyzers)
 
 	// store index
-	if err := core.StoreIndex(index); err != nil {
+	if err := core.IndexMgr.Store(index); err != nil {
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
