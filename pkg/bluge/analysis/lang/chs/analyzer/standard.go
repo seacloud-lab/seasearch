@@ -17,6 +17,7 @@ package analyzer
 
 import (
 	"github.com/blugelabs/bluge/analysis"
+	blugetoken "github.com/blugelabs/bluge/analysis/token"
 	"github.com/go-ego/gse"
 
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs/token"
@@ -25,7 +26,9 @@ import (
 
 func NewStandardAnalyzer(seg *gse.Segmenter) *analysis.Analyzer {
 	return &analysis.Analyzer{
-		Tokenizer:    tokenizer.NewStandardTokenizer(seg),
-		TokenFilters: []analysis.TokenFilter{token.NewStopTokenFilter(seg, nil)},
+		Tokenizer: tokenizer.NewStandardTokenizer(seg),
+		// gse lowercases ASCII only: fold the case of every script (Cyrillic, Greek, ...)
+		// so that a word at the start of a sentence is found by its lowercase form
+		TokenFilters: []analysis.TokenFilter{blugetoken.NewLowerCaseFilter(), token.NewStopTokenFilter(seg, nil)},
 	}
 }

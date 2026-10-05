@@ -94,6 +94,11 @@ func TestNewGseStandardAnalyzer(t *testing.T) {
 			text: "《复仇者联盟3：无限战争》是全片使用IMAX摄影机拍摄制作的科幻片.",
 			want: "[复仇者 联盟 3 无限 战争 全片 使用 imax 摄影机 拍摄 制作 科幻片]",
 		},
+		{
+			name: "non-ASCII letters are lowercased too",
+			text: "Выручка Österreich Αθήνα Łódź",
+			want: "[выручка   österreich   αθήνα   łódź]",
+		},
 	}
 
 	for _, tt := range tests {
@@ -114,6 +119,11 @@ func TestNewGseSearchAnalyzer(t *testing.T) {
 			name: "default",
 			text: "《复仇者联盟3：无限战争》是全片使用IMAX摄影机拍摄制作的科幻片.",
 			want: "[复仇 仇者 复仇者 联盟 3 无限 战争 全片 使用 imax 摄影 摄影机 拍摄 制作 科幻 科幻片]",
+		},
+		{
+			name: "non-ASCII letters are lowercased too",
+			text: "Выручка Österreich Αθήνα Łódź",
+			want: "[в ы р у ч к а   ö sterreich   α θ ή ν α   ł ó d ź]",
 		},
 	}
 
