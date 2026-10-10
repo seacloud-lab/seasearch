@@ -319,7 +319,7 @@ func (index *Index) UpdateMetadata() error {
 	atomic.StoreUint64(&index.ref.Stats.StorageSize, totalSize)
 	index.lock.Unlock()
 
-	return storeIndex(index)
+	return IndexMgr.Store(index)
 }
 
 // SaveVecIndexMeta update vector index metadata
@@ -331,7 +331,7 @@ func (index *Index) SaveVecIndexMeta(fieldName string, vecIndex *meta.VecIndex) 
 	index.ref.VecIndexes[fieldName] = vecIndex
 	index.lock.Unlock()
 
-	return storeIndex(index)
+	return IndexMgr.Store(index)
 }
 
 // UpdateMetadataByShard update first layer shard metadata, mainly docNum, storageSize and timeRange

@@ -115,10 +115,10 @@ func TestDelete(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		idx, exists := core.GetIndex(indexName)
-		assert.True(t, exists)
+		idx, err := core.IndexMgr.Get(indexName)
+		assert.Nil(t, err)
 		assert.NoError(t, idx.Close())
-		err := core.DeleteIndex(indexName)
+		err = core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"os"
 	"testing"
 
 	"github.com/zincsearch/zincsearch/pkg/auth"
@@ -8,12 +9,17 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func TestMain(m *testing.M) {
-	config.InitConfig()
-	metadata.InitMetaStorage()
-	ider.InitIder()
-	auth.InitFirstUser()
-	core.InitIndexList()
+	start := func() error {
+		config.InitConfig()
+		metadata.InitMetaStorage()
+		ider.InitIder()
+		auth.InitFirstUser()
+		core.InitIndexList()
+		return nil
+	}
+	os.Exit(utils.RunMain(m, start, nil))
 }

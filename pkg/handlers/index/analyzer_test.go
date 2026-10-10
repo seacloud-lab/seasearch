@@ -248,7 +248,7 @@ func TestAnalyze(t *testing.T) {
 		err = index.SetMappings(mapping)
 		assert.NoError(t, err)
 
-		err = core.StoreIndex(index)
+		err = core.IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -270,7 +270,7 @@ func TestAnalyze(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex(indexName)
+		err := core.IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

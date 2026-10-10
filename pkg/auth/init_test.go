@@ -7,12 +7,16 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func TestMain(m *testing.M) {
-	config.InitConfig()
-	ider.InitIder()
-	metadata.InitMetaStorage()
-	InitFirstUser()
-	os.Exit(m.Run())
+	start := func() error {
+		config.InitConfig()
+		ider.InitIder()
+		metadata.InitMetaStorage()
+		InitFirstUser()
+		return nil
+	}
+	os.Exit(utils.RunMain(m, start, nil))
 }

@@ -63,7 +63,11 @@ func AddOrRemoveESAlias(c *gin.Context) {
 	addMap := map[string][]string{}
 	removeMap := map[string][]string{}
 
-	indexList := core.ZINC_INDEX_LIST.List()
+	indexList, err := core.ListIndexNames()
+	if err != nil {
+		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
 
 	for _, action := range alias.Actions {
 		if action.Add != nil {
@@ -170,16 +174,16 @@ func getRegex(s string) (*regexp.Regexp, error) {
 	return p, nil
 }
 
-func matchAndAddToMap(indexList []*core.Index, indexName string, m map[string][]string, b *base) {
+func matchAndAddToMap(indexList []string, indexName string, m map[string][]string, b *base) {
 	var n string // reuse same string variable
 
 	if !strings.Contains(indexName, "*") {
-		x, ok := core.ZINC_INDEX_LIST.Get(indexName)
-		if !ok {
+		x, err := core.GetIndexMetadata(indexName)
+		if err != nil {
 			return
 		}
 
-		n = x.GetName()
+		n = x.Name
 
 		if b.Alias != "" { // alias takes precedence over aliases
 			m[b.Alias] = append(m[b.Alias], n)
@@ -193,7 +197,7 @@ func matchAndAddToMap(indexList []*core.Index, indexName string, m map[string][]
 
 	// indexName contains a wildcard(*) r, range over the entire indexlist looking for matches
 	for _, index := range indexList {
-		n = index.GetName()
+		n = index
 		if indexNameMatches(indexName, n) {
 			if b.Alias != "" { // alias takes precedence over aliases
 				m[b.Alias] = append(m[b.Alias], n)

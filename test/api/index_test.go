@@ -70,7 +70,7 @@ func TestIndex(t *testing.T) {
 			})
 			t.Run("delete index with not exist indexName", func(t *testing.T) {
 				resp := request("DELETE", "/api/index/newindex", nil)
-				assert.Equal(t, http.StatusBadRequest, resp.Code)
+				assert.Equal(t, http.StatusOK, resp.Code)
 			})
 		})
 

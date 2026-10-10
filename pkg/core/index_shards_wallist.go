@@ -72,12 +72,11 @@ func (t *IndexShardWALList) Len() int {
 }
 
 func (t *IndexShardWALList) ConsumeWAL() {
-
-	indexes := make(map[string]*Index)
 	eg := &errgroup.Group{}
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	tick := time.NewTicker(config.Global.WalSyncInterval)
 	for range tick.C {
+		indexes := make(map[string]*Index)
 		shardClosed := make(chan string, t.Len())
 		indexUpdated := make(chan string, t.Len())
 		for _, shard := range t.List() {

@@ -72,8 +72,8 @@ func SearchDSL(c *gin.Context) {
 
 	if indexName != "" {
 		// TODO: adapt this to allow strings.Split(indexName, ",") slice
-		idx, ok := core.ZINC_INDEX_LIST.Get(indexName)
-		if ok {
+		idx, err := core.IndexMgr.Get(indexName)
+		if err == nil {
 			storageSize := idx.GetStats().StorageSize
 			eventData := make(map[string]interface{})
 			eventData["search_type"] = "query_dsl"
@@ -206,9 +206,12 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		if !cluster.AssignCheck(indexName) {
 			return nil, core.ErrIndexServerMismatch
 		}
-		index, exists := core.GetIndex(indexName)
-		if !exists {
-			return nil, fmt.Errorf("index %s does not exists", indexName)
+		index, loadErr := core.IndexMgr.Get(indexName)
+		if loadErr != nil {
+			if errors.Is(loadErr, core.ErrIndexNotFound) {
+				loadErr = errors.ErrKeyNotFound
+			}
+			return nil, fmt.Errorf("index %s does not exists: %w", indexName, loadErr)
 		}
 		resp, err = index.Search(query)
 	}
@@ -267,9 +270,9 @@ func UnifiedSearch(c *gin.Context) {
 	for _, q := range req.IndexQueries {
 		q := q
 		eg.Go(func() error {
-			index, exists := core.GetIndex(q.Index)
+			index, loadErr := core.IndexMgr.Get(q.Index)
 			// some index not exists, we ignore
-			if !exists {
+			if loadErr != nil {
 				return nil
 			}
 			res, err := index.SearchWithStats(q.Query, stats)
@@ -335,7 +338,7 @@ func InternalUnifiedSearch(c *gin.Context) {
 		}
 		request.Stats, err = core.QueryStatsInfoWithSecondShardIds(indexMp, query)
 		if err != nil {
-			if errors.Is(err, errors.ErrKeyNotFound) {
+			if errors.Is(err, core.ErrIndexNotFound) {
 				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
 				return
 			}
@@ -351,9 +354,9 @@ func InternalUnifiedSearch(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, indexReq := range request.IndexQueries {
-		index, err := core.GetZincIndexFromMetadata(indexReq.Index)
+		index, err := core.IndexMgr.Get(indexReq.Index)
 		if err != nil {
-			if errors.Is(err, errors.ErrKeyNotFound) {
+			if errors.Is(err, core.ErrIndexNotFound) {
 				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
 				return
 			}

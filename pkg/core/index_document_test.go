@@ -97,7 +97,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -130,7 +130,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 
 	t.Run("cleanup", func(t *testing.T) {
 		assert.NoError(t, index.Close())
-		err = DeleteIndex(indexName)
+		err = IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
@@ -178,7 +178,7 @@ func TestIndex_UpdateDocument(t *testing.T) {
 		index, err = NewIndex("TestIndex_UpdateDocument.index_1")
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 		prop := meta.NewProperty("date")
 		mappings := index.GetMappings()
@@ -207,7 +207,7 @@ func TestIndex_UpdateDocument(t *testing.T) {
 	t.Run("cleanup", func(t *testing.T) {
 		err = index.Close()
 		assert.NoError(t, err)
-		err = DeleteIndex("TestIndex_UpdateDocument.index_1")
+		err = IndexMgr.Delete("TestIndex_UpdateDocument.index_1")
 		assert.NoError(t, err)
 	})
 }
@@ -242,7 +242,7 @@ func TestIndex_GetDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 
 		err = index.CreateDocument("1", map[string]interface{}{
@@ -268,7 +268,7 @@ func TestIndex_GetDocument(t *testing.T) {
 
 	t.Run("cleanup", func(t *testing.T) {
 		assert.NoError(t, index.Close())
-		err = DeleteIndex(indexName)
+		err = IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
@@ -303,7 +303,7 @@ func TestIndex_DeleteDocument(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 
 		err = index.CreateDocument("1", map[string]interface{}{
@@ -329,7 +329,7 @@ func TestIndex_DeleteDocument(t *testing.T) {
 
 	t.Run("cleanup", func(t *testing.T) {
 		assert.NoError(t, index.Close())
-		err = DeleteIndex(indexName)
+		err = IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
@@ -481,7 +481,7 @@ func TestIndex_CreateUpdateDocumentWithDateField(t *testing.T) {
 		index, err = NewIndex(indexName)
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -557,7 +557,7 @@ func TestIndex_CreateUpdateDocumentWithDateField(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err = DeleteIndex(indexName)
+		err = IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
