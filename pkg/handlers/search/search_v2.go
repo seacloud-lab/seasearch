@@ -354,7 +354,7 @@ func InternalUnifiedSearch(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, indexReq := range request.IndexQueries {
-		index, err := core.IndexMgr.Get(indexReq.Index)
+		index, err := core.IndexMgr.GetQueryIndex(indexReq.Index)
 		if err != nil {
 			if errors.Is(err, core.ErrIndexNotFound) {
 				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})

@@ -1,5 +1,11 @@
 package core
 
+// Index metadata catalog
+//
+// This file keeps metadata queries separate from the runtime index cache. Its
+// functions read persisted metadata directly, without loading indexes or
+// opening their storage.
+
 import (
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/meta"

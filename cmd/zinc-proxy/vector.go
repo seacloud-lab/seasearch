@@ -30,7 +30,7 @@ func SearchVector(c *gin.Context) {
 	}
 	auth := c.Request.Header.Get("Authorization")
 	var clientErr *HttpClientError
-	zincIndex, err := core.IndexMgr.Get(indexName)
+	zincIndex, err := core.IndexMgr.GetQueryIndex(indexName)
 	if errors.Is(err, core.ErrIndexNotFound) {
 		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not found"})
 		return

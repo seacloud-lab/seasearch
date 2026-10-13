@@ -265,7 +265,7 @@ func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (Vector
 	var zincIndex *Index
 	var err error
 	if forParallelSearch {
-		zincIndex, err = IndexMgr.Get(zincIndexName)
+		zincIndex, err = IndexMgr.GetQueryIndex(zincIndexName)
 		if err != nil {
 			return nil, err
 		}

@@ -244,7 +244,7 @@ func QueryStatsInfoWithSecondShardIds(indexes PartialIndexes, query *meta.ZincQu
 	timeMin, timeMax := timerange.Query(query.Query)
 
 	for idx, secondIds := range indexes {
-		index, err := IndexMgr.Get(idx)
+		index, err := IndexMgr.GetQueryIndex(idx)
 		if err != nil {
 			return nil, err
 		}

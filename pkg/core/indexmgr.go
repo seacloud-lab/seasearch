@@ -98,6 +98,13 @@ func (mgr *IndexManager) getIndex(name string) (*Index, error) {
 	return index, nil
 }
 
+// GetQueryIndex retrieves an index without checking for server assignment.
+// This is useful in parallel query where the index are already assigned to the
+// server.
+func (mgr *IndexManager) GetQueryIndex(name string) (*Index, error) {
+	return mgr.getIndex(name)
+}
+
 // GetOrCreate retrieves an index by name, creating it if it does not exist. It
 // returns the index, a boolean indicating whether the index already existed,
 // and an error if any occurred during the process.
