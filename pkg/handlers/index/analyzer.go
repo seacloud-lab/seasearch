@@ -51,8 +51,8 @@ func Analyze(c *gin.Context) {
 	indexName := c.Param("target")
 	if indexName != "" {
 		// use index analyzer
-		index, exists := core.GetIndex(indexName)
-		if !exists {
+		index, err := core.IndexMgr.Get(indexName)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 			return
 		}

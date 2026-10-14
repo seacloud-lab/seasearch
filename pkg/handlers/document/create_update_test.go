@@ -136,7 +136,7 @@ func TestCreateUpdate(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.DeleteIndex("TestDocumentCreateUpdate.index_1")
+		err := core.IndexMgr.Delete("TestDocumentCreateUpdate.index_1")
 		assert.NoError(t, err)
 	})
 }

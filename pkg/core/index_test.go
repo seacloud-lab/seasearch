@@ -35,7 +35,7 @@ func TestIndex_Index(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, index)
 
-	err = StoreIndex(index)
+	err = IndexMgr.Store(index)
 	assert.NoError(t, err)
 
 	got, err := json.Marshal(index)
@@ -261,7 +261,7 @@ func TestIndex_BuildBlugeDocumentFromJSON(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 		index.GetMappings().SetProperty("time", meta.NewProperty("date"))
 	})
@@ -298,7 +298,7 @@ func TestIndex_BuildBlugeDocumentFromJSON(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := DeleteIndex(indexName)
+		err := IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }
@@ -313,7 +313,7 @@ func TestIndex_Settings(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = StoreIndex(index)
+		err = IndexMgr.Store(index)
 		assert.NoError(t, err)
 	})
 
@@ -347,7 +347,7 @@ func TestIndex_Settings(t *testing.T) {
 	})
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := DeleteIndex(indexName)
+		err := IndexMgr.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

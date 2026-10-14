@@ -1,11 +1,13 @@
 package index
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
@@ -21,9 +23,13 @@ import (
 func Exists(c *gin.Context) {
 	indexName := c.Param("target")
 
-	_, exists := core.GetIndex(indexName)
-	if !exists {
+	_, err := core.GetIndexMetadata(indexName)
+	if errors.Is(err, zincerrors.ErrKeyNotFound) || errors.Is(err, core.ErrIndexServerMismatch) {
 		c.Status(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 

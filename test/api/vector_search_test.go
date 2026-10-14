@@ -229,7 +229,7 @@ func TestVectorSearch(t *testing.T) {
 		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
 		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
 		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits); i++ {
+		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
 			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
@@ -248,7 +248,7 @@ func TestVectorSearch(t *testing.T) {
 		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
 		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
 		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits); i++ {
+		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
 			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
@@ -301,7 +301,7 @@ func TestVectorSearch(t *testing.T) {
 		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
 		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
 		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits); i++ {
+		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
 			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
 			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)

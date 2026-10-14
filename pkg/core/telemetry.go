@@ -108,8 +108,9 @@ func (t *telemetry) Instance() {
 		return
 	}
 
+	indexes, _ := ListIndexMetadata()
 	traits := analytics.NewTraits().
-		Set("index_count", ZINC_INDEX_LIST.Len()).
+		Set("index_count", len(indexes)).
 		Set("total_index_size_mb", t.TotalIndexSize())
 
 	for k, v := range t.baseInfo {
@@ -150,15 +151,16 @@ func (t *telemetry) runEvents() {
 
 func (t *telemetry) TotalIndexSize() uint64 {
 	TotalIndexSize := uint64(0)
-	for _, idx := range ZINC_INDEX_LIST.List() {
-		TotalIndexSize += t.GetIndexSize(idx.GetName())
+	indexes, _ := ListIndexMetadata()
+	for _, idx := range indexes {
+		TotalIndexSize += atomic.LoadUint64(&idx.Stats.StorageSize) / 1024 / 1024
 	}
 	return TotalIndexSize
 }
 
 func (t *telemetry) GetIndexSize(indexName string) uint64 {
-	if index, ok := ZINC_INDEX_LIST.Get(indexName); ok {
-		return atomic.LoadUint64(&index.ref.Stats.StorageSize) / 1024 / 1024 // convert to MB
+	if index, err := GetIndexMetadata(indexName); err == nil {
+		return atomic.LoadUint64(&index.Stats.StorageSize) / 1024 / 1024 // convert to MB
 	}
 	return 0
 }
@@ -170,7 +172,8 @@ func (t *telemetry) HeartBeat() {
 		return
 	}
 	data := make(map[string]interface{})
-	data["index_count"] = ZINC_INDEX_LIST.Len()
+	indexes, _ := ListIndexMetadata()
+	data["index_count"] = len(indexes)
 	data["total_index_size_mb"] = t.TotalIndexSize()
 	data["memory_used_percent"] = m.UsedPercent
 	t.Event("heartbeat", data)
