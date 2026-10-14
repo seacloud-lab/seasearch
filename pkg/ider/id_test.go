@@ -16,13 +16,20 @@
 package ider
 
 import (
+	"os"
 	"testing"
+
+	"github.com/zincsearch/zincsearch/test/utils"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
-	InitIder()
+	start := func() error {
+		InitIder()
+		return nil
+	}
+	os.Exit(utils.RunMain(m, start, nil))
 }
 
 func TestGenerate(t *testing.T) {

@@ -23,14 +23,14 @@ import (
 // @Router /es/{index}/_mapping [get]
 func GetESMapping(c *gin.Context) {
 	indexName := c.Param("target")
-	index, exists := core.GetIndex(indexName)
-	if !exists {
+	index, err := core.GetIndexMetadata(indexName)
+	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
 
 	// format mappings
-	mappings := index.GetMappings()
+	mappings := index.Mappings
 
 	// NOTE: Zinc currently "converts" object array fields to "field.index.sub_field"
 	// Example Input Document:
@@ -52,7 +52,7 @@ func GetESMapping(c *gin.Context) {
 	// kept in the resulting mapping.
 	es := convertToESMapping(mappings)
 
-	zutils.GinRenderJSON(c, http.StatusOK, gin.H{index.GetName(): gin.H{"mappings": es}})
+	zutils.GinRenderJSON(c, http.StatusOK, gin.H{index.Name: gin.H{"mappings": es}})
 }
 
 // convertToESMapping converts the given Zinc mappings to the ElasticSearch representation.

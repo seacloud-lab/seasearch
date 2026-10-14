@@ -16,29 +16,33 @@
 package redo
 
 import (
-	"log"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 var l *Log
 
 func TestMain(m *testing.M) {
-	var err error
-	l, err = Open("data/redoTest", nil)
-	if err != nil {
-		log.Fatal(err)
+	start := func() error {
+		var err error
+		l, err = Open("data/redoTest", nil)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-
-	m.Run()
-
-	if err = l.Close(); err != nil {
-		log.Fatal(err)
+	stop := func() error {
+		err := l.Close()
+		if err != nil {
+			return err
+		}
+		os.RemoveAll("data")
+		return nil
 	}
-
-	os.Exit(0)
+	os.Exit(utils.RunMain(m, start, stop))
 }
 
 func TestOpenClose(t *testing.T) {

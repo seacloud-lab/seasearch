@@ -160,7 +160,7 @@ func (s *IndexShard) NewShard() error {
 	s.root.lock.Unlock()
 
 	// store update
-	if err := storeIndex(s.root); err != nil {
+	if err := IndexMgr.Store(s.root); err != nil {
 		return err
 	}
 	return nil
@@ -358,7 +358,7 @@ func (s *IndexShard) Close() error {
 		}
 		secondShard.writer = nil
 	}
-	if config.Global.EnableWal && atomic.LoadUint64(&s.open) == 1 {
+	if config.Global.EnableWal && s.wal != nil {
 		if err := s.wal.Close(); err != nil {
 			return err
 		}

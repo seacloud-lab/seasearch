@@ -22,9 +22,23 @@ import (
 	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+	"github.com/zincsearch/zincsearch/test/utils"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	start := func() error {
+		os.Setenv("SS_DATA_PATH", "./data")
+		return nil
+	}
+	stop := func() error {
+		os.RemoveAll("./data")
+		os.RemoveAll("./ss_path")
+		return nil
+	}
+	os.Exit(utils.RunMain(m, start, stop))
+}
 
 func TestConfig(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {

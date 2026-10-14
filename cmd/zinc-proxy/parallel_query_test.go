@@ -1,24 +1,30 @@
 package main
 
 import (
+	"os"
 	"testing"
+
+	"github.com/zincsearch/zincsearch/test/utils"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
-	nodeMap = &NodeMap{
-		mp: make(map[int]string),
+	start := func() error {
+		nodeMap = &NodeMap{
+			mp: make(map[int]string),
+		}
+		assignMap = &AssignMap{
+			mp: make(map[string]int),
+		}
+		return nil
 	}
-	assignMap = &AssignMap{
-		mp: make(map[string]int),
-	}
-
+	os.Exit(utils.RunMain(m, start, nil))
 }
 
 func TestQueryNodes(t *testing.T) {
 	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}}
-	assignMap.mp["0c"] = 1
+	assignMap.mp["8e"] = 1
 
 	conf.General.ParallelQueryNodeLimit = 2
 	list, err := getQueryNodes(nodes, "test_index")
@@ -33,7 +39,7 @@ func TestQueryNodes(t *testing.T) {
 
 func TestQueryNodes2(t *testing.T) {
 	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}, {id: 3}, {id: 4}}
-	assignMap.mp["0c"] = 2
+	assignMap.mp["8e"] = 2
 
 	conf.General.ParallelQueryNodeLimit = 6
 	list, err := getQueryNodes(nodes, "test_index")
@@ -50,7 +56,7 @@ func TestQueryNodes2(t *testing.T) {
 
 func TestQueryNodes3(t *testing.T) {
 	nodes := []nodeInfo{{id: 0}, {id: 1}, {id: 2}, {id: 3}, {id: 4}}
-	assignMap.mp["0c"] = 2
+	assignMap.mp["8e"] = 2
 
 	conf.General.ParallelQueryNodeLimit = 3
 	list, err := getQueryNodes(nodes, "test_index")
