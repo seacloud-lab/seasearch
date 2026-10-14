@@ -98,9 +98,10 @@ func (mgr *IndexManager) getIndex(name string) (*Index, error) {
 	return index, nil
 }
 
-// GetQueryIndex retrieves an index without checking for server assignment.
-// This is useful in parallel query where the index are already assigned to the
-// server.
+// GetQueryIndex retrieves an index without caching it or checking its server
+// assignment. It is intended for parallel queries when the index belongs to
+// another server and may therefore be updated or deleted without notifying
+// this server.
 func (mgr *IndexManager) GetQueryIndex(name string) (*Index, error) {
 	return mgr.getIndex(name)
 }
