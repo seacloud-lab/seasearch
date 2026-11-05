@@ -7,11 +7,12 @@ import (
 	"os"
 	"path"
 
-	"github.com/haiwen/goutils/objclient"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
+
+	"github.com/haiwen/goutils/objclient"
+	"github.com/rs/zerolog/log"
 )
 
 type s3Storage struct {
