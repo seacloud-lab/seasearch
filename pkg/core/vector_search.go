@@ -8,11 +8,11 @@ import (
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 )
 
 type VectorQuery struct {

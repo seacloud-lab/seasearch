@@ -11,14 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blugelabs/bluge"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+
+	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 

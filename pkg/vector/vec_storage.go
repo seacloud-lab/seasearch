@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/config"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ObjStore

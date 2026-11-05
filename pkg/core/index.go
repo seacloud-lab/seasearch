@@ -20,15 +20,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/blugelabs/bluge/analysis"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
+	"github.com/zincsearch/zincsearch/pkg/vector"
+	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/hash/rendezvous"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
+
+	"github.com/blugelabs/bluge/analysis"
+	"golang.org/x/sync/errgroup"
 )
 
 type Index struct {

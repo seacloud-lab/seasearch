@@ -8,15 +8,16 @@ import (
 	"path"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/x448/float16"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/x448/float16"
 )
 
 func makeIvfPqForTest(t *testing.T) *IvfPqIndex {
