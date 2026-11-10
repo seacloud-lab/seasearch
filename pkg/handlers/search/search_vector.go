@@ -10,6 +10,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -78,11 +79,12 @@ func VectorRecall(c *gin.Context) {
 		return
 	}
 
-	zincIndex, err := core.IndexMgr.Get(indexName)
+	zincIndex, err := store.Open(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: index %s not found: %w", indexName, err).Error()})
 		return
 	}
+	defer zincIndex.Close()
 	request := &recallRequest{
 		Nprobe:     5,
 		QueryCount: 100,
@@ -117,7 +119,7 @@ func VectorRecall(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: field %s is not vector field", fieldName).Error()})
 		return
 	}
-	recall, err := core.VectorRecall(zincIndex, fieldName, request.QueryCount, int64(request.K),
+	recall, err := core.VectorRecall(&zincIndex.Index, fieldName, request.QueryCount, int64(request.K),
 		request.Nprobe)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})

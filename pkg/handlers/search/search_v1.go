@@ -22,6 +22,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	v1 "github.com/zincsearch/zincsearch/pkg/meta/v1"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
@@ -41,11 +42,12 @@ import (
 // @Router /api/{index}/_search [post]
 func SearchV1(c *gin.Context) {
 	indexName := c.Param("target")
-	index, err := core.IndexMgr.Get(indexName)
+	index, err := store.Open(indexName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
+	defer index.Close()
 
 	iQuery := new(v1.ZincQuery)
 	iQuery.MaxResults = 10

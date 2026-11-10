@@ -27,6 +27,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
@@ -75,10 +76,11 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 	var doc map[string]interface{}
 	var err error
 	var count int64
-	newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+	newIndex, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
 		return count, err
 	}
+	defer newIndex.Close()
 
 	ops := make([]core.DocOperation, 0)
 	for scanner.Scan() { // Read each line

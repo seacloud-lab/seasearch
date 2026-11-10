@@ -19,15 +19,11 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
-	"github.com/zincsearch/zincsearch/pkg/uquery/mappings"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -51,7 +47,7 @@ func Create(c *gin.Context) {
 	indexName := c.Param("target")
 	err := CreateIndexWorker(&newIndex, indexName)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -86,7 +82,7 @@ func CreateES(c *gin.Context) {
 
 	err := CreateIndexWorker(&newIndex, indexName)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -110,47 +106,11 @@ func CreateIndexWorker(newIndex *meta.IndexSimple, indexName string) error {
 	if newIndex.Name == "" {
 		return errors.New("index.name should be not empty")
 	}
-	if !cluster.AssignCheck(newIndex.Name) {
-		return core.ErrIndexServerMismatch
-	}
-
-	if _, err := core.GetIndexMetadata(newIndex.Name); err == nil {
-		return errors.New("index [" + newIndex.Name + "] already exists")
-	} else if !errors.Is(err, zincerrors.ErrKeyNotFound) {
+	index, err := store.Create(newIndex)
+	if err != nil {
 		return err
 	}
-
-	if newIndex.Settings == nil {
-		newIndex.Settings = new(meta.IndexSettings)
-	}
-	analyzers, err := zincanalysis.RequestAnalyzer(newIndex.Settings.Analysis)
-	if err != nil {
-		return errors.New(err.Error())
-	}
-
-	mappings, err := mappings.Request(analyzers, newIndex.Mappings)
-	if err != nil {
-		return errors.New(err.Error())
-	}
-
-	index, err := core.NewIndex(newIndex.Name)
-	if err != nil {
-		return errors.New(err.Error())
-	}
-
-	// update settings
-	_ = index.SetSettings(newIndex.Settings)
-
-	// update analyzers
-	_ = index.SetAnalyzers(analyzers)
-
-	// update mappings
-	_ = index.SetMappings(mappings)
-
-	// store index
-	if err = core.IndexMgr.Store(index); err != nil {
-		return errors.New(err.Error())
-	}
+	defer index.Close()
 
 	return nil
 }

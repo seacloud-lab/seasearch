@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -115,7 +115,7 @@ func TestGet(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.IndexMgr.Delete(indexName)
+		err := store.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

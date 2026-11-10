@@ -4,14 +4,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
-
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -47,30 +45,17 @@ func DeleteByQuery(c *gin.Context) {
 	deleteIds := make([]string, len(resp.Hits.Hits))
 	failures := []string{}
 	for i, hit := range resp.Hits.Hits {
-		if config.Global.EnableWal {
-			index, err := core.IndexMgr.Get(hit.Index)
-			if err != nil {
-				failures = append(failures, hit.ID)
-				continue
-			}
-			err = index.DeleteDocument(hit.ID)
-			if err != nil {
-				failures = append(failures, hit.ID)
-			}
-		} else {
-			deleteIds[i] = hit.ID
-		}
+		deleteIds[i] = hit.ID
 	}
-	if !config.Global.EnableWal {
-		index, err := core.IndexMgr.Get(indexName)
-		if err == nil {
-			err = index.DeleteDocuments(deleteIds)
-		}
-		if err != nil {
-			log.Error().Err(err).Msg("delete index failed")
-			// mark all deletes are failed
-			failures = deleteIds
-		}
+	index, err := store.Open(indexName)
+	if err == nil {
+		defer index.Close()
+		err = index.DeleteDocuments(deleteIds)
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("delete index failed")
+		// mark all deletes are failed
+		failures = deleteIds
 	}
 
 	totalDeletes := resp.Hits.Total.Value - len(failures)

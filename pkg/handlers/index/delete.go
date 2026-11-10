@@ -24,6 +24,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 )
 
 // Delete deletes a zinc index and its associated data.
@@ -61,7 +62,7 @@ func Delete(c *gin.Context) {
 			}
 			continue
 		}
-		if err := core.IndexMgr.Delete(indexName); err != nil {
+		if err := store.Delete(indexName); err != nil {
 			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -89,7 +90,7 @@ func deleteIndexWithWildcard(indexName string, indexList []string) error {
 
 	for _, name := range indexList {
 		if p.MatchString(name) {
-			if err := core.IndexMgr.Delete(name); err != nil {
+			if err := store.Delete(name); err != nil {
 				return err
 			}
 		}

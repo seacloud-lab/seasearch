@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -13,11 +14,13 @@ func SealVectorIndex(c *gin.Context) {
 	indexName := c.Param("target")
 	fieldName := c.Param("field")
 
-	index, err := core.IndexMgr.Get(indexName)
+	index, err := store.Open(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not exists"})
 		return
 	}
+	defer index.Close()
+
 	mp := index.GetMappings()
 	prop, ok := mp.Properties[fieldName]
 	if !ok || prop.Type != "vector" {

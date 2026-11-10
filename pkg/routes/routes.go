@@ -108,7 +108,6 @@ func SetRoutes(r *gin.Engine) {
 	r.DELETE("/api/index/:target", AuthMiddleware("index.Delete"), ClusterMiddleware, index.Delete)
 	r.GET("/api/index/:target", AuthMiddleware("index.Get"), ClusterMiddleware, index.Get)
 	r.HEAD("/api/index/:target", AuthMiddleware("index.Exists"), index.Exists)
-	r.POST("/api/index/:target/refresh", AuthMiddleware("index.Refresh"), ClusterMiddleware, index.Refresh)
 	// index settings
 	r.GET("/api/:target/_mapping", AuthMiddleware("index.GetMapping"), ClusterMiddleware, index.GetMapping)
 	r.PUT("/api/:target/_mapping", AuthMiddleware("index.SetMapping"), ClusterMiddleware, index.SetMapping)
@@ -193,7 +192,6 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/es/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, document.ESBulk)
 	r.POST("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
 	r.PUT("/es/:target/_bulk", AuthMiddleware("document.ESBulk"), ESMiddleware, ClusterMiddleware, document.ESBulk)
-	r.POST("/es/:target/_refresh", AuthMiddleware("index.Refresh"), ClusterMiddleware, index.Refresh)
 	// ES Document
 	r.POST("/es/:target/_doc", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)        // create
 	r.PUT("/es/:target/_doc/:id", AuthMiddleware("document.CreateUpdate"), ESMiddleware, ClusterMiddleware, document.CreateUpdate)     // create or update

@@ -23,6 +23,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -283,6 +284,6 @@ func newIndex(t *testing.T, indexName string) (*core.Index, func()) {
 	return index, func() {
 		require.NoError(t, metadata.Alias.Set(map[string][]string{}))
 		core.ZINC_INDEX_ALIAS_LIST = *core.NewAliasList()
-		require.NoError(t, core.IndexMgr.Delete(indexName))
+		require.NoError(t, store.Delete(indexName))
 	}
 }

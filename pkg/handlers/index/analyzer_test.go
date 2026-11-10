@@ -25,6 +25,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
@@ -270,7 +271,7 @@ func TestAnalyze(t *testing.T) {
 	}
 
 	t.Run("cleanup", func(t *testing.T) {
-		err := core.IndexMgr.Delete(indexName)
+		err := store.Delete(indexName)
 		assert.NoError(t, err)
 	})
 }

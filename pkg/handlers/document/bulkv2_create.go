@@ -20,6 +20,7 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
+	"github.com/zincsearch/zincsearch/pkg/store"
 
 	"github.com/gin-gonic/gin"
 
@@ -75,10 +76,11 @@ func Bulkv2(c *gin.Context) {
 func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 	var err error
 	var count int64
-	newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+	newIndex, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
 		return count, err
 	}
+	defer newIndex.Close()
 	ops := make([]core.DocOperation, 0)
 	for _, doc := range body.Records { // Read each line
 		update := false

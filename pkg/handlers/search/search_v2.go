@@ -26,6 +26,7 @@ import (
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
@@ -65,6 +66,7 @@ func SearchDSL(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
 		}
 		errors.HandleError(c, err)
 		return
@@ -72,8 +74,9 @@ func SearchDSL(c *gin.Context) {
 
 	if indexName != "" {
 		// TODO: adapt this to allow strings.Split(indexName, ",") slice
-		idx, err := core.IndexMgr.Get(indexName)
+		idx, err := store.Open(indexName)
 		if err == nil {
+			defer idx.Close()
 			storageSize := idx.GetStats().StorageSize
 			eventData := make(map[string]interface{})
 			eventData["search_type"] = "query_dsl"
@@ -201,18 +204,19 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	var err error
 	var resp *meta.SearchResponse
 	if indexName == "" || strings.HasSuffix(indexName, "*") || strings.HasPrefix(indexName, "*") || len(indexNames) > 1 {
-		resp, err = core.MultiSearch(indexNames, query)
+		resp, err = store.MultiSearch(indexNames, query)
 	} else {
 		if !cluster.AssignCheck(indexName) {
 			return nil, core.ErrIndexServerMismatch
 		}
-		index, loadErr := core.IndexMgr.Get(indexName)
+		index, loadErr := store.Open(indexName)
 		if loadErr != nil {
-			if errors.Is(loadErr, core.ErrIndexNotFound) {
+			if errors.Is(loadErr, store.ErrIndexNotFound) {
 				loadErr = errors.ErrKeyNotFound
 			}
 			return nil, fmt.Errorf("index %s does not exists: %w", indexName, loadErr)
 		}
+		defer index.Close()
 		resp, err = index.Search(query)
 	}
 	return resp, err
@@ -243,6 +247,10 @@ func UnifiedSearch(c *gin.Context) {
 	IndexList := make([]string, 0, len(req.IndexQueries))
 	var query *meta.ZincQuery
 	for _, q := range req.IndexQueries {
+		if q.Index == "" {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index"})
+			return
+		}
 		if q.Query == nil {
 			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require query"})
 			return
@@ -253,7 +261,7 @@ func UnifiedSearch(c *gin.Context) {
 		IndexList = append(IndexList, q.Index)
 	}
 
-	stats, err := core.QueryStatsInfo(IndexList, query)
+	stats, err := store.QueryStatsInfo(IndexList, query)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -270,11 +278,14 @@ func UnifiedSearch(c *gin.Context) {
 	for _, q := range req.IndexQueries {
 		q := q
 		eg.Go(func() error {
-			index, loadErr := core.IndexMgr.Get(q.Index)
-			// some index not exists, we ignore
-			if loadErr != nil {
+			index, loadErr := store.Open(q.Index)
+			// Missing indexes may disappear between statistics and execution.
+			if errors.Is(loadErr, store.ErrIndexNotFound) {
 				return nil
+			} else if loadErr != nil {
+				return loadErr
 			}
+			defer index.Close()
 			res, err := index.SearchWithStats(q.Query, stats)
 			if err != nil {
 				return err
@@ -306,8 +317,8 @@ func UnifiedSearch(c *gin.Context) {
 }
 
 type InternalUnifiedSearchRequest struct {
-	Stats        *zincsearch.UnifiedStats `json:"stats"`
-	IndexQueries []core.IndexQueryRequest `json:"index_queries"`
+	Stats        *zincsearch.UnifiedStats  `json:"stats"`
+	IndexQueries []store.IndexQueryRequest `json:"index_queries"`
 }
 
 // InternalUnifiedSearch performs a unified search using the provided statistics information.
@@ -321,24 +332,34 @@ func InternalUnifiedSearch(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	var query *meta.ZincQuery
-	for _, q := range request.IndexQueries {
-		query = q.Query
-		break
+	if len(request.IndexQueries) == 0 {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "No index is specified."})
+		return
 	}
+	for _, q := range request.IndexQueries {
+		if q.Index == "" {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require index"})
+			return
+		}
+		if q.Query == nil {
+			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "require query"})
+			return
+		}
+	}
+	query := request.IndexQueries[0].Query
 
 	// There is no statistical information, it means
 	// the query is only executed on the current node.
 	// We need collect local stats info
 	if request.Stats == nil {
 		var err error
-		indexMp := make(core.PartialIndexes)
+		indexMp := make(store.PartialIndexes)
 		for _, idx := range request.IndexQueries {
 			indexMp[idx.Index] = idx.SecondShardId
 		}
-		request.Stats, err = core.QueryStatsInfoWithSecondShardIds(indexMp, query)
+		request.Stats, err = store.QueryStatsInfoWithSecondShardIds(indexMp, query)
 		if err != nil {
-			if errors.Is(err, core.ErrIndexNotFound) {
+			if errors.Is(err, store.ErrIndexNotFound) {
 				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
 				return
 			}
@@ -354,20 +375,14 @@ func InternalUnifiedSearch(c *gin.Context) {
 	var eg errgroup.Group
 	eg.SetLimit(config.Global.Shard.GoroutineNum)
 	for _, indexReq := range request.IndexQueries {
-		index, err := core.IndexMgr.GetQueryIndex(indexReq.Index)
-		if err != nil {
-			if errors.Is(err, core.ErrIndexNotFound) {
-				zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
-				return
-			}
-			log.Err(err).Msgf("get local index metadata err: ")
-			zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		secondIds := indexReq.SecondShardId
-		q := indexReq.Query
+		indexReq := indexReq
 		eg.Go(func() error {
-			res, err := index.PartialSearch(secondIds, q, request.Stats)
+			index, err := store.GetQueryIndex(indexReq.Index)
+			if err != nil {
+				return err
+			}
+			defer index.Close()
+			res, err := index.PartialSearch(indexReq.SecondShardId, indexReq.Query, request.Stats)
 			if err != nil {
 				return err
 			}
@@ -402,20 +417,20 @@ func InternalUnifiedSearch(c *gin.Context) {
 }
 
 type InternalQueryStatsRequest struct {
-	IndexList core.PartialIndexes `json:"index_list"`
-	Query     *meta.ZincQuery     `json:"Query"`
+	IndexList store.PartialIndexes `json:"index_list"`
+	Query     *meta.ZincQuery      `json:"Query"`
 }
 
 // InternalQueryStats collects statistical information from the local node based on the provided query.
 // If the input index does not include any secondary shard IDs, statistics for the entire index are collected.
 // It's called by SeaSearch proxy to implement parallel unified search.
 func InternalQueryStats(c *gin.Context) {
-	var req *InternalQueryStatsRequest
+	var req InternalQueryStatsRequest
 	if err := zutils.GinBindJSON(c, &req); err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	stats, err := core.QueryStatsInfoWithSecondShardIds(req.IndexList, req.Query)
+	stats, err := store.QueryStatsInfoWithSecondShardIds(req.IndexList, req.Query)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -176,7 +177,7 @@ func TestSettings(t *testing.T) {
 
 	t.Run("delete index", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			_ = core.IndexMgr.Delete(fmt.Sprintf("TestSettings.index_%d", i))
+			_ = store.Delete(fmt.Sprintf("TestSettings.index_%d", i))
 		}
 	})
 }

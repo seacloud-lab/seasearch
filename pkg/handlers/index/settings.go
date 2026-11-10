@@ -22,8 +22,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -82,47 +83,31 @@ func SetSettings(c *gin.Context) {
 		return
 	}
 
-	analyzers, err := zincanalysis.RequestAnalyzer(settings.Analysis)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
-	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
-			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+	index, err := store.Create(&meta.IndexSimple{Name: indexName, Settings: settings})
+	if errors.Is(err, store.ErrIndexAlreadyExists) {
+		analysis := settings.Analysis
+		if analysis != nil && (len(analysis.Analyzer) > 0 || len(analysis.CharFilter) > 0 ||
+			len(analysis.Tokenizer) > 0 || len(analysis.TokenFilter) > 0 || len(analysis.Filter) > 0) {
+			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "can't update analysis for existing index"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	if exists {
-		if settings.Analysis != nil && len(settings.Analysis.Analyzer) > 0 {
-			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "can't update analyzer for existing index"})
-			return
-		}
-		// store index
-		if err := core.IndexMgr.Store(index); err != nil {
-			c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-
 		c.JSON(http.StatusOK, meta.HTTPResponse{Message: "ok"})
 		return
 	}
-
-	// update settings
-	_ = index.SetSettings(settings)
-
-	// update analyzers
-	_ = index.SetAnalyzers(analyzers)
-
-	// store index
-	if err := core.IndexMgr.Store(index); err != nil {
-		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+	if err != nil {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
+			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+			return
+		}
+		code := http.StatusInternalServerError
+		var configErr *zincerrors.Error
+		if errors.As(err, &configErr) {
+			code = http.StatusBadRequest
+		}
+		c.JSON(code, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+	defer index.Close()
 
 	c.JSON(http.StatusOK, meta.HTTPResponse{Message: "ok"})
 }

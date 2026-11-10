@@ -30,6 +30,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
@@ -172,10 +173,11 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					})
 				default:
 				}
-				newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+				newIndex, _, err := store.OpenOrCreate(indexName)
 				if err != nil {
 					return bulkRes, err
 				}
+				defer newIndex.Close()
 				err = newIndex.CreateDocument(docID, doc, update)
 				if err != nil {
 					return bulkRes, err
@@ -235,10 +237,11 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					}
 
 					if config.Global.EnableWal {
-						newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+						newIndex, _, err := store.OpenOrCreate(indexName)
 						if err != nil {
 							return bulkRes, err
 						}
+						defer newIndex.Close()
 						// delete
 						err = newIndex.DeleteDocument(docID)
 						bulkRes.Count++
@@ -266,10 +269,11 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 	if !config.Global.EnableWal {
 		for indexName, ids := range indexDelDocMap {
-			newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+			newIndex, _, err := store.OpenOrCreate(indexName)
 			if err != nil {
 				return bulkRes, err
 			}
+			defer newIndex.Close()
 			for _, id := range ids {
 				bulkRes.Count++
 				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
@@ -282,10 +286,11 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			}
 		}
 		for indexName, ops := range indexDocMap {
-			newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+			newIndex, _, err := store.OpenOrCreate(indexName)
 			if err != nil {
 				return bulkRes, err
 			}
+			defer newIndex.Close()
 			for _, op := range ops {
 				bulkRes.Count++
 				if op.Update {

@@ -24,6 +24,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -62,7 +63,7 @@ func CreateUpdate(c *gin.Context) {
 	}
 
 	// If the index does not exist, then create it
-	index, _, err := core.IndexMgr.GetOrCreate(indexName)
+	index, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
 		if errors.Is(err, core.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
@@ -71,6 +72,7 @@ func CreateUpdate(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+	defer index.Close()
 
 	err = index.CreateDocument(docID, doc, update)
 	if err != nil {

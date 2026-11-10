@@ -11,6 +11,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -131,7 +132,7 @@ func TestDeleteByQuery(t *testing.T) {
 				assertHTTPResponse(t, w, test.want.failure.statusCode, test.want.failure.body)
 			}
 
-			assert.NoError(t, core.IndexMgr.Delete(index.GetName()))
+			assert.NoError(t, store.Delete(index.GetName()))
 		})
 
 	}

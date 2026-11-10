@@ -20,10 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/test/utils"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDelete(t *testing.T) {
@@ -113,12 +112,4 @@ func TestDelete(t *testing.T) {
 			assert.Contains(t, w.Body.String(), tt.args.result)
 		})
 	}
-
-	t.Run("cleanup", func(t *testing.T) {
-		idx, err := core.IndexMgr.Get(indexName)
-		assert.Nil(t, err)
-		assert.NoError(t, idx.Close())
-		err = core.IndexMgr.Delete(indexName)
-		assert.NoError(t, err)
-	})
 }
