@@ -3,7 +3,7 @@ package text
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/vector"
@@ -38,7 +38,7 @@ func (s *IndexShard) ExecuteBatches(batches map[int64]*PreparedBatch, result *Sh
 	for id := range batches {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	var writeErr error
 	for _, id := range ids {
 		batch := batches[id]
@@ -62,19 +62,21 @@ func (s *IndexShard) ExecuteBatches(batches map[int64]*PreparedBatch, result *Sh
 		// not promise rollback. Wider time bounds are safe; narrower bounds could
 		// hide a partially committed document from time-filtered queries.
 		second.Timestamps = append(second.Timestamps, batch.Timestamps...)
-		if err := writer.Batch(batch.Batch); err != nil {
+		err = writer.Batch(batch.Batch)
+		if err != nil {
 			writeErr = fmt.Errorf("write shard %s/%d: %w", s.name, target, err)
 			break
 		}
 		if id == ShardIDNeedUpdate && batch.DeleteOperations > 0 {
-			for old := int64(0); old < target; old++ {
+			for old := range target {
 				writer, err := s.GetWriter(old)
 				if err != nil {
 					writeErr = err
 					break
 				}
 				result.second(old)
-				if err := writer.Batch(batch.DeleteOthers); err != nil {
+				err = writer.Batch(batch.DeleteOthers)
+				if err != nil {
 					writeErr = fmt.Errorf("delete old copies in shard %s/%d: %w", s.name, old, err)
 					break
 				}
@@ -112,8 +114,9 @@ func (s *IndexShard) ExecuteBatches(batches map[int64]*PreparedBatch, result *Sh
 		if countErr == nil {
 			second.DocNum = count
 		}
-		if err := errors.Join(countErr, reader.Close()); err != nil {
-			errs = append(errs, fmt.Errorf("read shard %s/%d statistics: %w", s.name, id, err))
+		reader.Close()
+		if countErr != nil {
+			errs = append(errs, fmt.Errorf("read shard %s/%d statistics: %w", s.name, id, countErr))
 		}
 	}
 	return errors.Join(errs...)
@@ -130,11 +133,13 @@ func (r *ShardWriteResult) second(id int64) *SecondWriteResult {
 }
 
 // AppendShard publishes a new empty runtime shard and its borrowed metadata
-// together. The store must hold mu exclusively and mark metadata dirty first.
+// together. The store must hold its Index metadata mutex exclusively and mark
+// metadata dirty first.
 // No Writer is opened and no persistence is performed here.
 func (s *IndexShard) AppendShard(ref *meta.IndexShard) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
 	if s.closed {
 		return ErrClosed
 	}

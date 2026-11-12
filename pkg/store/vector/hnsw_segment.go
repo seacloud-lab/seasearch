@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/flex"
 
 	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 	usearch "github.com/unum-cloud/usearch/golang"
 	"golang.org/x/time/rate"
 )
@@ -78,27 +78,29 @@ func newHNSWSegment(store string, dimensions int, resources *resources) *HNSWSeg
 	return &seg
 }
 
-func (seg *HNSWSegment) Close() error {
+func (seg *HNSWSegment) Close() {
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
+
 	if seg.closed {
-		return nil
+		return
 	}
 	seg.closed = true
-	return seg.closeLocked()
+	seg.closeResources()
 }
 
-func (seg *HNSWSegment) closeLocked() error {
-	var errs []error
+// closeResources closes storage and native resources and resets the loaded view,
+// allowing a later operation to reload unless Close has marked the segment closed.
+// The caller must hold seg.mutex's write lock; this helper does not acquire it.
+func (seg *HNSWSegment) closeResources() {
 	if seg.index != nil {
-		if err := seg.index.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close USearch index: %w", err))
-		}
+		seg.index.Close()
 		seg.index = nil
 	}
 	if seg.writer != nil {
-		if err := seg.writer.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close stored-vector Writer: %w", err))
+		err := seg.writer.Close()
+		if err != nil {
+			log.Warn().Err(err).Str("store", seg.store).Msg("failed to close HNSW stored-vector Writer")
 		}
 		seg.writer = nil
 	}
@@ -108,11 +110,11 @@ func (seg *HNSWSegment) closeLocked() error {
 	seg.cache.docIDIndex = make(map[int64]int)
 	seg.docTS = make(map[int64]int64)
 	seg.hnswLogID, seg.latestLogID = 0, 0
-	return errors.Join(errs...)
 }
 
 func (seg *HNSWSegment) load(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 	if seg.loaded.Load() {
@@ -152,24 +154,29 @@ func (seg *HNSWSegment) load(ctx context.Context) error {
 
 	reader, err := seg.writer.Reader()
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to get reader: %w", err), seg.closeLocked())
+		seg.closeResources()
+		return fmt.Errorf("failed to get reader: %w", err)
 	}
 
 	err = seg.loadLogIDs(ctx, reader)
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to load log ids: %w", err), reader.Close(), seg.closeLocked())
+		reader.Close()
+		seg.closeResources()
+		return fmt.Errorf("failed to load log ids: %w", err)
 	}
 	err = seg.loadLogs(ctx, reader)
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to load logs: %w", err), reader.Close(), seg.closeLocked())
+		reader.Close()
+		seg.closeResources()
+		return fmt.Errorf("failed to load logs: %w", err)
 	}
 	err = seg.loadHNSW()
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to load hnsw: %w", err), reader.Close(), seg.closeLocked())
+		reader.Close()
+		seg.closeResources()
+		return fmt.Errorf("failed to load hnsw: %w", err)
 	}
-	if err := reader.Close(); err != nil {
-		return errors.Join(err, seg.closeLocked())
-	}
+	reader.Close()
 
 	seg.loaded.Store(true)
 
@@ -335,14 +342,16 @@ func (seg *HNSWSegment) Batch(ctx context.Context, addIDs []int64, vectors [][]f
 	if err != nil {
 		return 0, err
 	}
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return 0, err
 	}
 	err = seg.writer.Batch(batch)
 	if err != nil {
 		// The commit outcome is uncertain. Discard the in-memory view so a later
 		// operation reloads committed logs rather than serving a known stale cache.
-		return 0, errors.Join(fmt.Errorf("failed to write bluge batch: %w", err), seg.closeLocked())
+		seg.closeResources()
+		return 0, fmt.Errorf("failed to write bluge batch: %w", err)
 	}
 
 	seg.latestLogID = latestLogID
@@ -433,7 +442,8 @@ func (seg *HNSWSegment) NeedRebuildHNSW(ctx context.Context) (bool, error) {
 // Count reads the logical view (snapshot plus unapplied logs), including after
 // reloading an uncertain Batch outcome. It does not modify Index metadata.
 func (seg *HNSWSegment) Count(ctx context.Context) (int64, error) {
-	if err := seg.load(ctx); err != nil {
+	err := seg.load(ctx)
+	if err != nil {
 		return 0, err
 	}
 	seg.mutex.RLock()
@@ -448,7 +458,8 @@ func (seg *HNSWSegment) Count(ctx context.Context) (int64, error) {
 	}
 	count += int64(size)
 	for id := range seg.docTS {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return 0, err
 		}
 		exists, err := seg.index.Contains(usearch.Key(id))
@@ -487,10 +498,11 @@ func (seg *HNSWSegment) BuildHNSW(ctx context.Context) error {
 func (seg *HNSWSegment) failMaintenance(err error) error {
 	seg.mutex.Lock()
 	defer seg.mutex.Unlock()
-	return errors.Join(err, seg.closeLocked())
+	seg.closeResources()
+	return err
 }
 
-func (seg *HNSWSegment) applyLogs(ctx context.Context) (logID int64, err error) {
+func (seg *HNSWSegment) applyLogs(ctx context.Context) (int64, error) {
 	seg.mutex.RLock()
 	writer := seg.writer
 	reader, err := writer.Reader()
@@ -499,7 +511,7 @@ func (seg *HNSWSegment) applyLogs(ctx context.Context) (logID int64, err error) 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get reader: %w", err)
 	}
-	defer func() { err = errors.Join(err, reader.Close()) }()
+	defer reader.Close()
 
 	batch := bluge.NewBatch()
 	logs := make(map[int64]HNSWLogRow)
@@ -537,21 +549,14 @@ func (seg *HNSWSegment) applyLogs(ctx context.Context) (logID int64, err error) 
 	return latestLogID, nil
 }
 
-func (seg *HNSWSegment) buildHNSW(ctx context.Context) (result *usearch.Index, err error) {
+func (seg *HNSWSegment) buildHNSW(ctx context.Context) (*usearch.Index, error) {
 	seg.mutex.Lock()
 	reader, err := seg.writer.Reader()
 	seg.mutex.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get reader: %w", err)
 	}
-	defer func() {
-		err = errors.Join(err, reader.Close())
-		// A cleanup error after upload must not leak the uninstalled candidate.
-		if err != nil && result != nil {
-			err = errors.Join(err, result.Close())
-			result = nil
-		}
-	}()
+	defer reader.Close()
 
 	closeIndex := true
 	index, err := seg.newIndex()
@@ -560,7 +565,7 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (result *usearch.Index, e
 	}
 	defer func() {
 		if closeIndex {
-			err = errors.Join(err, index.Close())
+			index.Close()
 		}
 	}()
 
@@ -580,7 +585,8 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (result *usearch.Index, e
 	// set must be read from "doc/" here.
 	it := seg.readHNSWDocRows(ctx, reader)
 	for row := range it.Range() {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return nil, err
 		}
 		err = index.Add(usearch.Key(row.ID), row.Vector)
@@ -596,15 +602,14 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (result *usearch.Index, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
-	if err := file.Close(); err != nil {
-		return nil, errors.Join(err, removeMaintenanceFile(file.Name()))
-	}
-	defer func() { err = errors.Join(err, removeMaintenanceFile(file.Name())) }()
+	file.Close()
+	defer removeMaintenanceFile(file.Name())
 	err = index.Save(file.Name())
 	if err != nil {
 		return nil, fmt.Errorf("failed to save index: %w", err)
 	}
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	err = seg.resources.storage.SaveFile(file.Name(), path.Join(seg.store, "0000", "hnsw"))
@@ -616,10 +621,10 @@ func (seg *HNSWSegment) buildHNSW(ctx context.Context) (result *usearch.Index, e
 	return index, nil
 }
 
-func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usearch.Index) (err error) {
+func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usearch.Index) error {
 	defer func() {
 		if index != nil {
-			err = errors.Join(err, index.Close())
+			index.Close()
 		}
 	}()
 
@@ -630,7 +635,7 @@ func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usear
 	if err != nil {
 		return fmt.Errorf("failed to get reader: %w", err)
 	}
-	defer func() { err = errors.Join(err, reader.Close()) }()
+	defer reader.Close()
 
 	batch := bluge.NewBatch()
 	docs := make(map[int64]struct{})
@@ -671,13 +676,13 @@ func (seg *HNSWSegment) cleanLogs(ctx context.Context, logID int64, index *usear
 		}
 	}
 	if seg.index != nil {
-		err = errors.Join(err, seg.index.Close())
+		seg.index.Close()
 	}
 	seg.index = index
 	index = nil
 	seg.mutex.Unlock()
 
-	return err
+	return nil
 }
 
 func (seg *HNSWSegment) Search(ctx context.Context, query []float32, k int64) ([]int64, []float32, error) {

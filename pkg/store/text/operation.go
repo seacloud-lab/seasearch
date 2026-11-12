@@ -3,11 +3,12 @@ package text
 import (
 	"fmt"
 
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/vector"
+
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	blugeindex "github.com/blugelabs/bluge/index"
-	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/vector"
 )
 
 const (
@@ -82,7 +83,10 @@ func PrepareBatches(indexName string, mappings *meta.Mappings, analyzers map[str
 		op := merged.last
 		prepared := result[op.ShardID]
 		if prepared == nil {
-			prepared = &PreparedBatch{Batch: blugeindex.NewBatch(), DeleteOthers: blugeindex.NewBatch()}
+			prepared = &PreparedBatch{
+				Batch:        blugeindex.NewBatch(),
+				DeleteOthers: blugeindex.NewBatch(),
+			}
 			result[op.ShardID] = prepared
 		}
 		action := mergedAction(merged.first, op.Action)
@@ -117,11 +121,22 @@ func PrepareBatches(indexName string, mappings *meta.Mappings, analyzers map[str
 		}
 		if action == vector.Delete {
 			for field := range vectorFields {
-				prepared.Vectors = append(prepared.Vectors, &vector.VecAction{DocId: op.DocID, Action: action, Index: indexName, Field: field})
+				prepared.Vectors = append(prepared.Vectors, &vector.VecAction{
+					DocId:  op.DocID,
+					Action: action,
+					Index:  indexName,
+					Field:  field,
+				})
 			}
 		} else {
 			for field, value := range vectors {
-				prepared.Vectors = append(prepared.Vectors, &vector.VecAction{DocId: op.DocID, Action: action, Index: indexName, Field: field, Vector: value})
+				prepared.Vectors = append(prepared.Vectors, &vector.VecAction{
+					DocId:  op.DocID,
+					Action: action,
+					Index:  indexName,
+					Field:  field,
+					Vector: value,
+				})
 			}
 		}
 	}

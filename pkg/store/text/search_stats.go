@@ -3,13 +3,70 @@ package text
 import (
 	"context"
 	"encoding/base64"
-	"errors"
+
+	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
+	"github.com/zincsearch/zincsearch/pkg/uquery/query"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/search"
 	segment "github.com/blugelabs/bluge_segment_api"
-	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 )
+
+// CollectStats consumes and closes all searchers, including on error. The caller
+// holds the Index reference and metadata protection until this function returns.
+func CollectStats(ctx context.Context, searchers []*SimpleSearcher, terms []query.Term) (*zincsearch.UnifiedStats, error) {
+	defer func() {
+		for _, searcher := range searchers {
+			searcher.Close()
+		}
+	}()
+	result := &zincsearch.UnifiedStats{FieldStats: make(map[string]*zincsearch.FieldStats)}
+	// Count each term once even when it occurs multiple times in the query.
+	fields := make(map[string]map[string][]byte)
+	for _, term := range terms {
+		if fields[term.Field] == nil {
+			fields[term.Field] = make(map[string][]byte)
+		}
+		fields[term.Field][base64.StdEncoding.EncodeToString(term.Value)] = term.Value
+	}
+	for _, searcher := range searchers {
+		reader, openErr := searcher.getReader(ctx)
+		if openErr != nil {
+			return nil, openErr
+		}
+		if reader != nil {
+			for field, values := range fields {
+				err := ctx.Err()
+				if err != nil {
+					return nil, err
+				}
+				stats, err := reader.GetUnderlyingReader().CollectionStats(field)
+				if err != nil {
+					return nil, err
+				}
+				fieldStats := &zincsearch.FieldStats{
+					Field:     field,
+					TermStats: make(map[string]*zincsearch.TermStats),
+				}
+				fieldStats.Merge(stats)
+				for key, value := range values {
+					err := ctx.Err()
+					if err != nil {
+						return nil, err
+					}
+					freq, err := reader.GetUnderlyingReader().GetDocumentFreq(value, field, true, true, false)
+					if err != nil {
+						return nil, err
+					}
+					fieldStats.TermStats[key] = &zincsearch.TermStats{Value: key, Freq: freq}
+				}
+				result.MergeField(fieldStats)
+			}
+		}
+		searcher.Close()
+	}
+	return result, ctx.Err()
+}
 
 // UnifiedSearcher owns base and borrows immutable statistics for one request.
 // Close the wrapper, not base or its Reader, before releasing the Index.
@@ -25,7 +82,7 @@ func NewUnifiedSearcher(base *SimpleSearcher, stats *zincsearch.UnifiedStats) *U
 func (s *UnifiedSearcher) Search(ctx context.Context, req bluge.SearchRequest) (iterator search.DocumentMatchIterator, err error) {
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, s.Close())
+			s.Close()
 		}
 	}()
 	reader, err := s.base.getReader(ctx)
@@ -47,7 +104,8 @@ func (s *UnifiedSearcher) Search(ctx context.Context, req bluge.SearchRequest) (
 	collector := req.Collector()
 	memNeeded := bluge.MemNeededForSearch(searcher, collector)
 	if cfg.SearchStartFunc != nil {
-		if err := cfg.SearchStartFunc(memNeeded); err != nil {
+		err = cfg.SearchStartFunc(memNeeded)
+		if err != nil {
 			return nil, err
 		}
 	}

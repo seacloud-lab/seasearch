@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/blugelabs/bluge"
-	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
+
+	"github.com/blugelabs/bluge"
+	"github.com/blugelabs/bluge/analysis"
 )
 
 // Document is request-owned normalized data. It contains no borrowed metadata.
 // Timestamp is in nanoseconds, and Fields excludes operation control fields.
 type Document struct {
-	Fields    map[string]interface{}
-	Source    map[string]interface{}
+	Fields    map[string]any
+	Source    map[string]any
 	Timestamp int64
 }
 
@@ -38,7 +39,7 @@ func BuildDocument(indexName, docID string, doc *Document, mappings *meta.Mappin
 			continue
 		}
 		if prop.Type == "vector" {
-			values, ok := value.([]interface{})
+			values, ok := value.([]any)
 			if !ok || len(values) != prop.Dims {
 				return nil, nil, fmt.Errorf("invalid prepared vector field %s", key)
 			}
@@ -53,14 +54,18 @@ func BuildDocument(indexName, docID string, doc *Document, mappings *meta.Mappin
 			vectors[key] = vector
 			continue
 		}
-		if values, ok := value.([]interface{}); ok {
+		if values, ok := value.([]any); ok {
 			for _, value := range values {
-				if err := buildField(mappings, analyzers, bdoc, key, value); err != nil {
+				err := buildField(mappings, analyzers, bdoc, key, value)
+				if err != nil {
 					return nil, nil, err
 				}
 			}
-		} else if err := buildField(mappings, analyzers, bdoc, key, value); err != nil {
-			return nil, nil, err
+		} else {
+			err := buildField(mappings, analyzers, bdoc, key, value)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	source, err := json.Marshal(doc.Source)
@@ -73,7 +78,7 @@ func BuildDocument(indexName, docID string, doc *Document, mappings *meta.Mappin
 	return bdoc, vectors, nil
 }
 
-func buildField(mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer, bdoc *bluge.Document, key string, value interface{}) error {
+func buildField(mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer, bdoc *bluge.Document, key string, value any) error {
 	prop, _ := mappings.GetProperty(key)
 	var field *bluge.TermField
 	switch prop.Type {
@@ -129,7 +134,8 @@ func buildField(mappings *meta.Mappings, analyzers map[string]*analysis.Analyzer
 	}
 	bdoc.AddField(field)
 	for subfield := range prop.Fields {
-		if err := buildField(mappings, analyzers, bdoc, key+"."+subfield, value); err != nil {
+		err := buildField(mappings, analyzers, bdoc, key+"."+subfield, value)
+		if err != nil {
 			return err
 		}
 	}

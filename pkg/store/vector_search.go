@@ -13,18 +13,19 @@ import (
 	storevector "github.com/zincsearch/zincsearch/pkg/store/vector"
 	"github.com/zincsearch/zincsearch/pkg/uquery/fields"
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 )
 
 // VectorQuery preserves the vector API's wire format without depending on the
 // legacy core runtime. The query and its nested values are request-exclusive.
 type VectorQuery struct {
-	ReturnFields interface{} `json:"return_fields"`
-	QueryField   string      `json:"query_field"`
-	Vector       []float32   `json:"vector"`
-	K            int         `json:"k"`
-	Nprobe       int         `json:"nprobe"` // Used only by IVFPQ.
-	Source       interface{} `json:"_source"`
-	FilterQuery  interface{} `json:"filter_query"`
+	ReturnFields any       `json:"return_fields"`
+	QueryField   string    `json:"query_field"`
+	Vector       []float32 `json:"vector"`
+	K            int       `json:"k"`
+	Nprobe       int       `json:"nprobe"` // Used only by IVFPQ.
+	Source       any       `json:"_source"`
+	FilterQuery  any       `json:"filter_query"`
 }
 
 type vectorCandidate struct {
@@ -37,12 +38,15 @@ type vectorCandidate struct {
 // filtering, native work, document retrieval and Reader cleanup. Cancellation
 // never releases protection before all internal work has actually returned.
 func (index *Index) VectorSearch(ctx context.Context, query *VectorQuery) (*meta.SearchResponse, error) {
-	if err := validateVectorQuery(ctx, query); err != nil {
+	err := validateVectorQuery(ctx, query)
+	if err != nil {
 		return nil, err
 	}
-	index.mu.RLock()
-	defer index.mu.RUnlock()
-	return vectorSearchLocked(ctx, []*Index{index}, query)
+
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
+	return vectorSearch(ctx, []*Index{index}, query)
 }
 
 // MultiVectorSearch matches owner names using the same rules as MultiSearch.
@@ -50,14 +54,16 @@ func (index *Index) VectorSearch(ctx context.Context, query *VectorQuery) (*meta
 // order, and releases them only after every Reader and native operation ends.
 // Callers must not hold a same-name Index reference while invoking this entry.
 func MultiVectorSearch(ctx context.Context, indexNames []string, query *VectorQuery) (*meta.SearchResponse, error) {
-	if err := validateVectorQuery(ctx, query); err != nil {
+	err := validateVectorQuery(ctx, query)
+	if err != nil {
 		return nil, err
 	}
 	names, err := matchedIndexNames(indexNames)
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	indexes, err := openQueryIndexes(names, false, false)
@@ -70,11 +76,56 @@ func MultiVectorSearch(ctx context.Context, indexNames []string, query *VectorQu
 	}
 	unlock := lockQueryIndexes(indexes)
 	defer unlock()
-	return vectorSearchLocked(ctx, indexes, query)
+	return vectorSearch(ctx, indexes, query)
+}
+
+// VectorRecall borrows an owner Index reference and holds mutex's read lock through
+// sampling, native execution and Reader cleanup. It never reconciles or saves
+// layout. IVFPQ preserves the unweighted mean of per-segment recall (growing
+// segments count as 1); Flat needs no storage resources, and HNSW is unsupported.
+func (index *Index) VectorRecall(ctx context.Context, field string, queryCount int, k int64, nprobe int) (float32, error) {
+	err := ctx.Err()
+	if err != nil {
+		return 0, err
+	}
+	if queryCount <= 0 || k <= 0 || nprobe <= 0 {
+		return 0, fmt.Errorf("recall query count, k and nprobe must be positive")
+	}
+
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
+	err = ctx.Err()
+	if err != nil {
+		return 0, err
+	}
+	ref, err := index.vectorMetadata(field)
+	if err != nil {
+		return 0, err
+	}
+	// Get validates the current layout without opening storage or native objects,
+	// including for Flat's resource-free shortcut.
+	runtime, err := index.vector.Get(field, ref)
+	if err != nil {
+		return 0, fmt.Errorf("get vector field %s on index %s: %w", field, index.name, err)
+	}
+	switch ref.TargetType {
+	case vector.Flat:
+		return 1, ctx.Err()
+	case vector.HNSW:
+		return 0, fmt.Errorf("recall is not supported for HNSW")
+	default:
+		value, err := runtime.Recall(ctx, ref, queryCount, k, nprobe)
+		if err != nil {
+			return 0, fmt.Errorf("recall vector field %s on index %s: %w", field, index.name, err)
+		}
+		return value, ctx.Err()
+	}
 }
 
 func validateVectorQuery(ctx context.Context, query *VectorQuery) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 	if query == nil {
@@ -86,9 +137,11 @@ func validateVectorQuery(ctx context.Context, query *VectorQuery) error {
 	return nil
 }
 
-// vectorMetadataLocked reads the authoritative state, never an embedded core
+// vectorMetadata reads the authoritative state, never an embedded core
 // Index. Ownership was checked by Open; do not recheck it during a held reference.
-func (index *Index) vectorMetadataLocked(field string) (*meta.VecIndex, error) {
+// The caller must hold index.mutex's read or write lock while using the returned
+// metadata. This helper does not acquire the lock itself.
+func (index *Index) vectorMetadata(field string) (*meta.VecIndex, error) {
 	if index.readOnly {
 		return nil, zincerrors.ErrIndexServerMismatch
 	}
@@ -109,11 +162,13 @@ func (index *Index) vectorMetadataLocked(field string) (*meta.VecIndex, error) {
 	return ref, nil
 }
 
-// All participating references and metadata read locks must already be held.
+// vectorSearch requires all participating references and index.mutex read locks
+// to remain held through execution and Reader cleanup; it does not acquire them.
 // No query path repairs layout, marks dirty or saves metadata.
-func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuery) (*meta.SearchResponse, error) {
+func vectorSearch(ctx context.Context, indexes []*Index, query *VectorQuery) (*meta.SearchResponse, error) {
 	started := time.Now()
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	// Parse projection even for empty results. These request-owned values can be
@@ -123,7 +178,7 @@ func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuer
 		return nil, err
 	}
 	var returnFields []*meta.Field
-	if values, ok := query.ReturnFields.([]interface{}); ok {
+	if values, ok := query.ReturnFields.([]any); ok {
 		returnFields, err = fields.Request(values)
 		if err != nil {
 			return nil, err
@@ -134,7 +189,7 @@ func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuer
 	// Validate every index before executing any searches. Get only constructs
 	// lightweight runtime objects and validates layout; it never opens resources.
 	for i, index := range indexes {
-		ref, err := index.vectorMetadataLocked(query.QueryField)
+		ref, err := index.vectorMetadata(query.QueryField)
 		if err != nil {
 			return nil, err
 		}
@@ -149,19 +204,28 @@ func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuer
 	}
 	var candidates []vectorCandidate
 	for i, index := range indexes {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return nil, err
 		}
-		items, err := index.searchVectorLocked(ctx, query, runtimes[i], refs[i])
+		items, err := index.searchVector(ctx, query, runtimes[i], refs[i])
 		if err != nil {
 			return nil, fmt.Errorf("search vector field %s on index %s: %w", query.QueryField, index.name, err)
 		}
 		for _, item := range items {
-			candidates = append(candidates, vectorCandidate{index.name, item.DocID, item.Distance})
+			candidates = append(candidates, vectorCandidate{
+				indexName: index.name,
+				docID:     item.DocID,
+				distance:  item.Distance,
+			})
 		}
 	}
 	slices.SortFunc(candidates, func(a, b vectorCandidate) int {
-		return cmp.Or(cmp.Compare(a.distance, b.distance), cmp.Compare(a.indexName, b.indexName), cmp.Compare(a.docID, b.docID))
+		return cmp.Or(
+			cmp.Compare(a.distance, b.distance),
+			cmp.Compare(a.indexName, b.indexName),
+			cmp.Compare(a.docID, b.docID),
+		)
 	})
 	candidates = candidates[:min(len(candidates), query.K)]
 	byIndex := make(map[string][]string)
@@ -175,7 +239,7 @@ func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuer
 		if len(ids) == 0 {
 			continue
 		}
-		hits, err := index.retrieveVectorDocumentsLocked(ctx, ids, projection, returnFields)
+		hits, err := index.retrieveVectorDocuments(ctx, ids, projection, returnFields)
 		if err != nil {
 			return nil, fmt.Errorf("retrieve vector documents on index %s: %w", index.name, err)
 		}
@@ -195,16 +259,21 @@ func vectorSearchLocked(ctx context.Context, indexes []*Index, query *VectorQuer
 	}
 	// Preserve distance tie order when float32 scoring rounds distinct distances
 	// to the same score. Index/name order already breaks exact distance ties.
-	slices.SortStableFunc(response.Hits.Hits, func(a, b meta.Hit) int { return cmp.Compare(b.Score, a.Score) })
+	slices.SortStableFunc(response.Hits.Hits, func(a, b meta.Hit) int {
+		return cmp.Compare(b.Score, a.Score)
+	})
 	response.Hits.Total.Value = len(response.Hits.Hits)
 	response.Took = int(time.Since(started).Milliseconds())
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	return response, nil
 }
 
-func (index *Index) searchVectorLocked(ctx context.Context, query *VectorQuery, runtime storevector.VectorIndex, ref *meta.VecIndex) ([]storevector.DocDistance, error) {
+// searchVector requires index.mutex's read or write lock through native work
+// and filter Reader cleanup; it does not acquire the lock itself.
+func (index *Index) searchVector(ctx context.Context, query *VectorQuery, runtime storevector.VectorIndex, ref *meta.VecIndex) ([]storevector.DocDistance, error) {
 	if query.FilterQuery == nil {
 		result, err := runtime.Search(ctx, ref, query.Vector, int64(query.K), query.Nprobe)
 		if err != nil {
@@ -216,8 +285,12 @@ func (index *Index) searchVectorLocked(ctx context.Context, query *VectorQuery, 
 		}
 		return items, nil
 	}
-	filter := &meta.ZincQuery{Query: query.FilterQuery, Sort: []any{"_id"}, Size: config.Global.MaxResults}
-	response, err := index.partialSearchLocked(ctx, nil, filter, nil)
+	filter := &meta.ZincQuery{
+		Query: query.FilterQuery,
+		Sort:  []any{"_id"},
+		Size:  config.Global.MaxResults,
+	}
+	response, err := index.partialSearch(ctx, nil, filter, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +311,8 @@ func (index *Index) searchVectorLocked(ctx context.Context, query *VectorQuery, 
 // Retrieve IDs only from their owning index, with that index's mappings. Bound
 // each window by MaxResults. Remove retrieved IDs before querying again so old
 // text copies cannot hide another selected ID or inflate the final total.
-func (index *Index) retrieveVectorDocumentsLocked(ctx context.Context, ids []string, projection *meta.Source, returnFields []*meta.Field) (map[string]meta.Hit, error) {
+// The caller must hold index.mutex's read or write lock through Reader cleanup.
+func (index *Index) retrieveVectorDocuments(ctx context.Context, ids []string, projection *meta.Source, returnFields []*meta.Field) (map[string]meta.Hit, error) {
 	hits := make(map[string]meta.Hit)
 	limit := config.Global.MaxResults
 	if limit <= 0 {
@@ -252,7 +326,8 @@ func (index *Index) retrieveVectorDocumentsLocked(ctx context.Context, ids []str
 			wanted[id] = true
 		}
 		for len(wanted) > 0 {
-			if err := ctx.Err(); err != nil {
+			err := ctx.Err()
+			if err != nil {
 				return nil, err
 			}
 			remaining := make([]string, 0, len(wanted))
@@ -262,11 +337,13 @@ func (index *Index) retrieveVectorDocumentsLocked(ctx context.Context, ids []str
 				}
 			}
 			query := &meta.ZincQuery{
-				Query: &meta.Query{Ids: &meta.IdsQuery{Values: remaining}},
-				Size:  len(remaining), Sort: []any{"_id"},
-				Source: projection, Fields: returnFields,
+				Query:  &meta.Query{Ids: &meta.IdsQuery{Values: remaining}},
+				Size:   len(remaining),
+				Sort:   []any{"_id"},
+				Source: projection,
+				Fields: returnFields,
 			}
-			response, err := index.partialSearchLocked(ctx, nil, query, nil)
+			response, err := index.partialSearch(ctx, nil, query, nil)
 			if err != nil {
 				return nil, err
 			}

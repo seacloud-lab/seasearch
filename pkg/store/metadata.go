@@ -41,17 +41,19 @@ func readIndex(name string, readOnly bool) (*Index, error) {
 
 // writeIndex synchronously saves unsaved metadata under the same lock used for
 // mutations. It does not publish the Index or acquire lifecycle locks. The caller
-// must not hold mu; already-locked write paths use saveLocked instead.
+// must not hold index.mutex; already-locked write paths use save instead.
 func writeIndex(index *Index) error {
-	index.mu.Lock()
-	defer index.mu.Unlock()
-	return index.saveLocked()
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	return index.save()
 }
 
-// saveLocked requires mu's write lock, held through persistence and dirty state
-// updates. It must not call MarshalJSON, which would recursively acquire mu.
+// save requires the caller to hold index.mutex's write lock through persistence
+// and dirty state updates; it does not acquire the lock itself. It must not call
+// MarshalJSON, which would recursively acquire index.mutex.
 // Failures retain both the current metadata and its dirty flag for a later retry.
-func (index *Index) saveLocked() error {
+func (index *Index) save() error {
 	if index.readOnly {
 		return fmt.Errorf("save index %s metadata: %w", index.name, text.ErrReadOnly)
 	}
@@ -63,7 +65,8 @@ func (index *Index) saveLocked() error {
 	if err != nil {
 		return fmt.Errorf("serialize index %s metadata: %w", index.name, err)
 	}
-	if err := metadata.Index.Set(index.name, data); err != nil {
+	err = metadata.Index.Set(index.name, data)
+	if err != nil {
 		return fmt.Errorf("save index %s metadata: %w", index.name, err)
 	}
 	index.dirty = false
@@ -74,7 +77,8 @@ func (index *Index) saveLocked() error {
 // or publishing a cache reference. All allocations on failure are GC-managed.
 func createIndex(request *meta.IndexSimple) (*Index, error) {
 	name := request.Name
-	if err := core.CheckIndexName(name); err != nil {
+	err := core.CheckIndexName(name)
+	if err != nil {
 		return nil, err
 	}
 	// Analyzer and mapping normalization can mutate nested input. Own all input
@@ -84,7 +88,8 @@ func createIndex(request *meta.IndexSimple) (*Index, error) {
 		return nil, fmt.Errorf("copy index %s request: %w", name, err)
 	}
 	var owned meta.IndexSimple
-	if err := json.Unmarshal(data, &owned); err != nil {
+	err = json.Unmarshal(data, &owned)
+	if err != nil {
 		return nil, fmt.Errorf("copy index %s request: %w", name, err)
 	}
 	ref := &meta.Index{
@@ -107,7 +112,8 @@ func createIndex(request *meta.IndexSimple) (*Index, error) {
 			return nil, fmt.Errorf("copy template for index %s: %w", name, err)
 		}
 		var settings meta.TemplateTemplate
-		if err := json.Unmarshal(data, &settings); err != nil {
+		err = json.Unmarshal(data, &settings)
+		if err != nil {
 			return nil, fmt.Errorf("copy template for index %s: %w", name, err)
 		}
 		ref.Settings = settings.Settings
@@ -206,7 +212,8 @@ func formatIndex(ref *meta.Index, readOnly bool) (*Index, error) {
 // formatIndexWithAnalyzers shares the final analyzer objects with text runtime
 // options. Creation parses mappings with this same set before constructing text.
 func formatIndexWithAnalyzers(ref *meta.Index, readOnly bool, analyzers map[string]*analysis.Analyzer) (*Index, error) {
-	if err := core.CheckIndexName(ref.Name); err != nil {
+	err := core.CheckIndexName(ref.Name)
+	if err != nil {
 		return nil, err
 	}
 	if ref.ShardNum <= 0 || ref.ShardNum != int64(len(ref.Shards)) {
@@ -225,8 +232,12 @@ func formatIndexWithAnalyzers(ref *meta.Index, readOnly bool, analyzers map[stri
 	if analyzers == nil {
 		analyzers = make(map[string]*analysis.Analyzer)
 	}
-	index := &Index{name: ref.Name, ref: ref, analyzers: analyzers, readOnly: readOnly}
-	var err error
+	index := &Index{
+		name:      ref.Name,
+		ref:       ref,
+		analyzers: analyzers,
+		readOnly:  readOnly,
+	}
 	index.text, err = text.New(text.Options{
 		Name:                  ref.Name,
 		StoreName:             index.GetStoreName(),
@@ -239,7 +250,9 @@ func formatIndexWithAnalyzers(ref *meta.Index, readOnly bool, analyzers map[stri
 	}
 	if !readOnly {
 		index.vector = storevector.NewVecIndexManager(storevector.Options{
-			Name: ref.Name, StoreName: index.GetStoreName(), StorageType: ref.StorageType,
+			Name:        ref.Name,
+			StoreName:   index.GetStoreName(),
+			StorageType: ref.StorageType,
 		})
 	}
 	return index, nil

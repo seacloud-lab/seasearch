@@ -20,8 +20,15 @@ func Delete(storeName, storageType string) error {
 	if err != nil {
 		return err
 	}
-	if err := store.Remove(storeName); err != nil {
+	err = store.Remove(storeName)
+	if err != nil {
 		return err
 	}
 	return os.RemoveAll(path.Join(config.Global.DataPath, vectorstore.VecPrefix, storeName))
+}
+
+// Disk SaveFile moves the temporary file, whereas object backends may leave it.
+// Cleanup is best-effort and must not invalidate a published snapshot.
+func removeMaintenanceFile(name string) {
+	_ = os.Remove(name)
 }

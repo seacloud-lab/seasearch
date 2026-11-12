@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blugelabs/bluge"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/blugelabs/bluge"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -53,6 +54,7 @@ func (index *Index) GetShardByShardKey(shardKey string) *IndexShard {
 func (s *IndexShard) GetLatestShardID() int64 {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	return int64(len(s.shards)) - 1
 }
 
@@ -65,6 +67,7 @@ func (s *IndexShard) GetID() string {
 func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	if s.closed {
 		return nil, ErrClosed
 	}
@@ -84,6 +87,7 @@ func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {
 	second := s.shards[id]
 	second.lock.Lock()
 	defer second.lock.Unlock()
+
 	if second.writer == nil {
 		cfg, err := s.openConfig(id)
 		if err != nil {
@@ -121,7 +125,8 @@ func (s *IndexShard) openConfig(shardID int64) (bluge.Config, error) {
 }
 
 func (s *IndexShard) openReader(ctx context.Context, shardID int64) (*bluge.Reader, error) {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	if !s.options.ReadOnly {
@@ -133,6 +138,7 @@ func (s *IndexShard) openReader(ctx context.Context, shardID int64) (*bluge.Read
 	}
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	if s.closed {
 		return nil, ErrClosed
 	}
@@ -143,8 +149,9 @@ func (s *IndexShard) openReader(ctx context.Context, shardID int64) (*bluge.Read
 	if err != nil {
 		return nil, err
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := ctx.Err(); err != nil {
+	for attempt := range 3 {
+		err = ctx.Err()
+		if err != nil {
 			return nil, err
 		}
 		reader, openErr := bluge.OpenReader(cfg)
@@ -171,21 +178,20 @@ func (s *IndexShard) openReader(ctx context.Context, shardID int64) (*bluge.Read
 }
 
 // Close requires the caller to have drained all uses of this shard first.
-func (s *IndexShard) Close() error {
+func (s *IndexShard) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
 	s.closed = true
-	var errs []error
 	for _, second := range s.shards {
 		second.lock.Lock()
 		if second.writer != nil {
-			if err := second.writer.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("close Writer for %s/%d: %w", s.name, second.id, err))
-			} else {
-				second.writer = nil
+			err := second.writer.Close()
+			if err != nil {
+				log.Warn().Err(err).Str("index", s.name).Int64("shard", second.id).Msg("failed to close text Writer")
 			}
+			second.writer = nil
 		}
 		second.lock.Unlock()
 	}
-	return errors.Join(errs...)
 }

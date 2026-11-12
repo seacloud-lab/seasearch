@@ -2,12 +2,12 @@ package text
 
 import (
 	"context"
-	"errors"
+
+	"github.com/zincsearch/zincsearch/pkg/meta"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/search"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
 // SimpleSearcher lazily opens a request Reader. It is for sequential use within
@@ -19,20 +19,21 @@ type SimpleSearcher struct {
 	reader        *bluge.Reader
 	opened        bool
 	closed        bool
-	closeErr      error
 }
 
 func (s *SimpleSearcher) Search(ctx context.Context, req bluge.SearchRequest) (search.DocumentMatchIterator, error) {
 	reader, err := s.getReader(ctx)
 	if err != nil {
-		return nil, errors.Join(err, s.Close())
+		s.Close()
+		return nil, err
 	}
 	if reader == nil {
 		return &emptyDocumentMatchIterator{}, nil
 	}
 	iterator, err := reader.Search(ctx, req)
 	if err != nil {
-		return nil, errors.Join(err, s.Close())
+		s.Close()
+		return nil, err
 	}
 	return iterator, nil
 }
@@ -45,7 +46,8 @@ func (s *SimpleSearcher) getReader(ctx context.Context) (*bluge.Reader, error) {
 	if s.closed {
 		return nil, ErrClosed
 	}
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	if !s.opened {
@@ -56,21 +58,25 @@ func (s *SimpleSearcher) getReader(ctx context.Context) (*bluge.Reader, error) {
 		s.reader = reader
 		s.opened = true
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, errors.Join(err, s.Close())
+	err = ctx.Err()
+	if err != nil {
+		s.Close()
+		return nil, err
 	}
 	return s.reader, nil
 }
 
+// Close releases the Reader once. Cleanup errors are ignored; the error result
+// is retained for compatibility with the searcher interface.
 func (s *SimpleSearcher) Close() error {
 	if !s.closed {
 		s.closed = true
 		if s.reader != nil {
-			s.closeErr = s.reader.Close()
+			s.reader.Close()
 			s.reader = nil
 		}
 	}
-	return s.closeErr
+	return nil
 }
 
 // GetSearchers borrows shard metadata only while selecting runtime shards. The
@@ -96,6 +102,7 @@ func (index *Index) GetSearchersByID(shards map[string]*meta.IndexShard, timeMin
 func (s *IndexShard) GetSearchers(ref *meta.IndexShard, timeMin, timeMax int64) []*SimpleSearcher {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	var searchers []*SimpleSearcher
 	if ref == nil {
 		return searchers
@@ -120,6 +127,7 @@ func (s *IndexShard) GetSearchers(ref *meta.IndexShard, timeMin, timeMax int64) 
 func (s *IndexShard) GetPartialSearchers(ref *meta.IndexShard, timeMin, timeMax int64, ids ...int) []*SimpleSearcher {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	var searchers []*SimpleSearcher
 	if ref == nil {
 		return searchers

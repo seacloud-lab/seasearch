@@ -2,9 +2,8 @@ package vector
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	vectorstore "github.com/zincsearch/zincsearch/pkg/vector"
@@ -16,7 +15,8 @@ import (
 // This preserves the legacy contiguous growing-tail reconciliation, but does not
 // invent metadata for gaps, missing sealed data, or unrecorded native snapshots.
 func (f *fieldIndex) ReconcileLayout(ctx context.Context, ref *meta.VecIndex) error {
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return err
 	}
 	if f.settings.TargetType != vectorstore.IVFPQ {
@@ -43,7 +43,7 @@ func (f *fieldIndex) ReconcileLayout(ctx context.Context, ref *meta.VecIndex) er
 			extra = append(extra, int(id))
 		}
 	}
-	sort.Ints(extra)
+	slices.Sort(extra)
 	// A missing empty current segment is legitimate only while it is the tail.
 	if len(extra) > 0 {
 		if _, ok := stored[int64(ref.CurrentSegmentId)]; !ok {
@@ -57,7 +57,8 @@ func (f *fieldIndex) ReconcileLayout(ctx context.Context, ref *meta.VecIndex) er
 		}
 	}()
 	for _, id := range extra {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return err
 		}
 		if id != len(ref.Segments) {
@@ -80,15 +81,18 @@ func (f *fieldIndex) ReconcileLayout(ctx context.Context, ref *meta.VecIndex) er
 		call := &segmentCall{IVFPQSegment: runtime, ref: segRef, ctx: ctx}
 		reader, err := call.openVecStoreReader()
 		if err != nil {
-			return errors.Join(err, runtime.Close())
+			runtime.Close()
+			return err
 		}
 		if reader == nil {
-			return errors.Join(fmt.Errorf("%w: empty unrecorded segment %d", ErrVecIndexCorruption, id), runtime.Close())
+			runtime.Close()
+			return fmt.Errorf("%w: empty unrecorded segment %d", ErrVecIndexCorruption, id)
 		}
 		count, countErr := reader.Count()
-		err = errors.Join(countErr, reader.Close(), runtime.Close())
-		if err != nil {
-			return err
+		reader.Close()
+		runtime.Close()
+		if countErr != nil {
+			return countErr
 		}
 		segRef.Count = int64(count)
 		ref.Segments = append(ref.Segments, segRef)

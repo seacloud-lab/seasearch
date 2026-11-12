@@ -7,12 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/vector"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ErrVectorMaintenanceStopped means hints cannot be accepted before Start or
@@ -34,10 +35,11 @@ type maintenanceHint struct {
 }
 
 type vectorMaintenanceScheduler struct {
-	// control serializes Start/Stop, including waiting for the previous workers.
-	// Producers and workers only use mu, never control.
-	control sync.Mutex
-	mu      sync.Mutex
+	// controlMutex serializes Start/Stop, including waiting for the previous
+	// workers. Producers and workers only use mutex, never controlMutex.
+	controlMutex sync.Mutex
+	mutex        sync.Mutex
+
 	running bool
 	pending map[maintenanceHint]struct{}
 	items   []maintenanceHint
@@ -54,10 +56,11 @@ var vectorMaintenance vectorMaintenanceScheduler
 // the same storage paths. Application startup integration is deliberately separate.
 func StartVectorMaintenance() {
 	s := &vectorMaintenance
-	s.control.Lock()
-	defer s.control.Unlock()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.controlMutex.Lock()
+	defer s.controlMutex.Unlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if s.running {
 		return
 	}
@@ -78,18 +81,18 @@ func StartVectorMaintenance() {
 // before closing metadata or storage dependencies. Repeated stops are harmless.
 func StopVectorMaintenance() {
 	s := &vectorMaintenance
-	s.control.Lock()
-	defer s.control.Unlock()
-	s.mu.Lock()
+	s.controlMutex.Lock()
+	defer s.controlMutex.Unlock()
+	s.mutex.Lock()
 	if !s.running {
-		s.mu.Unlock()
+		s.mutex.Unlock()
 		return
 	}
 	s.running = false
 	s.cancel()
 	s.items = nil
 	s.pending = nil
-	s.mu.Unlock()
+	s.mutex.Unlock()
 	s.wg.Wait()
 }
 
@@ -103,11 +106,12 @@ func RequestVectorSeal(indexName, field string) error {
 	return vectorMaintenance.submit(maintenanceHint{index: indexName, field: field, kind: maintenanceSeal})
 }
 
-// submit never waits for the worker, so callers may hold Index.mu. Only pending
+// submit never waits for the worker, so callers may hold Index.mutex. Only pending
 // hints are deduplicated; a hint taken by the worker may immediately queue again.
 func (s *vectorMaintenanceScheduler) submit(hint maintenanceHint) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if !s.running {
 		return ErrVectorMaintenanceStopped
 	}
@@ -124,8 +128,9 @@ func (s *vectorMaintenanceScheduler) submit(hint maintenanceHint) error {
 }
 
 func (s *vectorMaintenanceScheduler) take() (maintenanceHint, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if !s.running || len(s.items) == 0 {
 		return maintenanceHint{}, false
 	}
@@ -152,7 +157,8 @@ func (s *vectorMaintenanceScheduler) work(ctx context.Context) {
 			if !ok {
 				break
 			}
-			if err := executeMaintenanceHint(ctx, hint); err != nil {
+			err := executeMaintenanceHint(ctx, hint)
+			if err != nil {
 				if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 					continue
 				}
@@ -164,7 +170,8 @@ func (s *vectorMaintenanceScheduler) work(ctx context.Context) {
 }
 
 func executeMaintenanceHint(ctx context.Context, hint maintenanceHint) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 	index, err := Open(hint.index)
@@ -194,7 +201,8 @@ func (s *vectorMaintenanceScheduler) scan(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.scanIVFPQ(ctx); err != nil && ctx.Err() == nil {
+			err := s.scanIVFPQ(ctx)
+			if err != nil && ctx.Err() == nil {
 				log.Error().Err(err).Msg("failed to scan IVFPQ maintenance")
 			}
 		}
@@ -205,7 +213,8 @@ func (s *vectorMaintenanceScheduler) scan(ctx context.Context) {
 // retried by a later scan, not a hot retry loop. HNSW failures require a later
 // write to produce another hint; no cold HNSW resources are loaded by this scan.
 func (s *vectorMaintenanceScheduler) scanIVFPQ(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 	indexes, err := metadata.Index.List(0, 0)
@@ -213,14 +222,16 @@ func (s *vectorMaintenanceScheduler) scanIVFPQ(ctx context.Context) error {
 		return err
 	}
 	for _, index := range indexes {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return err
 		}
 		if !cluster.AssignCheck(index.Name) {
 			continue
 		}
 		for field, ref := range index.VecIndexes {
-			if err := ctx.Err(); err != nil {
+			err := ctx.Err()
+			if err != nil {
 				return err
 			}
 			if ref == nil || ref.TargetType != vector.IVFPQ {
@@ -229,7 +240,12 @@ func (s *vectorMaintenanceScheduler) scanIVFPQ(ctx context.Context) error {
 			for _, segment := range ref.Segments {
 				if segment != nil && segment.Id != ref.CurrentSegmentId &&
 					segment.Status == vector.StatusGrowing && segment.Count >= config.Global.VectorConfig.IvfPqThreshold {
-					if err := s.submit(maintenanceHint{index: index.Name, field: field, kind: maintenanceSeal}); err != nil {
+					err := s.submit(maintenanceHint{
+						index: index.Name,
+						field: field,
+						kind:  maintenanceSeal,
+					})
+					if err != nil {
 						return err
 					}
 					break

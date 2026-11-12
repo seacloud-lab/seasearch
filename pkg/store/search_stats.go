@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	"sort"
+	"slices"
 
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -41,7 +41,7 @@ func QueryStatsInfoWithSecondShardIds(partial PartialIndexes, q *meta.ZincQuery)
 	for name := range partial {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	indexes, err := openQueryIndexes(names, true, false)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,8 @@ func QueryStatsInfoWithSecondShardIds(partial PartialIndexes, q *meta.ZincQuery)
 
 // collectQueryStats requires all participating Index metadata locks to be held.
 func collectQueryStats(ctx context.Context, indexes []*Index, partial PartialIndexes, q *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	if len(indexes) == 0 {

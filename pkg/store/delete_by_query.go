@@ -23,15 +23,18 @@ func (index *Index) DeleteByQuery(query *meta.ZincQuery) (*DeleteByQueryResult, 
 		return nil, err
 	}
 	defer cancel()
-	index.mu.Lock()
-	defer index.mu.Unlock()
-	if err := index.checkWriteLocked(); err != nil {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err = index.checkWritable()
+	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return nil, err
 	}
-	response, err := index.partialSearchLocked(ctx, nil, query, nil)
+	response, err := index.partialSearch(ctx, nil, query, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -51,11 +54,12 @@ func (index *Index) DeleteByQuery(query *meta.ZincQuery) (*DeleteByQueryResult, 
 	// All query Readers are closed. Do not start deletion if querying or result
 	// collection exhausted the timeout. Write operations use their existing
 	// synchronous cleanup protocol rather than this query context.
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	if len(result.IDs) == 0 {
 		return result, nil
 	}
-	return result, index.deleteDocumentsLocked(result.IDs, true)
+	return result, index.deleteDocuments(result.IDs, true)
 }

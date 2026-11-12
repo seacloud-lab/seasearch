@@ -26,7 +26,7 @@ type Options struct {
 }
 
 type resources struct {
-	mu      sync.Mutex
+	mutex   sync.Mutex
 	storage vectorstore.ObjStore
 	tmpDir  string
 }
@@ -34,8 +34,9 @@ type resources struct {
 // ensure is called by operations, never while holding the manager cache lock.
 // Failed initialization may be retried; there are no native resources to publish.
 func (r *resources) ensure() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	if r.storage != nil {
 		return nil
 	}
@@ -44,7 +45,8 @@ func (r *resources) ensure() error {
 		return err
 	}
 	tmpDir := path.Join(config.Global.DataPath, vectorstore.VecPrefix, "tmp")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	err = os.MkdirAll(tmpDir, 0755)
+	if err != nil {
 		return err
 	}
 	r.storage, r.tmpDir = storage, tmpDir
@@ -56,7 +58,7 @@ func (r *resources) ensure() error {
 // metadata, or starts background work. There is no cross-Index runtime cache.
 type VecIndexManager struct {
 	options   Options
-	mu        sync.Mutex
+	mutex     sync.Mutex
 	fields    map[string]VectorIndex
 	resources *resources
 	closed    bool
@@ -64,7 +66,10 @@ type VecIndexManager struct {
 
 // NewVecIndexManager allocates only Go objects, including for text-only indexes.
 func NewVecIndexManager(options Options) *VecIndexManager {
-	return &VecIndexManager{options: options, fields: make(map[string]VectorIndex)}
+	return &VecIndexManager{
+		options: options,
+		fields:  make(map[string]VectorIndex),
+	}
 }
 
 // Get borrows ref read-only and copies immutable configuration. Actual Writer
@@ -72,12 +77,14 @@ func NewVecIndexManager(options Options) *VecIndexManager {
 // released. Layout reconciliation is an explicit write operation, not a Get side
 // effect. Callers must not retain the returned runtime beyond their Index use.
 func (m *VecIndexManager) Get(field string, ref *meta.VecIndex) (VectorIndex, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	if m.closed {
 		return nil, ErrClosed
 	}
-	if err := validateLayout(ref); err != nil {
+	err := validateLayout(ref)
+	if err != nil {
 		return nil, err
 	}
 	if m.options.StorageType != config.Global.StorageType {
@@ -100,8 +107,9 @@ func (m *VecIndexManager) Get(field string, ref *meta.VecIndex) (VectorIndex, er
 	runtime := &fieldIndex{
 		name:      path.Join(m.options.Name, field),
 		storeName: path.Join(m.options.StoreName, subPath),
-		settings:  cfg, resources: m.resources,
-		segments: make(map[int]*IVFPQSegment),
+		settings:  cfg,
+		resources: m.resources,
+		segments:  make(map[int]*IVFPQSegment),
 	}
 	if cfg.TargetType == vectorstore.HNSW {
 		runtime.hnsw = newHNSWSegment(runtime.storeName, cfg.Dims, m.resources)
@@ -112,22 +120,20 @@ func (m *VecIndexManager) Get(field string, ref *meta.VecIndex) (VectorIndex, er
 
 // Close requires all owner Index users to have drained. Unpublish everything
 // before cleanup; a partially closed runtime is never reused, even on failure.
-func (m *VecIndexManager) Close() error {
-	m.mu.Lock()
+// Cleanup failures are handled by resource owners and are not returned.
+func (m *VecIndexManager) Close() {
+	m.mutex.Lock()
 	if m.closed {
-		m.mu.Unlock()
-		return nil
+		m.mutex.Unlock()
+		return
 	}
 	m.closed = true
 	fields := m.fields
 	m.fields = nil
 	m.resources = nil
-	m.mu.Unlock()
-	var errs []error
-	for field, runtime := range fields {
-		if err := runtime.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("field %s: %w", field, err))
-		}
+	m.mutex.Unlock()
+
+	for _, runtime := range fields {
+		runtime.Close()
 	}
-	return errors.Join(errs...)
 }

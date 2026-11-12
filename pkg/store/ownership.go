@@ -29,7 +29,8 @@ func (cache *Cache) cleanUnassigned() error {
 		if cluster.AssignCheck(name) {
 			continue
 		}
-		if err := cache.cleanUnassignedIndex(name); err != nil {
+		err := cache.cleanUnassignedIndex(name)
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -77,12 +78,11 @@ func (cache *Cache) cleanUnassignedIndex(name string) error {
 	index := item.index
 	// Retain the only current metadata on save failure. A later assignment hint,
 	// ordinary TTL eviction or Stop may try again; there is no periodic retry.
-	if err := writeIndex(index); err != nil {
+	err := writeIndex(index)
+	if err != nil {
 		return fmt.Errorf("unassign index %s: %w", name, err)
 	}
 	cache.Del(name)
-	if err := index.closeResources(); err != nil {
-		return fmt.Errorf("unassign index %s: %w", name, err)
-	}
+	index.closeResources()
 	return nil
 }

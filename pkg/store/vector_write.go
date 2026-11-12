@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 )
 
-// prepareVectorsLocked runs before any text worker. Get never repairs metadata;
+// prepareVectors runs before any text worker. Get never repairs metadata;
 // reconciliation is explicitly serialized here. Only a successful check of all
 // fields is remembered for this Index lifetime, independently of dirty/save
 // success. Partial failures retry all fields on the next call. The enclosing
 // operation must save even if preparation partly fails.
-func (index *Index) prepareVectorsLocked() error {
+// The caller must hold index.mutex's write lock; this helper does not acquire it.
+func (index *Index) prepareVectors() error {
 	if index.vectorLayoutChecked {
 		return nil
 	}
@@ -23,14 +24,15 @@ func (index *Index) prepareVectorsLocked() error {
 	for field := range index.ref.VecIndexes {
 		fields = append(fields, field)
 	}
-	sort.Strings(fields)
+	slices.Sort(fields)
 	for _, field := range fields {
 		runtime, err := index.vector.Get(field, index.ref.VecIndexes[field])
 		if err != nil {
 			return fmt.Errorf("prepare vector field %s: %w", field, err)
 		}
 		index.dirty = true
-		if err := runtime.ReconcileLayout(context.Background(), index.ref.VecIndexes[field]); err != nil {
+		err = runtime.ReconcileLayout(context.Background(), index.ref.VecIndexes[field])
+		if err != nil {
 			return fmt.Errorf("reconcile vector field %s: %w", field, err)
 		}
 	}
@@ -38,11 +40,12 @@ func (index *Index) prepareVectorsLocked() error {
 	return nil
 }
 
-// batchVectorsLocked consumes one confirmed target batch, never combines windows
+// batchVectors consumes one confirmed target batch, never combines windows
 // (delete/add ordering matters for repeated IDs). Different text workers may
 // address the same field, so only the parent calls this after all workers finish.
 // All fields are attempted, even if one fails; no component persists metadata.
-func (index *Index) batchVectorsLocked(actions []*vector.VecAction) error {
+// The caller must hold index.mutex's write lock; this helper does not acquire it.
+func (index *Index) batchVectors(actions []*vector.VecAction) error {
 	byField := make(map[string][]*vector.VecAction)
 	for _, action := range actions {
 		if action == nil {
@@ -54,7 +57,7 @@ func (index *Index) batchVectorsLocked(actions []*vector.VecAction) error {
 	for field := range byField {
 		fields = append(fields, field)
 	}
-	sort.Strings(fields)
+	slices.Sort(fields)
 	var errs []error
 	for _, field := range fields {
 		ref := index.ref.VecIndexes[field]

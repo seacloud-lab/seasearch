@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"path"
 	"sync"
@@ -16,7 +15,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 
 	"github.com/blugelabs/bluge/analysis"
-	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -26,6 +24,8 @@ var (
 
 // Index is a shared owner runtime index or an independent read-only query view.
 // Each acquisition must remain held while using its shards and readers.
+// Exported operations acquire mutex as needed. Unexported helpers that access
+// mutable state require the caller to hold mutex unless documented otherwise.
 type Index struct {
 	name string
 
@@ -39,19 +39,19 @@ type Index struct {
 	analyzers map[string]*analysis.Analyzer
 	text      *text.Index
 	vector    *vector.VecIndexManager
-	// Protected by mu; all vector field layouts have been checked for this
+	// Protected by mutex; all vector field layouts have been checked for this
 	// Index lifetime, independently of persistence success. Reset when vector
 	// fields are added, removed or rebuilt.
 	vectorLayoutChecked bool
 
-	// mu protects metadata and dirty. Writers hold it exclusively through the
+	// mutex protects metadata and dirty. Writers hold it exclusively through the
 	// entire operation and synchronous save; queries hold its read lock through
 	// result consumption and Reader cleanup. Analysis configuration and analyzers
-	// are immutable after publication. Never hold mu while draining references.
-	mu sync.RWMutex
+	// are immutable after publication. Never hold mutex while draining references.
+	mutex sync.RWMutex
 
 	// dirty tracks metadata changes not yet successfully persisted. Set it when
-	// modifying ref under mu, including before an operation that may partly fail.
+	// modifying ref under mutex, including before an operation that may partly fail.
 	dirty bool
 
 	// Retained while existing callers are migrated to the store-owned state.
@@ -63,8 +63,9 @@ func (index *Index) GetName() string {
 }
 
 func (index *Index) GetStoreName() string {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	if index.ref.StoreWithHash {
 		value := zutils.GetHashEncode(index.name)
 		return path.Join(value[:2], value[2:])
@@ -73,22 +74,25 @@ func (index *Index) GetStoreName() string {
 }
 
 func (index *Index) GetStorageType() string {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	return index.ref.StorageType
 }
 
 func (index *Index) GetStats() meta.IndexStat {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	return index.ref.Stats
 }
 
 // GetMappings returns an independent copy of the current store-owned mappings.
 // The caller must hold an Index reference; mutations to the copy are not saved.
 func (index *Index) GetMappings() *meta.Mappings {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	if index.ref.Mappings == nil {
 		return nil
 	}
@@ -97,8 +101,9 @@ func (index *Index) GetMappings() *meta.Mappings {
 
 // MarshalJSON serializes store metadata rather than the embedded legacy Index.
 func (index *Index) MarshalJSON() ([]byte, error) {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	return json.Marshal(index.ref)
 }
 
@@ -106,8 +111,9 @@ func (index *Index) MarshalJSON() ([]byte, error) {
 // a request-owned copy. Filters and the tokenizer are borrowed immutable objects;
 // callers may replace them or append filters, but must not mutate the components.
 func (index *Index) Analyzer(field, name string) (*analysis.Analyzer, error) {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
 	if field != "" && name == "" {
 		if prop, ok := index.ref.Mappings.GetProperty(field); ok {
 			name = prop.SearchAnalyzer
@@ -132,12 +138,10 @@ func (index *Index) Analyzer(field, name string) (*analysis.Analyzer, error) {
 // Close releases an owner cache reference or closes an uncached query view.
 // Searchers and their Readers must be closed first. Owner resource cleanup is
 // performed separately during eviction, deletion or shutdown. Each acquisition
-// must be closed exactly once; failed view cleanup can be retried with Close.
+// must be closed exactly once. Resource cleanup is best-effort.
 func (index *Index) Close() {
 	if index.readOnly {
-		if err := index.text.Close(); err != nil {
-			log.Warn().Err(err).Str("index", index.name).Msg("failed to close query view")
-		}
+		index.text.Close()
 		return
 	}
 	cache.Release(index.name)
@@ -145,24 +149,15 @@ func (index *Index) Close() {
 
 // closeResources is final cleanup, not the public reference-release operation.
 // All owner references and request Readers must already have been released.
-func (index *Index) closeResources() error {
-	var errs []error
+// Resource owners log Writer cleanup failures without propagating them.
+func (index *Index) closeResources() {
 	if index.vector != nil {
-		if err := index.vector.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close vector resources: %w", err))
-		}
+		index.vector.Close()
 		index.vector = nil
 	}
 	index.vectorLayoutChecked = false
 	if index.text != nil {
-		if err := index.text.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close text resources: %w", err))
-		}
+		index.text.Close()
 		index.text = nil
 	}
-	err := errors.Join(errs...)
-	if err != nil {
-		log.Error().Err(err).Str("index", index.name).Msg("failed to close index resources")
-	}
-	return err
 }

@@ -2,12 +2,12 @@ package text
 
 import (
 	"context"
-	"errors"
 
-	"github.com/blugelabs/bluge"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/source"
+
+	"github.com/blugelabs/bluge"
 )
 
 // FindDocument returns the newest matching shard and optionally its document.
@@ -24,9 +24,9 @@ func (s *IndexShard) FindDocument(ctx context.Context, ref *meta.IndexShard, doc
 	return ShardIDNeedLatest, nil, zincerrors.ErrorIDNotFound
 }
 
-func findDocument(ctx context.Context, searcher *SimpleSearcher, docID string, withSource bool) (id int64, hit *meta.Hit, err error) {
-	id = ShardIDNeedLatest
-	defer func() { err = errors.Join(err, searcher.Close()) }()
+func findDocument(ctx context.Context, searcher *SimpleSearcher, docID string, withSource bool) (int64, *meta.Hit, error) {
+	id := ShardIDNeedLatest
+	defer searcher.Close()
 	request := bluge.NewTopNSearch(1, bluge.NewTermQuery(docID).SetField("_id"))
 	iterator, err := searcher.Search(ctx, request)
 	if err != nil {
@@ -40,7 +40,7 @@ func findDocument(ctx context.Context, searcher *SimpleSearcher, docID string, w
 	if !withSource {
 		return id, nil, nil
 	}
-	hit = &meta.Hit{ID: docID, Type: "_doc"}
+	hit := &meta.Hit{ID: docID, Type: "_doc"}
 	err = match.VisitStoredFields(func(field string, value []byte) bool {
 		switch field {
 		case "_id":

@@ -12,6 +12,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	vectorstore "github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
+
 	"golang.org/x/sync/errgroup"
 )
 
@@ -20,7 +21,9 @@ type DocDistance struct {
 	Distance float32
 }
 
-type BatchResult struct{ NeedBuildHNSW bool }
+type BatchResult struct {
+	NeedBuildHNSW bool
+}
 
 // VectorIndex borrows metadata only until each call (and all its internal work)
 // returns. The caller holds an owner Index reference throughout. Batch,
@@ -37,7 +40,9 @@ type VectorIndex interface {
 	Seal(context.Context, *meta.VecIndex) error
 	BuildHNSW(context.Context, *meta.VecIndex) error
 	Recall(context.Context, *meta.VecIndex, int, int64, int) (float32, error)
-	Close() error
+	// Close performs best-effort cleanup after owner users have drained.
+	// Writer owners log cleanup failures without propagating them.
+	Close()
 	config() fieldConfig
 }
 
@@ -52,9 +57,16 @@ type fieldConfig struct {
 }
 
 func configFromMeta(ref *meta.VecIndex) fieldConfig {
-	return fieldConfig{TargetType: ref.TargetType, Dims: ref.Dims, M: ref.M, NBits: ref.NBits,
-		NList: ref.NList, LayoutVersion: ref.LayoutVersion,
-		StoreWithHash: ref.StoreWithHash, StoreWithFloat16: ref.StoreWithFloat16}
+	return fieldConfig{
+		TargetType:       ref.TargetType,
+		Dims:             ref.Dims,
+		M:                ref.M,
+		NBits:            ref.NBits,
+		NList:            ref.NList,
+		LayoutVersion:    ref.LayoutVersion,
+		StoreWithHash:    ref.StoreWithHash,
+		StoreWithFloat16: ref.StoreWithFloat16,
+	}
 }
 
 func validateLayout(ref *meta.VecIndex) error {
@@ -93,28 +105,41 @@ type fieldIndex struct {
 	name, storeName string
 	settings        fieldConfig
 	resources       *resources
-	mu              sync.Mutex // runtime creation/closing only; metadata is protected by store
+	mutex           sync.Mutex // runtime creation/closing only; metadata is protected by store
 	closed          bool
 	segments        map[int]*IVFPQSegment
 	hnsw            *HNSWSegment
 }
 
-func (f *fieldIndex) config() fieldConfig { return f.settings }
-func (f *fieldIndex) Name() string        { return f.name }
-func (f *fieldIndex) StoreName() string   { return f.storeName }
-func (f *fieldIndex) UseFloat16() bool    { return f.settings.StoreWithFloat16 }
+func (f *fieldIndex) config() fieldConfig {
+	return f.settings
+}
+
+func (f *fieldIndex) Name() string {
+	return f.name
+}
+
+func (f *fieldIndex) StoreName() string {
+	return f.storeName
+}
+
+func (f *fieldIndex) UseFloat16() bool {
+	return f.settings.StoreWithFloat16
+}
 
 func (f *fieldIndex) check(ctx context.Context, ref *meta.VecIndex) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
-	f.mu.Lock()
+	f.mutex.Lock()
 	closed := f.closed
-	f.mu.Unlock()
+	f.mutex.Unlock()
 	if closed {
 		return ErrClosed
 	}
-	if err := validateLayout(ref); err != nil {
+	err = validateLayout(ref)
+	if err != nil {
 		return err
 	}
 	if configFromMeta(ref) != f.settings {
@@ -125,8 +150,9 @@ func (f *fieldIndex) check(ctx context.Context, ref *meta.VecIndex) error {
 
 // call is never cached: only seg (which has no metadata reference) is cached.
 func (f *fieldIndex) segment(ctx context.Context, ref *meta.VectorSegment) (*segmentCall, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
 	if f.closed {
 		return nil, ErrClosed
 	}
@@ -144,7 +170,8 @@ func (f *fieldIndex) segment(ctx context.Context, ref *meta.VectorSegment) (*seg
 
 func (f *fieldIndex) Batch(ctx context.Context, ref *meta.VecIndex, vectors [][]float32, addIDs, deleteIDs []int64) (BatchResult, error) {
 	var result BatchResult
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return result, err
 	}
 	if len(vectors) != len(addIDs) {
@@ -175,7 +202,8 @@ func (f *fieldIndex) Batch(ctx context.Context, ref *meta.VecIndex, vectors [][]
 	}()
 	if len(deleteIDs) > 0 {
 		for _, segRef := range ref.Segments {
-			if err := ctx.Err(); err != nil {
+			err := ctx.Err()
+			if err != nil {
 				return result, err
 			}
 			seg, err := f.segment(ctx, segRef)
@@ -187,14 +215,16 @@ func (f *fieldIndex) Batch(ctx context.Context, ref *meta.VecIndex, vectors [][]
 				return result, err
 			}
 			if len(ids) > 0 {
-				if err := seg.Batch(&segBatch{deleteIds: ids}); err != nil {
+				err = seg.Batch(&segBatch{deleteIds: ids})
+				if err != nil {
 					return result, err
 				}
 			}
 		}
 	}
 	if len(addIDs) > 0 {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return result, err
 		}
 		segRef := ref.Segments[ref.CurrentSegmentId]
@@ -202,7 +232,11 @@ func (f *fieldIndex) Batch(ctx context.Context, ref *meta.VecIndex, vectors [][]
 		if err != nil {
 			return result, err
 		}
-		if err := seg.Batch(&segBatch{addIds: addIDs, addVectors: vectors}); err != nil {
+		err = seg.Batch(&segBatch{
+			addIds:     addIDs,
+			addVectors: vectors,
+		})
+		if err != nil {
 			return result, err
 		}
 		if f.settings.TargetType == vectorstore.IVFPQ && segRef.Count >= config.Global.VectorConfig.IvfPqThreshold {
@@ -220,7 +254,8 @@ type segBatch struct {
 }
 
 func (f *fieldIndex) Search(ctx context.Context, ref *meta.VecIndex, query []float32, k int64, nprobe int) (map[string]float32, error) {
-	if err := f.checkQuery(ctx, ref, query, k); err != nil {
+	err := f.checkQuery(ctx, ref, query, k)
+	if err != nil {
 		return nil, err
 	}
 	if f.hnsw != nil {
@@ -241,7 +276,8 @@ func (f *fieldIndex) Search(ctx context.Context, ref *meta.VecIndex, query []flo
 	workers.SetLimit(max(1, config.Global.Shard.GoroutineNum))
 	for i, segRef := range ref.Segments {
 		workers.Go(func() error {
-			if err := ctx.Err(); err != nil {
+			err := ctx.Err()
+			if err != nil {
 				return err
 			}
 			seg, err := f.segment(ctx, segRef)
@@ -252,7 +288,8 @@ func (f *fieldIndex) Search(ctx context.Context, ref *meta.VecIndex, query []flo
 			return err
 		})
 	}
-	if err := workers.Wait(); err != nil {
+	err = workers.Wait()
+	if err != nil {
 		return nil, err
 	}
 	merged := make(map[string]float32)
@@ -265,7 +302,10 @@ func (f *fieldIndex) Search(ctx context.Context, ref *meta.VecIndex, query []flo
 	}
 	items := make([]DocDistance, 0, len(merged))
 	for id, distance := range merged {
-		items = append(items, DocDistance{id, distance})
+		items = append(items, DocDistance{
+			DocID:    id,
+			Distance: distance,
+		})
 	}
 	sortDistances(items)
 	result := make(map[string]float32)
@@ -276,7 +316,8 @@ func (f *fieldIndex) Search(ctx context.Context, ref *meta.VecIndex, query []flo
 }
 
 func (f *fieldIndex) checkQuery(ctx context.Context, ref *meta.VecIndex, query []float32, k int64) error {
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return err
 	}
 	if len(query) != f.settings.Dims || k <= 0 {
@@ -292,7 +333,8 @@ func sortDistances(items []DocDistance) {
 }
 
 func (f *fieldIndex) SearchByIDs(ctx context.Context, ref *meta.VecIndex, query []float32, k int64, ids []string) ([]DocDistance, error) {
-	if err := f.checkQuery(ctx, ref, query, k); err != nil {
+	err := f.checkQuery(ctx, ref, query, k)
+	if err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
@@ -309,11 +351,15 @@ func (f *fieldIndex) SearchByIDs(ctx context.Context, ref *meta.VecIndex, query 
 			return nil, err
 		}
 		for i, id := range matched {
-			items = append(items, DocDistance{base62.Encode(id), distances[i]})
+			items = append(items, DocDistance{
+				DocID:    base62.Encode(id),
+				Distance: distances[i],
+			})
 		}
 	} else {
 		for _, segRef := range ref.Segments {
-			if err := ctx.Err(); err != nil {
+			err := ctx.Err()
+			if err != nil {
 				return nil, err
 			}
 			seg, err := f.segment(ctx, segRef)
@@ -344,14 +390,16 @@ func (f *fieldIndex) SearchByIDs(ctx context.Context, ref *meta.VecIndex, query 
 }
 
 func (f *fieldIndex) Seal(ctx context.Context, ref *meta.VecIndex) error {
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return err
 	}
 	if f.settings.TargetType != vectorstore.IVFPQ {
 		return fmt.Errorf("seal requires IVFPQ")
 	}
 	for _, segRef := range ref.Segments {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return err
 		}
 		if segRef.Id == ref.CurrentSegmentId || segRef.Status != vectorstore.StatusGrowing || segRef.Count < config.Global.VectorConfig.IvfPqThreshold {
@@ -361,7 +409,8 @@ func (f *fieldIndex) Seal(ctx context.Context, ref *meta.VecIndex) error {
 		if err != nil {
 			return err
 		}
-		if err := seg.Seal(); err != nil {
+		err = seg.Seal()
+		if err != nil {
 			return fmt.Errorf("seal segment %d: %w", segRef.Id, err)
 		}
 	}
@@ -369,7 +418,8 @@ func (f *fieldIndex) Seal(ctx context.Context, ref *meta.VecIndex) error {
 }
 
 func (f *fieldIndex) BuildHNSW(ctx context.Context, ref *meta.VecIndex) error {
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return err
 	}
 	if f.hnsw == nil {
@@ -388,7 +438,8 @@ func (f *fieldIndex) BuildHNSW(ctx context.Context, ref *meta.VecIndex) error {
 }
 
 func (f *fieldIndex) Recall(ctx context.Context, ref *meta.VecIndex, count int, k int64, nprobe int) (float32, error) {
-	if err := f.check(ctx, ref); err != nil {
+	err := f.check(ctx, ref)
+	if err != nil {
 		return 0, err
 	}
 	if f.hnsw != nil {
@@ -399,7 +450,8 @@ func (f *fieldIndex) Recall(ctx context.Context, ref *meta.VecIndex, count int, 
 	}
 	var total float32
 	for _, segRef := range ref.Segments {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return 0, err
 		}
 		seg, err := f.segment(ctx, segRef)
@@ -415,26 +467,21 @@ func (f *fieldIndex) Recall(ctx context.Context, ref *meta.VecIndex, count int, 
 	return total / float32(len(ref.Segments)), ctx.Err()
 }
 
-func (f *fieldIndex) Close() error {
-	f.mu.Lock()
+func (f *fieldIndex) Close() {
+	f.mutex.Lock()
 	if f.closed {
-		f.mu.Unlock()
-		return nil
+		f.mutex.Unlock()
+		return
 	}
 	f.closed = true
 	segments, hnsw := f.segments, f.hnsw
 	f.segments, f.hnsw = nil, nil
-	f.mu.Unlock()
-	var errs []error
-	for id, seg := range segments {
-		if err := seg.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("segment %d: %w", id, err))
-		}
+	f.mutex.Unlock()
+
+	for _, seg := range segments {
+		seg.Close()
 	}
 	if hnsw != nil {
-		if err := hnsw.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("HNSW segment: %w", err))
-		}
+		hnsw.Close()
 	}
-	return errors.Join(errs...)
 }

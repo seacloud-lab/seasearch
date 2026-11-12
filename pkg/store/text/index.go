@@ -1,16 +1,16 @@
 package text
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path"
 
-	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/hash/rendezvous"
+
+	"github.com/blugelabs/bluge/analysis"
 )
 
 // Index owns text runtime resources, not persistent metadata. Metadata passed
@@ -78,15 +78,11 @@ func New(options Options, shards map[string]*meta.IndexShard) (*Index, error) {
 
 // Close closes all cached Writers. The caller must first drain Index references
 // and close all request Readers. This is resource cleanup, not reference release.
-// Failed Writers remain attached so an explicit cleanup retry can reach them.
-func (index *Index) Close() error {
-	var errs []error
+// Writer cleanup failures are logged by their owning shards, not returned.
+func (index *Index) Close() {
 	for _, shard := range index.shards {
-		if err := shard.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		shard.Close()
 	}
-	return errors.Join(errs...)
 }
 
 // Delete removes persistent text data after all owner resources have closed.

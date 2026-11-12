@@ -12,20 +12,24 @@ import (
 
 // SealVector checks the current field and seals eligible non-current IVFPQ
 // segments. The caller holds an owner Index reference until this call returns.
-// Cancellation is checked before work starts (including after waiting for mu);
+// Cancellation is checked before work starts (including after waiting for mutex);
 // once started, maintenance and saving run synchronously without cancellation.
 // Missing fields, other algorithms and fields needing no work are successful
 // no-ops. Errors do not imply that no persistent changes have taken effect.
 func (index *Index) SealVector(ctx context.Context, field string) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
-	index.mu.Lock()
-	defer index.mu.Unlock()
-	if err := ctx.Err(); err != nil {
+
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err = ctx.Err()
+	if err != nil {
 		return err
 	}
-	ref, err := index.maintenanceMetadataLocked(field, vector.IVFPQ)
+	ref, err := index.maintenanceMetadata(field, vector.IVFPQ)
 	if err != nil || ref == nil {
 		return err
 	}
@@ -42,21 +46,25 @@ func (index *Index) SealVector(ctx context.Context, field string) error {
 	if err != nil {
 		err = fmt.Errorf("seal vector field %s on index %s: %w", field, index.name, err)
 	}
-	return errors.Join(err, index.saveLocked())
+	return errors.Join(err, index.save())
 }
 
 // BuildHNSW checks the current field and rebuilds its snapshot when needed. It
 // follows SealVector's reference, cancellation, no-op and partial-failure rules.
 func (index *Index) BuildHNSW(ctx context.Context, field string) error {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
-	index.mu.Lock()
-	defer index.mu.Unlock()
-	if err := ctx.Err(); err != nil {
+
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err = ctx.Err()
+	if err != nil {
 		return err
 	}
-	ref, err := index.maintenanceMetadataLocked(field, vector.HNSW)
+	ref, err := index.maintenanceMetadata(field, vector.HNSW)
 	if err != nil || ref == nil {
 		return err
 	}
@@ -69,12 +77,13 @@ func (index *Index) BuildHNSW(ctx context.Context, field string) error {
 	if err != nil {
 		err = fmt.Errorf("build HNSW field %s on index %s: %w", field, index.name, err)
 	}
-	return errors.Join(err, index.saveLocked())
+	return errors.Join(err, index.save())
 }
 
-// maintenanceMetadataLocked distinguishes an obsolete hint from corrupt current
-// metadata. It requires mu's write lock and never opens runtime resources.
-func (index *Index) maintenanceMetadataLocked(field, algorithm string) (*meta.VecIndex, error) {
+// maintenanceMetadata distinguishes an obsolete hint from corrupt current
+// metadata. The caller must hold index.mutex's write lock while using the returned
+// metadata. This helper does not acquire the lock or open runtime resources.
+func (index *Index) maintenanceMetadata(field, algorithm string) (*meta.VecIndex, error) {
 	if index.readOnly {
 		return nil, zincerrors.ErrIndexServerMismatch
 	}
@@ -85,7 +94,7 @@ func (index *Index) maintenanceMetadataLocked(field, algorithm string) (*meta.Ve
 	if !ok || prop.Type != "vector" {
 		return nil, nil
 	}
-	ref, err := index.vectorMetadataLocked(field)
+	ref, err := index.vectorMetadata(field)
 	if err != nil {
 		return nil, err
 	}

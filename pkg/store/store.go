@@ -1,14 +1,11 @@
 package store
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"path"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
@@ -43,7 +40,8 @@ func Start() error {
 func Stop() {
 	StopVectorMaintenance()
 	closer.SignalAndWait()
-	if err := cache.close(); err != nil {
+	err := cache.close()
+	if err != nil {
 		log.Error().Err(err).Msg("failed to stop index store")
 	}
 }
@@ -132,7 +130,8 @@ func Create(request *meta.IndexSimple) (*Index, error) {
 		return nil, fmt.Errorf("index request must not be nil")
 	}
 	name := request.Name
-	if err := core.CheckIndexName(name); err != nil {
+	err := core.CheckIndexName(name)
+	if err != nil {
 		return nil, err
 	}
 	lifecycle := locker.Lifecycle(name)
@@ -152,7 +151,8 @@ func Create(request *meta.IndexSimple) (*Index, error) {
 	if cached {
 		return nil, fmt.Errorf("index [%s] already exists: %w", name, ErrIndexAlreadyExists)
 	}
-	if _, err := metadata.Index.Get(name); err == nil {
+	_, err = metadata.Index.Get(name)
+	if err == nil {
 		return nil, fmt.Errorf("index [%s] already exists: %w", name, ErrIndexAlreadyExists)
 	} else if !errors.Is(err, zincerrors.ErrKeyNotFound) {
 		return nil, fmt.Errorf("read index %s metadata: %w", name, err)
@@ -162,7 +162,8 @@ func Create(request *meta.IndexSimple) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeIndex(index); err != nil {
+	err = writeIndex(index)
+	if err != nil {
 		// No storage resources have been opened. A failed Set may have committed;
 		// leave persistent metadata for the next read rather than rolling it back.
 		return nil, err
@@ -193,7 +194,7 @@ func GetQueryIndex(name string) (*Index, error) {
 
 // Delete waits for owner references to drain before closing resources and
 // removing data. Callers must release their own references before calling it.
-// Close failures discard cached objects but leave all persistent data intact.
+// Resource cleanup is best-effort and does not prevent persistent data deletion.
 func Delete(name string) error {
 	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, "_") || !deleteIndexNameRe.MatchString(name) {
 		return fmt.Errorf("invalid index name %q", name)
@@ -216,9 +217,7 @@ func Delete(name string) error {
 		// Unpublish even if resource cleanup fails. A partially closed object
 		// must never be handed to a subsequent acquisition.
 		cache.Del(name)
-		if err := index.closeResources(); err != nil {
-			return fmt.Errorf("close index %s: %w", name, err)
-		}
+		index.closeResources()
 	} else {
 		// Cold deletion needs no analyzers, runtime shards or Writers.
 		ref, err := metadata.Index.Get(name)
@@ -239,288 +238,17 @@ func Delete(name string) error {
 		storageType = ref.StorageType
 	}
 
-	if err := vector.Delete(storeName, storageType); err != nil {
+	err := vector.Delete(storeName, storageType)
+	if err != nil {
 		return fmt.Errorf("delete index %s vector data: %w", name, err)
 	}
-	if err := text.Delete(storeName, storageType); err != nil {
+	err = text.Delete(storeName, storageType)
+	if err != nil {
 		return fmt.Errorf("delete index %s text data: %w", name, err)
 	}
-	if err := metadata.Index.Delete(name); err != nil && !errors.Is(err, zincerrors.ErrKeyNotFound) {
+	err = metadata.Index.Delete(name)
+	if err != nil && !errors.Is(err, zincerrors.ErrKeyNotFound) {
 		return fmt.Errorf("delete index %s metadata: %w", name, err)
-	}
-	return nil
-}
-
-// Locker coordinates operations on indexes by name.
-type Locker struct {
-	mutex sync.Mutex
-	items map[string]*LockerItem
-}
-
-type LockerItem struct {
-	lifecycle sync.RWMutex
-	cacheload sync.Mutex
-}
-
-func newLocker() *Locker {
-	return &Locker{
-		items: make(map[string]*LockerItem),
-	}
-}
-
-func (locker *Locker) Lifecycle(name string) *sync.RWMutex {
-	locker.mutex.Lock()
-	defer locker.mutex.Unlock()
-
-	item, ok := locker.items[name]
-	if !ok {
-		item = new(LockerItem)
-		locker.items[name] = item
-	}
-
-	return &item.lifecycle
-}
-
-func (locker *Locker) CacheLoad(name string) *sync.Mutex {
-	locker.mutex.Lock()
-	defer locker.mutex.Unlock()
-
-	item, ok := locker.items[name]
-	if !ok {
-		item = new(LockerItem)
-		locker.items[name] = item
-	}
-
-	return &item.cacheload
-}
-
-// Cache tracks owner references and idle entries.
-type Cache struct {
-	mutex sync.Mutex
-	items map[string]*CacheItem
-	evict *list.List
-
-	assignChanged <-chan struct{}
-}
-
-type CacheItem struct {
-	elem *list.Element
-	refs int
-
-	// idle is closed when refs reaches zero and replaced on the next acquisition.
-	idle chan struct{}
-
-	rtime time.Time
-
-	index *Index
-}
-
-func newCache() *Cache {
-	return &Cache{
-		items:         make(map[string]*CacheItem),
-		evict:         list.New(),
-		assignChanged: cluster.AssignmentChanged,
-	}
-}
-
-func (cache *Cache) Acquire(name string) (*Index, bool) {
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-
-	item, ok := cache.items[name]
-	if !ok {
-		return nil, false
-	}
-
-	if item.elem != nil {
-		cache.evict.Remove(item.elem)
-		item.elem = nil
-	}
-
-	if item.refs == 0 {
-		item.idle = make(chan struct{})
-	}
-	item.refs++
-
-	return item.index, true
-}
-
-func (cache *Cache) Release(name string) {
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-
-	item, ok := cache.items[name]
-	if !ok {
-		return
-	}
-
-	item.refs--
-
-	if item.refs == 0 {
-		close(item.idle)
-		item.rtime = time.Now()
-		item.elem = cache.evict.PushBack(item)
-	}
-}
-
-func (cache *Cache) Add(index *Index) {
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-
-	item := new(CacheItem)
-	item.refs = 1
-	item.idle = make(chan struct{})
-	item.index = index
-	cache.items[index.name] = item
-}
-
-// waitIdle requires the caller to hold the lifecycle write lock. This excludes
-// acquisitions and replacement while existing holders release their references.
-func (cache *Cache) waitIdle(name string) *Index {
-	cache.mutex.Lock()
-	item, ok := cache.items[name]
-	if !ok {
-		cache.mutex.Unlock()
-		return nil
-	}
-	idle := item.idle
-	cache.mutex.Unlock()
-
-	<-idle
-	return item.index
-}
-
-func (cache *Cache) Del(name string) {
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-
-	item, ok := cache.items[name]
-	if !ok {
-		return
-	}
-
-	if item.elem != nil {
-		cache.evict.Remove(item.elem)
-		item.elem = nil
-	}
-	delete(cache.items, name)
-}
-
-func (cache *Cache) Clean() {
-	defer closer.Done()
-
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-closer.HasBeenClosed():
-			return
-		case <-cache.assignChanged:
-			if err := cache.cleanUnassigned(); err != nil {
-				log.Warn().Err(err).Msg("failed to clean unassigned indexes")
-			}
-		case <-ticker.C:
-			err := cache.clean()
-			if err != nil {
-				log.Warn().Err(err).Msg("failed to clean index cache")
-			}
-		}
-	}
-}
-
-func (cache *Cache) clean() error {
-	cutoff := time.Now().Add(time.Minute * -15)
-
-	var names []string
-	cache.mutex.Lock()
-	for elem := cache.evict.Front(); elem != nil; elem = elem.Next() {
-		item := elem.Value.(*CacheItem)
-		if item.rtime.After(cutoff) {
-			break
-		}
-		names = append(names, item.index.name)
-	}
-	cache.mutex.Unlock()
-
-	var errs []error
-	for _, name := range names {
-		if err := cache.cleanIndex(name, cutoff); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	return errors.Join(errs...)
-}
-
-func (cache *Cache) cleanIndex(name string, cutoff time.Time) error {
-	locker.Lifecycle(name).Lock()
-	defer locker.Lifecycle(name).Unlock()
-
-	cache.mutex.Lock()
-	item, ok := cache.items[name]
-	if !ok || item.refs != 0 || item.rtime.After(cutoff) {
-		cache.mutex.Unlock()
-		return nil
-	}
-	index := item.index
-	cache.mutex.Unlock()
-
-	// A save failure leaves the latest metadata and runtime cached for retry.
-	if err := writeIndex(index); err != nil {
-		return fmt.Errorf("evict index %s: %w", name, err)
-	}
-	// The lifecycle write lock keeps this zero-reference entry stable and blocks
-	// reloading until all resource close calls have finished.
-	cache.Del(name)
-	if err := index.closeResources(); err != nil {
-		return fmt.Errorf("evict index %s: %w", name, err)
-	}
-
-	return nil
-}
-
-// close is shutdown cleanup, not eviction. Callers must already be drained and
-// the scanner stopped. Save failures must not prevent any resource close calls.
-func (cache *Cache) close() error {
-	cache.mutex.Lock()
-	names := make([]string, 0, len(cache.items))
-	for name := range cache.items {
-		names = append(names, name)
-	}
-	cache.mutex.Unlock()
-
-	var errs []error
-	for _, name := range names {
-		if err := cache.closeIndex(name); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func (cache *Cache) closeIndex(name string) error {
-	lifecycle := locker.Lifecycle(name)
-	lifecycle.Lock()
-	defer lifecycle.Unlock()
-
-	cache.mutex.Lock()
-	item, ok := cache.items[name]
-	cache.mutex.Unlock()
-	if !ok {
-		return nil
-	}
-
-	index := item.index
-	var errs []error
-	if err := writeIndex(index); err != nil {
-		errs = append(errs, err)
-	}
-	cache.Del(name)
-	if err := index.closeResources(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("stop index %s: %w", name, err)
 	}
 	return nil
 }

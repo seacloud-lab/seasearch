@@ -1,213 +1,152 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"strings"
-	"time"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store/text"
-	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
-	"github.com/zincsearch/zincsearch/pkg/zutils/flatten"
 )
 
-// prepareDocumentLocked requires mu's write lock. The caller resolves the target
-// second shard and whether this is an insert or update before calling it. Mapping
-// changes remain dirty even if a later field fails validation; this helper does
-// not save metadata or open Writers. The enclosing write operation handles both.
-func (index *Index) prepareDocumentLocked(docID string, doc map[string]interface{}, update bool, shardID int64) (text.Operation, error) {
-	if index.readOnly {
-		return text.Operation{}, text.ErrReadOnly
-	}
-	if len(index.ref.VecIndexes) > 0 && base62.Encode(base62.Decode(docID)) != docID {
-		return text.Operation{}, fmt.Errorf("document ID (%v) is not a valid base62 string", docID)
-	}
-	// Own the request data: flatten retains scalar arrays, and normalization must
-	// not change the caller's source or another operation in the same request.
-	source := copyDocument(doc)
-	fields, err := flatten.Flatten(source, "")
-	if err != nil {
-		return text.Operation{}, err
-	}
-	mappings := index.ref.Mappings
-	for key, value := range fields {
-		if value == nil {
-			continue
-		}
-		if inferProperty(mappings, key, value) {
-			index.dirty = true
-		}
-		prop, ok := mappings.GetProperty(key)
-		if !ok || !prop.Index {
-			continue
-		}
-		if prop.Type == "vector" {
-			values, ok := value.([]interface{})
-			if !ok {
-				return text.Operation{}, fmt.Errorf("invalid vector field %s: expected an array", key)
-			}
-			if len(values) != prop.Dims {
-				return text.Operation{}, fmt.Errorf("vector dims should be %d, but got %d", prop.Dims, len(values))
-			}
-			for i, value := range values {
-				values[i], err = zutils.ToFloat64(value)
-				if err != nil {
-					return text.Operation{}, fmt.Errorf("invalid vector field %s: %w", key, err)
-				}
-			}
-			fields[key] = values
-			// Preserve the existing source rule: remove top-level vector fields.
-			delete(source, key)
-			continue
-		}
-		if values, ok := value.([]interface{}); ok {
-			for i, value := range values {
-				values[i], err = normalizeField(prop, key, value)
-				if err != nil {
-					return text.Operation{}, err
-				}
-			}
-			fields[key] = values
-		} else {
-			fields[key], err = normalizeField(prop, key, value)
-			if err != nil {
-				return text.Operation{}, err
-			}
-		}
-	}
+// DocOperation preserves compatibility with bulk callers during their migration.
+// The new write path never calls the embedded legacy Index.
+type DocOperation = core.DocOperation
 
-	timestamp := time.Now()
-	if value, ok := fields[meta.TimeFieldName]; ok {
-		prop, _ := mappings.GetProperty(meta.TimeFieldName)
-		timestamp, err = zutils.ParseTime(value, prop.Format, prop.TimeZone)
+// CreateDocument inserts a document, or replaces an existing document when update
+// is true. The caller holds one Index reference through this synchronous call.
+func (index *Index) CreateDocument(docID string, doc map[string]any, update bool) error {
+	return index.CreateDocuments([]DocOperation{{DocId: docID, Doc: doc, Update: update}})
+}
+
+func (index *Index) CreateDocuments(operations []DocOperation) error {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err := index.checkWritable()
+	if err != nil {
+		return err
+	}
+	groups := make(map[string][]text.Operation)
+	for _, operation := range operations {
+		shard := index.text.GetShardByDocID(operation.DocId)
+		id := text.ShardIDNeedLatest
+		update := operation.Update
+		if update {
+			var err error
+			id, _, err = shard.FindDocument(context.Background(), index.ref.Shards[shard.GetID()], operation.DocId, false)
+			if errors.Is(err, zincerrors.ErrorIDNotFound) {
+				update = false
+			} else if err != nil {
+				return errors.Join(err, index.save())
+			}
+		}
+		op, err := index.prepareDocument(operation.DocId, operation.Doc, update, id)
 		if err != nil {
-			return text.Operation{}, fmt.Errorf("field [%s] value [%v] parse err: %w", meta.TimeFieldName, value, err)
+			return errors.Join(err, index.save())
 		}
-		delete(source, meta.TimeFieldName)
+		groups[shard.GetID()] = append(groups[shard.GetID()], op)
 	}
-	// Control fields are represented by typed operation fields, not user data.
-	for _, key := range []string{meta.ActionFieldName, meta.IDFieldName, meta.ShardFieldName, meta.TimeFieldName, meta.SourceFieldName} {
-		delete(fields, key)
-	}
-	action := meta.ActionTypeInsert
-	if update {
-		action = meta.ActionTypeUpdate
-	}
-	return text.Operation{
-		DocID: docID, Action: action, ShardID: shardID,
-		Document: &text.Document{Fields: fields, Source: source, Timestamp: timestamp.UnixNano()},
-	}, nil
+	return index.commit(groups)
 }
 
-func copyDocument(doc map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(doc))
-	for key, value := range doc {
-		result[key] = copyDocumentValue(value)
-	}
-	return result
-}
+// UpdateDocument preserves replace/upsert semantics: insert controls whether an
+// absent document can be created. It does not merge the old source with doc.
+func (index *Index) UpdateDocument(docID string, doc map[string]any, insert bool) error {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
 
-func copyDocumentValue(value interface{}) interface{} {
-	switch value := value.(type) {
-	case map[string]interface{}:
-		return copyDocument(value)
-	case []interface{}:
-		result := make([]interface{}, len(value))
-		for i, value := range value {
-			result[i] = copyDocumentValue(value)
-		}
-		return result
-	default:
-		return value
-	}
-}
-
-// inferProperty follows the legacy first-array-element and date detection rules.
-// Existing fields are preserved except for the legacy text.keyword completion.
-func inferProperty(mappings *meta.Mappings, key string, value interface{}) bool {
-	if prop, ok := mappings.GetProperty(key); ok {
-		if !config.Global.EnableTextKeywordMapping || prop.Type != "text" {
-			return false
-		}
-		if _, ok := mappings.GetProperty(key + ".keyword"); ok {
-			return false
-		}
-	}
-	if values, ok := value.([]interface{}); ok {
-		if len(values) == 0 {
-			return false
-		}
-		value = values[0]
-		// Legacy array inference recognizes JSON numbers, not integer values.
-		switch value.(type) {
-		case string, float64, bool:
-		default:
-			return false
-		}
-	}
-	var prop meta.Property
-	switch value := value.(type) {
-	case string:
-		if layout := detectTimeLayout(value); layout != "" {
-			if _, err := time.Parse(layout, value); err == nil {
-				prop = meta.NewProperty("date")
-				prop.Format = layout
-			}
-		}
-		if prop.Type == "" {
-			prop = meta.NewProperty("text")
-			if config.Global.EnableTextKeywordMapping {
-				keyword := meta.NewProperty("keyword")
-				prop.AddField("keyword", keyword)
-				mappings.SetProperty(key+".keyword", keyword)
-			}
-		}
-	case int, int64, float64:
-		prop = meta.NewProperty("numeric")
-	case bool:
-		prop = meta.NewProperty("bool")
-	default:
-		return false
-	}
-	mappings.SetProperty(key, prop)
-	return true
-}
-
-func normalizeField(prop meta.Property, key string, value interface{}) (interface{}, error) {
-	var normalized interface{}
-	var err error
-	switch prop.Type {
-	case "text", "keyword":
-		normalized, err = zutils.ToString(value)
-	case "numeric":
-		normalized, err = zutils.ToFloat64(value)
-	case "bool":
-		normalized, err = zutils.ToBool(value)
-	case "date", "time":
-		_, err = zutils.ParseTime(value, prop.Format, prop.TimeZone)
-		normalized = value
-	default:
-		return nil, fmt.Errorf("field [%s] has unsupported type [%s]", key, prop.Type)
-	}
+	err := index.checkWritable()
 	if err != nil {
-		return nil, fmt.Errorf("field [%s] value [%v] cannot convert to [%s]: %w", key, value, prop.Type, err)
+		return err
 	}
-	return normalized, nil
+	shard := index.text.GetShardByDocID(docID)
+	id, _, err := shard.FindDocument(context.Background(), index.ref.Shards[shard.GetID()], docID, false)
+	update := true
+	if err != nil {
+		if !insert || !errors.Is(err, zincerrors.ErrorIDNotFound) {
+			return err
+		}
+		update = false
+	}
+	op, err := index.prepareDocument(docID, doc, update, id)
+	if err != nil {
+		return errors.Join(err, index.save())
+	}
+	return index.commit(map[string][]text.Operation{shard.GetID(): {op}})
 }
 
-func detectTimeLayout(value string) string {
-	switch {
-	case len(value) == 19 && strings.Index(value, " ") == 10:
-		return "2006-01-02 15:04:05"
-	case len(value) == 19 && strings.Index(value, "T") == 10:
-		return "2006-01-02T15:04:05"
-	case len(value) == 25 && strings.Index(value, "T") == 10:
-		return time.RFC3339
-	case len(value) == 29 && strings.Index(value, "T") == 10 && strings.Index(value, ".") == 19:
-		return "2006-01-02T15:04:05.999Z07:00"
-	default:
-		return ""
+func (index *Index) DeleteDocument(docID string) error {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err := index.checkWritable()
+	if err != nil {
+		return err
 	}
+	return index.deleteDocuments([]string{docID}, false)
+}
+
+// DeleteDocuments ignores missing text documents but still deletes their vectors,
+// preserving the legacy bulk cleanup of vector remnants after partial failures.
+func (index *Index) DeleteDocuments(docIDs []string) error {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err := index.checkWritable()
+	if err != nil {
+		return err
+	}
+	return index.deleteDocuments(docIDs, true)
+}
+
+// deleteDocuments requires index.mutex's write lock; it does not acquire it.
+func (index *Index) deleteDocuments(docIDs []string, ignoreMissing bool) error {
+	groups := make(map[string][]text.Operation)
+	for _, docID := range docIDs {
+		if len(index.ref.VecIndexes) > 0 && base62.Encode(base62.Decode(docID)) != docID {
+			return fmt.Errorf("document ID (%v) is not a valid base62 string", docID)
+		}
+		shard := index.text.GetShardByDocID(docID)
+		id, _, err := shard.FindDocument(context.Background(), index.ref.Shards[shard.GetID()], docID, false)
+		action := meta.ActionTypeDelete
+		if err != nil {
+			if !errors.Is(err, zincerrors.ErrorIDNotFound) {
+				return err
+			}
+			if len(index.ref.VecIndexes) > 0 {
+				action, id = meta.ActionTypeDeleteVecOnly, text.ShardIDNeedLatest
+			} else if ignoreMissing {
+				continue
+			} else {
+				return err
+			}
+		}
+		groups[shard.GetID()] = append(groups[shard.GetID()], text.Operation{
+			DocID:   docID,
+			Action:  action,
+			ShardID: id,
+		})
+	}
+	return index.commit(groups)
+}
+
+func (index *Index) GetDocument(docID string) (*meta.Hit, error) {
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
+	shard := index.text.GetShardByDocID(docID)
+	_, hit, err := shard.FindDocument(context.Background(), index.ref.Shards[shard.GetID()], docID, true)
+	return hit, err
+}
+
+// checkWritable reads immutable state and does not require index.mutex.
+func (index *Index) checkWritable() error {
+	if index.readOnly {
+		return text.ErrReadOnly
+	}
+	return nil
 }

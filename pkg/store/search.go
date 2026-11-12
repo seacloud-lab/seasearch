@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -19,8 +18,8 @@ import (
 // Searcher before releasing it. Readers borrowed from Searchers must not be
 // closed separately.
 func (index *Index) GetSearchers(timeMin, timeMax int64) []*text.SimpleSearcher {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
 
 	return index.getSearchers(timeMin, timeMax)
 }
@@ -29,17 +28,18 @@ func (index *Index) GetSearchers(timeMin, timeMax int64) []*text.SimpleSearcher 
 // reference and cleanup contract as GetSearchers. Shard IDs are assigned by the
 // proxy for collaborative queries; an empty ID list selects no shards.
 func (index *Index) GetSearchersByID(timeMin, timeMax int64, secondShardIDs ...int) []*text.SimpleSearcher {
-	index.mu.RLock()
-	defer index.mu.RUnlock()
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
 
 	return index.getSearchersByID(timeMin, timeMax, secondShardIDs...)
 }
 
-// These helpers require mu to be held and never acquire it recursively.
+// getSearchers requires index.mutex's read or write lock and does not acquire it.
 func (index *Index) getSearchers(timeMin, timeMax int64) []*text.SimpleSearcher {
 	return index.text.GetSearchers(index.ref.Shards, timeMin, timeMax)
 }
 
+// getSearchersByID requires index.mutex's read or write lock and does not acquire it.
 func (index *Index) getSearchersByID(timeMin, timeMax int64, ids ...int) []*text.SimpleSearcher {
 	return index.text.GetSearchersByID(index.ref.Shards, timeMin, timeMax, ids...)
 }
@@ -62,16 +62,19 @@ func (index *Index) PartialSearch(ids []int, query *meta.ZincQuery, stats *zincs
 		return nil, err
 	}
 	defer cancel()
-	index.mu.RLock()
-	defer index.mu.RUnlock()
-	return index.partialSearchLocked(ctx, ids, query, stats)
+
+	index.mutex.RLock()
+	defer index.mutex.RUnlock()
+
+	return index.partialSearch(ctx, ids, query, stats)
 }
 
-// partialSearchLocked requires mu's read or write lock and an Index reference.
+// partialSearch requires index.mutex's read or write lock and an Index reference.
 // It consumes results and closes every Searcher/Reader before returning, including
 // on failure. Callers must not use a partial response when an error is returned.
-func (index *Index) partialSearchLocked(ctx context.Context, ids []int, query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
-	if err := prepareQuery(index, query); err != nil {
+func (index *Index) partialSearch(ctx context.Context, ids []int, query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
+	err := prepareQuery(index, query)
+	if err != nil {
 		return nil, err
 	}
 	timeMin, timeMax := timerange.Query(query.Query)
@@ -98,15 +101,16 @@ func queryContext(query *meta.ZincQuery) (context.Context, context.CancelFunc, e
 
 // prepareQuery requires the Index metadata lock to be held.
 func prepareQuery(index *Index, query *meta.ZincQuery) error {
-	if err := uquery.NormalizeQuery(query, index.ref.Mappings, index.analyzers); err != nil {
+	err := uquery.NormalizeQuery(query, index.ref.Mappings, index.analyzers)
+	if err != nil {
 		return err
 	}
-	_, err := uquery.ParseQueryDSL(query, index.ref.Mappings, index.analyzers)
+	_, err = uquery.ParseQueryDSL(query, index.ref.Mappings, index.analyzers)
 	return err
 }
 
 // All participating Index metadata locks remain held through execution and cleanup.
-func executeSearch(ctx context.Context, index *Index, query *meta.ZincQuery, stats *zincsearch.UnifiedStats, bases []*text.SimpleSearcher) (response *meta.SearchResponse, err error) {
+func executeSearch(ctx context.Context, index *Index, query *meta.ZincQuery, stats *zincsearch.UnifiedStats, bases []*text.SimpleSearcher) (*meta.SearchResponse, error) {
 	searchers := make([]zincsearch.Searcher, len(bases))
 	for i, base := range bases {
 		if stats == nil {
@@ -117,12 +121,11 @@ func executeSearch(ctx context.Context, index *Index, query *meta.ZincQuery, sta
 	}
 	defer func() {
 		for _, searcher := range searchers {
-			if closeErr := searcher.Close(); closeErr != nil && !errors.Is(err, closeErr) {
-				err = errors.Join(err, closeErr)
-			}
+			searcher.Close()
 		}
 	}()
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return nil, err
 	}
 	return zincsearch.MultiZincSearch(ctx, query, index.ref.Mappings, index.analyzers, searchers...)

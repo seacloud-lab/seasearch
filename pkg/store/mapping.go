@@ -2,7 +2,8 @@ package store
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -13,10 +14,12 @@ import (
 // AddMappings adds fields using the Index's frozen analysis configuration and
 // synchronously saves metadata. The caller must hold an Index reference. All
 // validation precedes mutation; save failures retain the new state and dirty flag.
-func (index *Index) AddMappings(request map[string]interface{}) error {
-	index.mu.Lock()
-	defer index.mu.Unlock()
-	if err := index.checkWriteLocked(); err != nil {
+func (index *Index) AddMappings(request map[string]any) error {
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	err := index.checkWritable()
+	if err != nil {
 		return err
 	}
 	// Own nested request data before parsing/normalizing it. Never retain mutable
@@ -26,14 +29,14 @@ func (index *Index) AddMappings(request map[string]interface{}) error {
 		return err
 	}
 	if added == nil || added.Len() == 0 {
-		return index.saveLocked()
+		return index.save()
 	}
 	properties := added.ListProperty()
 	fields := make([]string, 0, len(properties))
 	for field := range properties {
 		fields = append(fields, field)
 	}
-	sort.Strings(fields)
+	slices.Sort(fields)
 	newVectors := make(map[string]*meta.VecIndex)
 	for _, field := range fields {
 		if index.ref.Mappings != nil {
@@ -74,12 +77,10 @@ func (index *Index) AddMappings(request map[string]interface{}) error {
 		if index.ref.VecIndexes == nil {
 			index.ref.VecIndexes = make(map[string]*meta.VecIndex)
 		}
-		for field, ref := range newVectors {
-			index.ref.VecIndexes[field] = ref
-		}
+		maps.Copy(index.ref.VecIndexes, newVectors)
 		index.vectorLayoutChecked = false
 	}
-	return index.saveLocked()
+	return index.save()
 }
 
 // newVectorMetadata constructs only a new field's initial layout. It must not be

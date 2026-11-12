@@ -1,9 +1,10 @@
 package store
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
@@ -52,7 +53,8 @@ func MultiSearch(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	}
 	unlock := lockQueryIndexes(indexes)
 	defer unlock()
-	if err := prepareQuery(indexes[0], query); err != nil {
+	err = prepareQuery(indexes[0], query)
+	if err != nil {
 		return nil, err
 	}
 	timeMin, timeMax := timerange.Query(query.Query)
@@ -136,14 +138,16 @@ func closeQueryIndexes(indexes []*Index) {
 }
 
 func lockQueryIndexes(indexes []*Index) func() {
-	ordered := append([]*Index(nil), indexes...)
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].name < ordered[j].name })
+	ordered := slices.Clone(indexes)
+	slices.SortFunc(ordered, func(a, b *Index) int {
+		return cmp.Compare(a.name, b.name)
+	})
 	for _, index := range ordered {
-		index.mu.RLock()
+		index.mutex.RLock()
 	}
 	return func() {
 		for i := len(ordered) - 1; i >= 0; i-- {
-			ordered[i].mu.RUnlock()
+			ordered[i].mutex.RUnlock()
 		}
 	}
 }
