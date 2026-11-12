@@ -56,6 +56,10 @@ func (s *IndexShard) GetLatestShardID() int64 {
 	return int64(len(s.shards)) - 1
 }
 
+func (s *IndexShard) GetID() string {
+	return s.id
+}
+
 // GetWriter returns a borrowed cached Writer. The caller must hold the owning
 // store Index reference throughout its use, and must not close the Writer.
 func (s *IndexShard) GetWriter(shardID ...int64) (*bluge.Writer, error) {

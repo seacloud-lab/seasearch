@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/vector"
@@ -178,7 +179,10 @@ func lazyCloseSegmentWriter() {
 
 // GetVectorIndex
 // The caller should always call the CloseVectorIndex after obtaining the vector index.
-func GetVectorIndex(indexName string, fieldName string, forParallelSearch bool) (VectorIndex, error) {
+func GetVectorIndex(indexName string, fieldName string) (VectorIndex, error) {
+	if !cluster.AssignCheck(indexName) {
+		return nil, ErrIndexServerMismatch
+	}
 	cachedName := path.Join(indexName, fieldName)
 	for {
 		vecIdxManager.lock.Lock()
@@ -198,7 +202,7 @@ func GetVectorIndex(indexName string, fieldName string, forParallelSearch bool) 
 		vecIdxManager.ready[cachedName] = ready
 		vecIdxManager.lock.Unlock()
 
-		index, err := getVectorIndex(fieldName, indexName, forParallelSearch)
+		index, err := getVectorIndex(fieldName, indexName)
 		if err != nil {
 			vecIdxManager.lock.Lock()
 			close(ready)
@@ -260,21 +264,11 @@ func CloseVectorIndex(idx VectorIndex, wait bool) {
 	}
 }
 
-// getVectorIndex create a vector index, if forParallelSearch is true, we load zinc index from metadata storage.
-func getVectorIndex(field, zincIndexName string, forParallelSearch bool) (VectorIndex, error) {
-	var zincIndex *Index
-	var err error
-	if forParallelSearch {
-		zincIndex, err = IndexMgr.GetQueryIndex(zincIndexName)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// get metadata
-		zincIndex, err = IndexMgr.Get(zincIndexName)
-		if err != nil {
-			return nil, fmt.Errorf("try get zinc index %s for getting vector field %s: %w", zincIndexName, field, err)
-		}
+// getVectorIndex loads an owner-only legacy vector runtime.
+func getVectorIndex(field, zincIndexName string) (VectorIndex, error) {
+	zincIndex, err := IndexMgr.Get(zincIndexName)
+	if err != nil {
+		return nil, fmt.Errorf("try get zinc index %s for getting vector field %s: %w", zincIndexName, field, err)
 	}
 
 	vecIndexMeta, ok := zincIndex.GetVecIndex(field)
@@ -461,7 +455,7 @@ func backgroundSeal() {
 			vecIdxManager.sealedLock.Lock()
 			vecIdxManager.sealTaskMp[task.taskName] = struct{}{}
 			vecIdxManager.sealedLock.Unlock()
-			vecIndex, err := GetVectorIndex(task.index, task.field, false)
+			vecIndex, err := GetVectorIndex(task.index, task.field)
 			if err != nil {
 				vecIdxManager.sealedLock.Lock()
 				delete(vecIdxManager.sealTaskMp, task.taskName)
@@ -532,7 +526,7 @@ func backgroundBuildHNSWIndex() {
 func buildHNSWIndex(task BuildHNSWIndexTask) error {
 	defer vecIdxManager.buildHNSWIndexTasks.Delete(task)
 
-	index, err := GetVectorIndex(task.index, task.field, false)
+	index, err := GetVectorIndex(task.index, task.field)
 	if err != nil {
 		return fmt.Errorf("failed to get vector index %v %v: %w", task.index, task.field, err)
 	}

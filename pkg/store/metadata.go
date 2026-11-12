@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/blugelabs/bluge/analysis"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
@@ -13,10 +12,12 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/store/text"
+	storevector "github.com/zincsearch/zincsearch/pkg/store/vector"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
 	"github.com/zincsearch/zincsearch/pkg/uquery/mappings"
-	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
+
+	"github.com/blugelabs/bluge/analysis"
 )
 
 // readIndex constructs an unpublished runtime index. The caller coordinates
@@ -38,22 +39,34 @@ func readIndex(name string, readOnly bool) (*Index, error) {
 	return index, nil
 }
 
-// writeIndex orders saves before serializing the store-owned metadata. It does
-// not publish the Index or acquire lifecycle locks. The caller must not hold mu.
+// writeIndex synchronously saves unsaved metadata under the same lock used for
+// mutations. It does not publish the Index or acquire lifecycle locks. The caller
+// must not hold mu; already-locked write paths use saveLocked instead.
 func writeIndex(index *Index) error {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	return index.saveLocked()
+}
+
+// saveLocked requires mu's write lock, held through persistence and dirty state
+// updates. It must not call MarshalJSON, which would recursively acquire mu.
+// Failures retain both the current metadata and its dirty flag for a later retry.
+func (index *Index) saveLocked() error {
 	if index.readOnly {
 		return fmt.Errorf("save index %s metadata: %w", index.name, text.ErrReadOnly)
 	}
-	index.saveMu.Lock()
-	defer index.saveMu.Unlock()
+	if !index.dirty {
+		return nil
+	}
 
-	data, err := index.MarshalJSON()
+	data, err := json.Marshal(index.ref)
 	if err != nil {
 		return fmt.Errorf("serialize index %s metadata: %w", index.name, err)
 	}
 	if err := metadata.Index.Set(index.name, data); err != nil {
 		return fmt.Errorf("save index %s metadata: %w", index.name, err)
 	}
+	index.dirty = false
 	return nil
 }
 
@@ -156,6 +169,9 @@ func createIndex(request *meta.IndexSimple) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize index %s: %w", name, err)
 	}
+	// The instance is still unpublished and exclusively owned by this call.
+	// Its initial metadata must be saved before it enters the cache.
+	index.dirty = true
 	return index, nil
 }
 
@@ -221,6 +237,11 @@ func formatIndexWithAnalyzers(ref *meta.Index, readOnly bool, analyzers map[stri
 	if err != nil {
 		return nil, err
 	}
+	if !readOnly {
+		index.vector = storevector.NewVecIndexManager(storevector.Options{
+			Name: ref.Name, StoreName: index.GetStoreName(), StorageType: ref.StorageType,
+		})
+	}
 	return index, nil
 }
 
@@ -243,16 +264,7 @@ func initializeMappings(ref *meta.Index) {
 			if ref.VecIndexes == nil {
 				ref.VecIndexes = make(map[string]*meta.VecIndex)
 			}
-			ref.VecIndexes[field] = &meta.VecIndex{
-				StoreWithHash:    true,
-				TargetType:       prop.VecIndexType,
-				Dims:             prop.Dims,
-				NBits:            prop.NBits,
-				M:                prop.M,
-				StoreWithFloat16: prop.StoreWithFloat16,
-				LayoutVersion:    vector.CurLayoutVersion,
-				Segments:         []*meta.VectorSegment{{Id: 0, Count: 0, Status: vector.StatusGrowing}},
-			}
+			ref.VecIndexes[field] = newVectorMetadata(prop)
 		}
 	}
 	ref.Mappings.SetProperty("_id", meta.NewProperty("keyword"))

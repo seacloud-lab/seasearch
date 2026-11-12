@@ -37,7 +37,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
-	"github.com/zincsearch/zincsearch/pkg/wal"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 
 	"github.com/getsentry/sentry-go"
@@ -91,19 +91,18 @@ func main() {
 	cluster.Init()
 	// init lruCache
 	lru_cache.Init()
-	// init assign watch
+	// Initialize legacy catalog state and the store cache/assignment loop.
 	core.InitIndexList()
-	// init vector index
-	core.InitVecIndexManager()
+	if err := store.Start(); err != nil {
+		log.Fatal().Err(err).Msg("failed to start index store")
+	}
+	// Vector runtimes belong to store.Index; never start the legacy manager
+	// against the same paths as store queries and synchronous writes.
+	store.StartVectorMaintenance()
 	// init listen auth and role
 	auth.Init()
 	// init async metadata update
 	core.InitAsyncMetaDataUpdate()
-	// Initialize WAL
-	if config.Global.EnableWal {
-		core.InitWalList()
-		wal.Init()
-	}
 
 	go logger.HandleRotateSignal()
 
@@ -136,8 +135,9 @@ func main() {
 		core.CloseAsyncMetaDataUpdate()
 		// close index list update
 		core.CloseIndexList()
-		// close vector index
-		core.CloseVecIndexManager()
+		store.StopVectorMaintenance()
+		// All store users must be drained before final resource cleanup.
+		store.Stop()
 		// close auth
 		auth.Close()
 		// close cluster
@@ -148,10 +148,6 @@ func main() {
 		// close metadata
 		err := metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
-		// close wal
-		if config.Global.EnableWal {
-			wal.ShutDown()
-		}
 
 		done <- struct{}{}
 	})

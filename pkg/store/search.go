@@ -64,6 +64,13 @@ func (index *Index) PartialSearch(ids []int, query *meta.ZincQuery, stats *zincs
 	defer cancel()
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	return index.partialSearchLocked(ctx, ids, query, stats)
+}
+
+// partialSearchLocked requires mu's read or write lock and an Index reference.
+// It consumes results and closes every Searcher/Reader before returning, including
+// on failure. Callers must not use a partial response when an error is returned.
+func (index *Index) partialSearchLocked(ctx context.Context, ids []int, query *meta.ZincQuery, stats *zincsearch.UnifiedStats) (*meta.SearchResponse, error) {
 	if err := prepareQuery(index, query); err != nil {
 		return nil, err
 	}

@@ -1,22 +1,24 @@
 package search
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 
-	"github.com/zincsearch/zincsearch/pkg/errors"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
-// DeleteByQuery searches the index and deletes all matches
+// DeleteByQuery deletes the documents selected by one query's from/size/sort window.
 //
 // @Id DeleteByQuery
-// @Summary Searches the index and deletes all matched documents
+// @Summary Deletes documents selected by the query window
 // @security BasicAuth
 // @Tags    Search
 // @Accept  json
@@ -36,34 +38,36 @@ func DeleteByQuery(c *gin.Context) {
 	}
 
 	indexName := c.Param("target")
-	resp, err := searchIndex([]string{indexName}, query)
+	index, err := store.Open(indexName)
 	if err != nil {
-		errors.HandleError(c, err)
+		if errors.Is(err, store.ErrIndexNotFound) {
+			err = fmt.Errorf("index %s does not exists: %w", indexName, zincerrors.ErrKeyNotFound)
+		}
+		zincerrors.HandleError(c, err)
 		return
 	}
+	defer index.Close()
 
-	deleteIds := make([]string, len(resp.Hits.Hits))
+	result, err := index.DeleteByQuery(query)
+	if result == nil {
+		zincerrors.HandleError(c, err)
+		return
+	}
+	deleted := len(result.IDs)
 	failures := []string{}
-	for i, hit := range resp.Hits.Hits {
-		deleteIds[i] = hit.ID
-	}
-	index, err := store.Open(indexName)
-	if err == nil {
-		defer index.Close()
-		err = index.DeleteDocuments(deleteIds)
-	}
 	if err != nil {
-		log.Error().Err(err).Msg("delete index failed")
-		// mark all deletes are failed
-		failures = deleteIds
+		log.Error().Err(err).Str("index", indexName).Msg("delete by query failed")
+		// Batch/save errors do not provide exact per-document outcomes. Report
+		// every target as unconfirmed, even though some changes may have applied.
+		failures = result.IDs
+		deleted = 0
 	}
 
-	totalDeletes := resp.Hits.Total.Value - len(failures)
 	zutils.GinRenderJSON(c, http.StatusOK, meta.HTTPResponseDeleteByQuery{
 		Took:             time.Since(start).Milliseconds(),
 		TimedOut:         false,
-		Total:            totalDeletes,
-		Deleted:          totalDeletes,
+		Total:            result.Matched,
+		Deleted:          deleted,
 		Batches:          0,
 		VersionConflicts: 0,
 		Noops:            0,

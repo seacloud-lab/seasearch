@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
@@ -20,6 +18,9 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/store/text"
 	"github.com/zincsearch/zincsearch/pkg/store/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
+
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -36,8 +37,15 @@ func Start() error {
 	return nil
 }
 
+// Stop requires external callers and background tasks to have released their
+// Index references. It stops and drains store vector maintenance, stops cache
+// scanning, then saves and closes every cached instance.
 func Stop() {
+	StopVectorMaintenance()
 	closer.SignalAndWait()
+	if err := cache.close(); err != nil {
+		log.Error().Err(err).Msg("failed to stop index store")
+	}
 }
 
 func Open(name string) (*Index, error) {
@@ -291,6 +299,8 @@ type Cache struct {
 	mutex sync.Mutex
 	items map[string]*CacheItem
 	evict *list.List
+
+	assignChanged <-chan struct{}
 }
 
 type CacheItem struct {
@@ -307,8 +317,9 @@ type CacheItem struct {
 
 func newCache() *Cache {
 	return &Cache{
-		items: make(map[string]*CacheItem),
-		evict: list.New(),
+		items:         make(map[string]*CacheItem),
+		evict:         list.New(),
+		assignChanged: cluster.AssignmentChanged,
 	}
 }
 
@@ -404,6 +415,10 @@ func (cache *Cache) Clean() {
 		select {
 		case <-closer.HasBeenClosed():
 			return
+		case <-cache.assignChanged:
+			if err := cache.cleanUnassigned(); err != nil {
+				log.Warn().Err(err).Msg("failed to clean unassigned indexes")
+			}
 		case <-ticker.C:
 			err := cache.clean()
 			if err != nil {
@@ -450,8 +465,10 @@ func (cache *Cache) cleanIndex(name string, cutoff time.Time) error {
 	index := item.index
 	cache.mutex.Unlock()
 
-	// When unsaved metadata tracking is introduced, save it here before
-	// unpublishing the instance; a save failure must leave it cached for retry.
+	// A save failure leaves the latest metadata and runtime cached for retry.
+	if err := writeIndex(index); err != nil {
+		return fmt.Errorf("evict index %s: %w", name, err)
+	}
 	// The lifecycle write lock keeps this zero-reference entry stable and blocks
 	// reloading until all resource close calls have finished.
 	cache.Del(name)
@@ -459,5 +476,51 @@ func (cache *Cache) cleanIndex(name string, cutoff time.Time) error {
 		return fmt.Errorf("evict index %s: %w", name, err)
 	}
 
+	return nil
+}
+
+// close is shutdown cleanup, not eviction. Callers must already be drained and
+// the scanner stopped. Save failures must not prevent any resource close calls.
+func (cache *Cache) close() error {
+	cache.mutex.Lock()
+	names := make([]string, 0, len(cache.items))
+	for name := range cache.items {
+		names = append(names, name)
+	}
+	cache.mutex.Unlock()
+
+	var errs []error
+	for _, name := range names {
+		if err := cache.closeIndex(name); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (cache *Cache) closeIndex(name string) error {
+	lifecycle := locker.Lifecycle(name)
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+
+	cache.mutex.Lock()
+	item, ok := cache.items[name]
+	cache.mutex.Unlock()
+	if !ok {
+		return nil
+	}
+
+	index := item.index
+	var errs []error
+	if err := writeIndex(index); err != nil {
+		errs = append(errs, err)
+	}
+	cache.Del(name)
+	if err := index.closeResources(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("stop index %s: %w", name, err)
+	}
 	return nil
 }

@@ -20,19 +20,13 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	indexUpdateCloser = z.NewCloser(1)
-	version           []byte
-)
+var version []byte
 
 func InitIndexList() {
 	// check version
@@ -59,11 +53,7 @@ func InitIndexList() {
 		log.Fatal().Err(err).Msg("Error loading alias")
 	}
 
-	if !config.Global.Cluster.Enable {
-		return
-	}
-
-	go watchIndexUpdate()
+	// Store Cache.Clean is the sole consumer of assignment-change notifications.
 }
 
 // LazyCloseSecondIndexShardWriters
@@ -106,27 +96,8 @@ func LazyCloseSecondIndexShardWriters() {
 	}
 }
 
-func CloseIndexList() {
-	if !config.Global.Cluster.Enable {
-		return
-	}
-	indexUpdateCloser.SignalAndWait()
-}
-
-func watchIndexUpdate() {
-	defer indexUpdateCloser.Done()
-	for {
-		select {
-		case <-indexUpdateCloser.HasBeenClosed():
-			return
-		case unassignMap := <-cluster.UnassignChan:
-			err := updateIndexList(unassignMap)
-			if err != nil {
-				log.Error().Err(err).Msg("cannot update memory index list")
-			}
-		}
-	}
-}
+// CloseIndexList remains for legacy callers; assignment cleanup belongs to store.
+func CloseIndexList() {}
 
 func updateIndexList(unassignMap map[string]struct{}) error {
 	// The index list only contains indexes managed by the current node.
