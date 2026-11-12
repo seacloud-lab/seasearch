@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -36,11 +37,12 @@ func (f *fieldIndex) ReconcileLayout(ctx context.Context, ref *meta.VecIndex) er
 	}
 	var extra []int
 	for id := range stored {
-		if id < 0 || int64(int(id)) != id {
+		if id < 0 || id > math.MaxInt {
 			return fmt.Errorf("%w: invalid segment %d", ErrVecIndexCorruption, id)
 		}
-		if int(id) >= len(ref.Segments) {
-			extra = append(extra, int(id))
+		segmentID := int(id)
+		if segmentID >= len(ref.Segments) {
+			extra = append(extra, segmentID)
 		}
 	}
 	slices.Sort(extra)
