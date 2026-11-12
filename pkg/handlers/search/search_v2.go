@@ -35,7 +35,6 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
-	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -65,7 +64,7 @@ func SearchDSL(c *gin.Context) {
 
 	resp, err := searchIndex(strings.Split(indexName, ","), query)
 	if err != nil {
-		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
+		if errors.Is(err, errors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -208,7 +207,7 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		resp, err = store.MultiSearch(indexNames, query)
 	} else {
 		if !cluster.AssignCheck(indexName) {
-			return nil, zincerrors.ErrIndexServerMismatch
+			return nil, errors.ErrIndexServerMismatch
 		}
 		index, loadErr := store.Open(indexName)
 		if loadErr != nil {

@@ -94,18 +94,25 @@ func (cache *Cache) Add(index *Index) {
 
 // waitIdle requires the caller to hold the lifecycle write lock. This excludes
 // acquisitions and replacement while existing holders release their references.
-func (cache *Cache) waitIdle(name string) *Index {
+// A timeout leaves the cache entry and its resources unchanged.
+func (cache *Cache) waitIdle(name string, timeout time.Duration) (*Index, error) {
 	cache.mutex.Lock()
 	item, ok := cache.items[name]
 	if !ok {
 		cache.mutex.Unlock()
-		return nil
+		return nil, nil
 	}
 	idle := item.idle
 	cache.mutex.Unlock()
 
-	<-idle
-	return item.index
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-idle:
+		return item.index, nil
+	case <-timer.C:
+		return nil, ErrIndexDrainTimeout
+	}
 }
 
 func (cache *Cache) Del(name string) {

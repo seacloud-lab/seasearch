@@ -25,7 +25,9 @@ type ObjStore interface {
 	LoadFile(name string) (string, io.Closer, error)
 	// SaveFile save a disk file into obj storage, and cache it.
 	SaveFile(inputFile string, name string) error
-	Remove(name string) error
+	// RemoveDir recursively deletes objects under the named directory, not siblings
+	// whose names merely share its prefix. name may identify an index or a field.
+	RemoveDir(name string) error
 }
 
 func GetVectorStorage() (ObjStore, error) {
@@ -111,7 +113,7 @@ func checkPath(localPath string) error {
 	return nil
 }
 
-func (d *diskStore) Remove(name string) error {
+func (d *diskStore) RemoveDir(name string) error {
 	localPath := path.Join(d.rootPath, name)
 	err := os.RemoveAll(localPath)
 	if err != nil {

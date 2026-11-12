@@ -19,6 +19,7 @@ import (
 var (
 	ErrIndexNotFound      = fmt.Errorf("index not found: %w", zincerrors.ErrKeyNotFound)
 	ErrIndexAlreadyExists = fmt.Errorf("index already exists")
+	ErrIndexDrainTimeout  = fmt.Errorf("index reference drain timed out")
 )
 
 // Index is a shared owner runtime index or an independent read-only query view.

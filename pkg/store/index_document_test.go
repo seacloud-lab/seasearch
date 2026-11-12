@@ -173,8 +173,7 @@ func TestIndex_UpdateDocument(t *testing.T) {
 		index, err = Create(&meta.IndexSimple{Name: "TestIndex_UpdateDocument.index_1"})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		prop := meta.NewProperty("date")
-		err = index.AddMappings(map[string]any{"properties": map[string]any{"time": prop}})
+		err = index.AddMappings(map[string]any{"properties": map[string]any{"time": map[string]any{"type": "date"}}})
 		assert.NoError(t, err)
 
 		err = index.CreateDocument("1", map[string]interface{}{

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
@@ -12,7 +13,9 @@ import (
 func makeHNSWSegmentForTest(t *testing.T) *HNSWSegment {
 	t.Helper()
 	configureVectorTest(t)
-	return newHNSWSegment("hnsw", 2, &resources{})
+	r := &resources{}
+	require.NoError(t, r.ensure())
+	return newHNSWSegment("hnsw", 2, r)
 }
 
 func TestHNSWSegment_BatchAndSearchCacheOnly(t *testing.T) {

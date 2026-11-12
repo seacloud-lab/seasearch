@@ -73,13 +73,17 @@ func (o *OssStorage) SaveFile(inputFile string, name string) error {
 	return o.cache.UpdateCacheFile(inputFile, localPath)
 }
 
-// Remove vector index, the input name should be index_name/vec_index_name
-func (o *OssStorage) Remove(name string) error {
-	prefix := path.Join(o.prefix, name)
+// RemoveDir recursively deletes a vector storage directory for an index or field.
+func (o *OssStorage) RemoveDir(name string) error {
+	// Append the boundary after Join, which would otherwise strip the slash.
+	prefix := path.Join(o.prefix, name) + "/"
 	objs, err := o.cli.List(context.Background(), prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove vec index file %s err: ", name)
 		return fmt.Errorf("remove vec index file err: %w", err)
+	}
+	if len(objs) == 0 {
+		return nil
 	}
 	keys := make([]string, 0, len(objs))
 	// remove local file

@@ -247,11 +247,11 @@ func TestIndex_Search(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		property := meta.Property{
-			Type:          "text",
-			Index:         true,
-			Store:         true,
-			Highlightable: true,
+		property := map[string]any{
+			"type":          "text",
+			"index":         true,
+			"store":         true,
+			"highlightable": true,
 		}
 
 		assert.NoError(t, index.AddMappings(map[string]any{"properties": map[string]any{"address.city": property}}))

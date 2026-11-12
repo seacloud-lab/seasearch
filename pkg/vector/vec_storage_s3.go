@@ -81,13 +81,17 @@ func (s *s3Storage) SaveFile(inputFile string, name string) error {
 	return s.cache.UpdateCacheFile(inputFile, localPath)
 }
 
-// Remove vector index, the input name should be index_name/vec_index_name
-func (s *s3Storage) Remove(name string) error {
-	prefix := path.Join(s.prefix, name)
+// RemoveDir recursively deletes a vector storage directory for an index or field.
+func (s *s3Storage) RemoveDir(name string) error {
+	// Append the boundary after Join, which would otherwise strip the slash.
+	prefix := path.Join(s.prefix, name) + "/"
 	objs, err := s.cli.List(context.Background(), prefix)
 	if err != nil {
 		log.Error().Err(err).Msgf("Remove vec index file %s err: list objects err: ", name)
 		return fmt.Errorf("remove vec index file err: list objects err: %w", err)
+	}
+	if len(objs) == 0 {
+		return nil
 	}
 
 	keys := make([]string, 0, len(objs))

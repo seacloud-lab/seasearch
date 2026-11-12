@@ -149,8 +149,8 @@ func (s *IndexShard) GetPartialSearchers(ref *meta.IndexShard, timeMin, timeMax 
 // The caller protects access to the borrowed metadata.
 func matchesTimeRange(second *meta.IndexSecondShard, timeMin, timeMax int64) bool {
 	stats := second.Stats
-	return !(timeMin > 0 && stats.DocTimeMax > 0 && stats.DocTimeMax < timeMin) &&
-		!(timeMax > 0 && stats.DocTimeMin > 0 && stats.DocTimeMin > timeMax)
+	return (timeMin <= 0 || stats.DocTimeMax <= 0 || stats.DocTimeMax >= timeMin) &&
+		(timeMax <= 0 || stats.DocTimeMin <= 0 || stats.DocTimeMin <= timeMax)
 }
 
 // emptyDocumentMatchIterator represents a successful search with no matches.

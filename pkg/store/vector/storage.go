@@ -20,7 +20,7 @@ func Delete(storeName, storageType string) error {
 	if err != nil {
 		return err
 	}
-	err = store.Remove(storeName)
+	err = store.RemoveDir(storeName)
 	if err != nil {
 		return err
 	}

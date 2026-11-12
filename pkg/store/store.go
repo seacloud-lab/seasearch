@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
@@ -18,6 +19,8 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/rs/zerolog/log"
 )
+
+const deleteDrainTimeout = 5 * time.Second
 
 var (
 	closer = z.NewCloser(0)
@@ -193,6 +196,9 @@ func GetQueryIndex(name string) (*Index, error) {
 
 // Delete waits for owner references to drain before closing resources and
 // removing data. Callers must release their own references before calling it.
+// If draining exceeds deleteDrainTimeout, it releases the lifecycle lock and
+// returns ErrIndexDrainTimeout without changing resources or persistent data.
+// The timeout does not bound lifecycle lock acquisition or storage deletion.
 // Resource cleanup is best-effort and does not prevent persistent data deletion.
 // Success confirms persistent deletion, not successful release of every resource;
 // cleanup failures are logged by resource owners, and deletion errors are returned.
@@ -208,7 +214,10 @@ func Delete(name string) error {
 		return zincerrors.ErrIndexServerMismatch
 	}
 
-	index := cache.waitIdle(name)
+	index, err := cache.waitIdle(name, deleteDrainTimeout)
+	if err != nil {
+		return fmt.Errorf("delete index %s: waiting for active references exceeded %s: %w", name, deleteDrainTimeout, err)
+	}
 	var storeName, storageType string
 	if index != nil {
 		// No holder can access metadata now, and the lifecycle write lock keeps
@@ -239,7 +248,7 @@ func Delete(name string) error {
 		storageType = ref.StorageType
 	}
 
-	err := vector.Delete(storeName, storageType)
+	err = vector.Delete(storeName, storageType)
 	if err != nil {
 		return fmt.Errorf("delete index %s vector data: %w", name, err)
 	}

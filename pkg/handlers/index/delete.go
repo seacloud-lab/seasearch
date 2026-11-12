@@ -16,6 +16,7 @@
 package index
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -39,6 +40,7 @@ import (
 // @Success 200 {object} meta.HTTPResponseIndex
 // @Failure 400 {object} meta.HTTPResponseError
 // @Failure 500 {object} meta.HTTPResponseError
+// @Failure 503 {object} meta.HTTPResponseError
 // @Router /api/index/{index} [delete]
 func Delete(c *gin.Context) {
 	indexNames := c.Param("target")
@@ -57,13 +59,13 @@ func Delete(c *gin.Context) {
 		if strings.Contains(indexName, "*") { // check for wildcard
 			err := deleteIndexWithWildcard(indexName, indexList)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+				renderDeleteError(c, err)
 				return
 			}
 			continue
 		}
 		if err := store.Delete(indexName); err != nil {
-			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+			renderDeleteError(c, err)
 			return
 		}
 	}
@@ -71,6 +73,14 @@ func Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, meta.HTTPResponse{
 		Message: "deleted",
 	})
+}
+
+func renderDeleteError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, store.ErrIndexDrainTimeout) {
+		status = http.StatusServiceUnavailable
+	}
+	c.JSON(status, meta.HTTPResponseError{Error: err.Error()})
 }
 
 func deleteIndexWithWildcard(indexName string, indexList []string) error {
