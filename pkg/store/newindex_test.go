@@ -1,0 +1,178 @@
+/* Copyright 2022 Zinc Labs Inc. and Contributors
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+ */
+
+package store
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+)
+
+func TestNewIndex(t *testing.T) {
+	type args struct {
+		name        string
+		storageType string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "normal",
+			args: args{
+				name:        "TestNewIndex.index_1",
+				storageType: "disk",
+			},
+			wantErr: false,
+		},
+		{
+			name: "underline prefix",
+			args: args{
+				name:        "_TestNewIndex.index_2",
+				storageType: "disk",
+			},
+			wantErr: true,
+		},
+		{
+			name: "with analyzer",
+			args: args{
+				name:        "TestNewIndex.index_3",
+				storageType: "disk",
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty",
+			args: args{
+				name:        "",
+				storageType: "disk",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Create(&meta.IndexSimple{Name: tt.args.name})
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, got)
+
+			got.Close()
+
+			t.Run("cleanup", func(t *testing.T) {
+				err := Delete(tt.args.name)
+				assert.NoError(t, err)
+			})
+		})
+	}
+}
+
+func TestGetIndex(t *testing.T) {
+	type args struct {
+		name string
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  *Index
+		want1 bool
+	}{
+		{
+			name: "normal",
+			args: args{
+				name: "TestGetIndex.index_1",
+			},
+			want1: true,
+		},
+		{
+			name: "not exist",
+			args: args{
+				name: "TestGetIndex.index_2",
+			},
+			want1: false,
+		},
+	}
+
+	t.Run("prepare", func(t *testing.T) {
+		index, err := Create(&meta.IndexSimple{Name: "TestGetIndex.index_1"})
+		assert.NoError(t, err)
+		assert.NotNil(t, index)
+
+		index.Close()
+	})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Open(tt.args.name)
+			if !tt.want1 {
+				assert.ErrorIs(t, err, ErrIndexNotFound)
+				return
+			}
+			assert.Nil(t, err)
+			assert.NotNil(t, got)
+			got.Close()
+		})
+	}
+
+	t.Run("cleanup", func(t *testing.T) {
+		err := Delete("TestGetIndex.index_1")
+		assert.NoError(t, err)
+	})
+}
+
+func TestCheckIndexName(t *testing.T) {
+	type args struct {
+		name string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "normal",
+			args: args{
+				name: "TestCheckIndexName.index_1",
+			},
+		},
+		{
+			name: "error",
+			args: args{
+				name: "_TestCheckIndexName.index_1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "error",
+			args: args{
+				name: "_TestCheckIndexName.index_*",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := meta.CheckIndexName(tt.args.name); (err != nil) != tt.wantErr {
+				t.Errorf("CheckIndexName() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

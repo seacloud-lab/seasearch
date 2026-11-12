@@ -5,16 +5,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store/text"
 	"github.com/zincsearch/zincsearch/pkg/zutils/base62"
 )
 
-// DocOperation preserves compatibility with bulk callers during their migration.
-// The new write path never calls the embedded legacy Index.
-type DocOperation = core.DocOperation
+// DocOperation describes a document insert or replacement in a synchronous batch.
+type DocOperation struct {
+	Update bool
+	DocId  string
+	Doc    map[string]interface{}
+}
 
 // CreateDocument inserts a document, or replaces an existing document when update
 // is true. The caller holds one Index reference through this synchronous call.

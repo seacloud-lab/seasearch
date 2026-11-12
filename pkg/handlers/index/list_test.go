@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -30,12 +29,13 @@ import (
 
 func TestList(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex("TestIndexList.index_1")
+		index, err := store.Create(&meta.IndexSimple{Name: "TestIndexList.index_1"})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	t.Run("list", func(t *testing.T) {
@@ -83,12 +83,13 @@ func TestList(t *testing.T) {
 
 func TestIndexNameList(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex("TestIndexNameList.index_1")
+		index, err := store.Create(&meta.IndexSimple{Name: "TestIndexNameList.index_1"})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	t.Run("indexNameList", func(t *testing.T) {

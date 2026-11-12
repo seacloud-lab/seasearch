@@ -3,12 +3,10 @@ package search
 import (
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
@@ -112,12 +110,20 @@ func TestDeleteByQuery(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			index, err := core.NewIndex("TestDeleteByQuery.index")
-			assert.NoError(t, err)
-			assert.NoError(t, core.IndexMgr.Store(index))
+			const indexName = "TestDeleteByQuery.index"
+			index, err := store.Create(&meta.IndexSimple{Name: indexName})
+			if !assert.NoError(t, err) {
+				return
+			}
+			defer func() {
+				assert.NoError(t, store.Delete(indexName))
+			}()
 			id := ider.Generate()
-			assert.NoError(t, index.CreateDocument(id, test.arg.doc, false))
-			time.Sleep(time.Second)
+			err = index.CreateDocument(id, test.arg.doc, false)
+			index.Close()
+			if !assert.NoError(t, err) {
+				return
+			}
 
 			c, w := utils.NewGinContext()
 			utils.SetGinRequestData(c, test.arg.query)
@@ -125,14 +131,17 @@ func TestDeleteByQuery(t *testing.T) {
 			DeleteByQuery(c)
 
 			if test.want.success.outcome {
-				time.Sleep(time.Second)
 				assertHTTPResponse(t, w, test.want.success.statusCode, test.want.success.body)
+				index, err := store.Open(indexName)
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer index.Close()
 				assertZeruResultQuery(t, index, test.arg.query)
 			} else {
 				assertHTTPResponse(t, w, test.want.failure.statusCode, test.want.failure.body)
 			}
 
-			assert.NoError(t, store.Delete(index.GetName()))
 		})
 
 	}
@@ -147,19 +156,14 @@ func assertHTTPResponse(t *testing.T, w *httptest.ResponseRecorder, statusCode i
 	}
 }
 
-func assertZeruResultQuery(t *testing.T, index *core.Index, query interface{}) {
-	jsonQuery, err := json.Marshal(&query)
-	assert.NoError(t, err)
-	var search, serr = index.Search(&meta.ZincQuery{
-		Query: &meta.Query{
-			Match: map[string]*meta.MatchQuery{
-				"_all": {
-					Query: string(jsonQuery),
-				},
-			},
-		},
-		Size: 10,
-	})
-	assert.NoError(t, serr)
+func assertZeruResultQuery(t *testing.T, index *store.Index, query string) {
+	var request meta.ZincQuery
+	if !assert.NoError(t, json.Unmarshal([]byte(query), &request)) {
+		return
+	}
+	search, serr := index.Search(&request)
+	if !assert.NoError(t, serr) {
+		return
+	}
 	assert.Equal(t, 0, search.Hits.Total.Value)
 }

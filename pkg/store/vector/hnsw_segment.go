@@ -94,7 +94,9 @@ func (seg *HNSWSegment) Close() {
 // The caller must hold seg.mutex's write lock; this helper does not acquire it.
 func (seg *HNSWSegment) closeResources() {
 	if seg.index != nil {
-		seg.index.Close()
+		if err := seg.index.Close(); err != nil {
+			log.Warn().Err(err).Str("store", seg.store).Msg("failed to close HNSW native index")
+		}
 		seg.index = nil
 	}
 	if seg.writer != nil {

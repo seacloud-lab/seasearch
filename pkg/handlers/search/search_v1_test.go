@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
@@ -68,11 +68,12 @@ func TestSearchV1(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName)
+		index, err := store.Create(&meta.IndexSimple{Name: indexName})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	for _, tt := range tests {

@@ -24,7 +24,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
@@ -82,7 +81,7 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 	}
 	defer newIndex.Close()
 
-	ops := make([]core.DocOperation, 0)
+	ops := make([]store.DocOperation, 0)
 	for scanner.Scan() { // Read each line
 		for k := range doc {
 			delete(doc, k)
@@ -103,21 +102,14 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 		} else {
 			update = true
 		}
-		if config.Global.EnableWal {
-			err = newIndex.CreateDocument(docID, doc, update)
-			if err != nil {
-				return count, err
-			}
-		} else {
-			// the 'doc' object is reused, we create a temp doc to prevent the 'doc' modified
-			var tempDoc map[string]interface{}
-			_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
-			ops = append(ops, core.DocOperation{
-				Doc:    tempDoc,
-				DocId:  docID,
-				Update: update,
-			})
-		}
+		// The scanner document is reused; retain an independent batch value.
+		var tempDoc map[string]interface{}
+		_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
+		ops = append(ops, store.DocOperation{
+			Doc:    tempDoc,
+			DocId:  docID,
+			Update: update,
+		})
 
 		count++
 	}
@@ -126,11 +118,8 @@ func MultiWorker(indexName string, body io.Reader) (int64, error) {
 		return count, err
 	}
 
-	if !config.Global.EnableWal {
-		err := newIndex.CreateDocuments(ops)
-		if err != nil {
-			return 0, err
-		}
+	if err := newIndex.CreateDocuments(ops); err != nil {
+		return 0, err
 	}
 
 	return count, nil

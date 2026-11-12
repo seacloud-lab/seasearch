@@ -21,7 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
+	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
@@ -36,7 +37,7 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 	}
 	tests := []struct {
 		name        string
-		nFn         func(*core.Index)
+		nFn         func(*store.Index)
 		args        args
 		wantErr     bool
 		wantCode    int
@@ -78,8 +79,8 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"add": {"index": "TestAddOrRemoveESAlias.index_1","aliases": ["test_alias_3","test_alias_4"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -91,8 +92,8 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"add": {"indices": ["TestAddOrRemoveESAlias.index_1"],"aliases": ["test_alias_3","test_alias_4"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -104,8 +105,8 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"add": {"indices": ["*index_1"],"aliases": ["test_alias_3","test_alias_4"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -117,9 +118,9 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"remove": {"index": "TestAddOrRemoveESAlias.index_1","alias": "existing_alias_2"}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -131,10 +132,10 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"remove": {"index": "TestAddOrRemoveESAlias.index_1","aliases": ["existing_alias_1","existing_alias_2"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -146,10 +147,10 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"remove": {"indices": ["TestAddOrRemoveESAlias.index_1"],"aliases": ["existing_alias_1","existing_alias_2"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -161,10 +162,10 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 				data:   `{"actions": [{"remove": {"indices": ["*index_1"],"aliases": ["existing_alias_1","existing_alias_2"]}}]}`,
 				result: `{"acknowledged":true}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode:    http.StatusOK,
 			wantErr:     false,
@@ -189,7 +190,7 @@ func TestAddOrRemoveESAlias(t *testing.T) {
 			require.Equal(t, tt.wantCode, w.Code)
 			require.Equal(t, tt.args.result, w.Body.String())
 
-			als := core.ZINC_INDEX_ALIAS_LIST.GetAliasesForIndex(indexName)
+			als := catalog.ZINC_INDEX_ALIAS_LIST.GetAliasesForIndex(indexName)
 			require.ElementsMatch(t, tt.wantAliases, als)
 		})
 	}
@@ -202,7 +203,7 @@ func TestGetESAliases(t *testing.T) {
 	}
 	tests := []struct {
 		name     string
-		nFn      func(*core.Index)
+		nFn      func(*store.Index)
 		params   map[string]string
 		args     args
 		wantErr  bool
@@ -213,10 +214,10 @@ func TestGetESAliases(t *testing.T) {
 			args: args{
 				result: `{"TestAddOrRemoveESAlias.index_1":{"aliases":{"existing_alias_1":{},"existing_alias_2":{},"existing_alias_3":{}}}}`,
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode: http.StatusOK,
 			wantErr:  false,
@@ -229,10 +230,10 @@ func TestGetESAliases(t *testing.T) {
 			params: map[string]string{
 				"target": "TestAddOrRemoveESAlias.index_1",
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode: http.StatusOK,
 			wantErr:  false,
@@ -245,10 +246,10 @@ func TestGetESAliases(t *testing.T) {
 			params: map[string]string{
 				"target_alias": "existing_alias_1",
 			},
-			nFn: func(index *core.Index) {
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
-				require.NoError(t, core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
+			nFn: func(index *store.Index) {
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_1", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_2", []string{index.GetName()}))
+				require.NoError(t, catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias("existing_alias_3", []string{index.GetName()}))
 			},
 			wantCode: http.StatusOK,
 			wantErr:  false,
@@ -274,16 +275,14 @@ func TestGetESAliases(t *testing.T) {
 	}
 }
 
-func newIndex(t *testing.T, indexName string) (*core.Index, func()) {
-	index, err := core.NewIndex(indexName)
-	require.NoError(t, err)
-
-	err = core.IndexMgr.Store(index)
+func newIndex(t *testing.T, indexName string) (*store.Index, func()) {
+	index, err := store.Create(&meta.IndexSimple{Name: indexName})
 	require.NoError(t, err)
 
 	return index, func() {
+		index.Close()
 		require.NoError(t, metadata.Alias.Set(map[string][]string{}))
-		core.ZINC_INDEX_ALIAS_LIST = *core.NewAliasList()
+		catalog.ZINC_INDEX_ALIAS_LIST = *catalog.NewAliasList()
 		require.NoError(t, store.Delete(indexName))
 	}
 }

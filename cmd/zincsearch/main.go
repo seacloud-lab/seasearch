@@ -29,9 +29,9 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -91,18 +91,15 @@ func main() {
 	cluster.Init()
 	// init lruCache
 	lru_cache.Init()
-	// Initialize legacy catalog state and the store cache/assignment loop.
-	core.InitIndexList()
+	// Initialize catalog state and the store cache/assignment loop.
+	catalog.Init()
 	if err := store.Start(); err != nil {
 		log.Fatal().Err(err).Msg("failed to start index store")
 	}
-	// Vector runtimes belong to store.Index; never start the legacy manager
-	// against the same paths as store queries and synchronous writes.
+	// Maintenance borrows current owner references from the store.
 	store.StartVectorMaintenance()
 	// init listen auth and role
 	auth.Init()
-	// init async metadata update
-	core.InitAsyncMetaDataUpdate()
 
 	go logger.HandleRotateSignal()
 
@@ -131,10 +128,6 @@ func main() {
 		}
 
 		log.Info().Msg("Index closing...")
-		// close metadata update
-		core.CloseAsyncMetaDataUpdate()
-		// close index list update
-		core.CloseIndexList()
 		store.StopVectorMaintenance()
 		// All store users must be drained before final resource cleanup.
 		store.Stop()
@@ -196,10 +189,10 @@ func main() {
 }
 
 func telemetry() {
-	core.InitTelemetry()
-	core.Telemetry.Instance()
-	core.Telemetry.Event("server_start", nil)
-	core.Telemetry.Cron()
+	catalog.InitTelemetry()
+	catalog.Telemetry.Instance()
+	catalog.Telemetry.Event("server_start", nil)
+	catalog.Telemetry.Cron()
 }
 
 func sentries() {
@@ -229,7 +222,7 @@ func profiling() {
 
 	ProfileID := config.Global.ProfilerFriendlyProfileID
 	if ProfileID == "" {
-		ProfileID = strings.ToLower(core.Telemetry.GetInstanceID())
+		ProfileID = strings.ToLower(catalog.Telemetry.GetInstanceID())
 	}
 
 	_, err := pyroscope.Start(pyroscope.Config{

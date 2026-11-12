@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/blugelabs/bluge"
-	"github.com/zincsearch/zincsearch/pkg/wal"
 )
 
 // IndexV026 compatible for v0.2.6 index
@@ -33,8 +32,7 @@ type IndexV026 struct {
 	DocTimeMax  int64             `json:"doc_time_max"`
 	ShardNum    int64             `json:"shard_num"`
 	Shards      []*IndexShardV026 `json:"shards"`
-	WAL         *wal.Log          `json:"-"`
-	WALSize     uint64            `json:"wal_size"`
+	WALSize     uint64            `json:"wal_size"` // Historical decoding compatibility; no runtime WAL.
 	Settings    *IndexSettings    `json:"settings,omitempty"`
 	Mappings    *Mappings         `json:"mappings,omitempty"`
 	CreateAt    time.Time         `json:"create_at"`

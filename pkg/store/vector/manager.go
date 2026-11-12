@@ -120,7 +120,8 @@ func (m *VecIndexManager) Get(field string, ref *meta.VecIndex) (VectorIndex, er
 
 // Close requires all owner Index users to have drained. Unpublish everything
 // before cleanup; a partially closed runtime is never reused, even on failure.
-// Cleanup failures are handled by resource owners and are not returned.
+// Resource owners log cleanup failures and discard their references regardless;
+// failures are not returned and do not prevent other fields from being closed.
 func (m *VecIndexManager) Close() {
 	m.mutex.Lock()
 	if m.closed {

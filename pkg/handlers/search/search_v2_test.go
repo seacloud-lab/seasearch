@@ -21,8 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
+	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
@@ -77,11 +77,11 @@ func TestSearchDSL(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName)
-		assert.NoError(t, err)
-		assert.NotNil(t, index)
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		index, err := store.Create(&meta.IndexSimple{Name: indexName})
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer index.Close()
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
 			"name": "zinc",
@@ -148,11 +148,11 @@ func TestMultipleSearch(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName)
-		assert.NoError(t, err)
-		assert.NotNil(t, index)
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		index, err := store.Create(&meta.IndexSimple{Name: indexName})
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer index.Close()
 		id := ider.Generate()
 		assert.NoError(t, index.CreateDocument(id, map[string]interface{}{
 			"name": "zinc",

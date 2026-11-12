@@ -5,7 +5,6 @@ import (
 	"path"
 	"sync"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store/text"
@@ -53,9 +52,6 @@ type Index struct {
 	// dirty tracks metadata changes not yet successfully persisted. Set it when
 	// modifying ref under mutex, including before an operation that may partly fail.
 	dirty bool
-
-	// Retained while existing callers are migrated to the store-owned state.
-	core.Index
 }
 
 func (index *Index) GetName() string {
@@ -149,7 +145,9 @@ func (index *Index) Close() {
 
 // closeResources is final cleanup, not the public reference-release operation.
 // All owner references and request Readers must already have been released.
-// Resource owners log Writer cleanup failures without propagating them.
+// Resource owners log cleanup failures without propagating them. Always attempt
+// both vector and text cleanup and discard runtime references, even on failure.
+// Callers must unpublish owner instances first; cleanup never gates data deletion.
 func (index *Index) closeResources() {
 	if index.vector != nil {
 		index.vector.Close()

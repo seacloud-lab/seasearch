@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -234,23 +233,24 @@ func TestAnalyze(t *testing.T) {
 	}
 
 	t.Run("prepare", func(t *testing.T) {
-		index, err := core.NewIndex(indexName)
-		assert.NoError(t, err)
-		assert.NotNil(t, index)
-
-		mapping := meta.NewMappings()
 		prop1 := meta.NewProperty("text")
 		prop1.Analyzer = "standard"
-		mapping.Properties["name1"] = prop1
 		prop2 := meta.NewProperty("text")
 		prop2.Analyzer = "standard"
 		prop2.SearchAnalyzer = "standard"
-		mapping.Properties["name2"] = prop2
-		err = index.SetMappings(mapping)
+		index, err := store.Create(&meta.IndexSimple{
+			Name: indexName,
+			Mappings: map[string]interface{}{
+				"properties": map[string]interface{}{
+					"name1": prop1,
+					"name2": prop2,
+				},
+			},
+		})
 		assert.NoError(t, err)
-
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	for _, tt := range tests {

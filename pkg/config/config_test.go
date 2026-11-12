@@ -44,7 +44,6 @@ func TestConfig(t *testing.T) {
 	t.Run("prepare", func(t *testing.T) {
 		os.Setenv("SS_ETCD_ENDPOINTS", "localhost:2379")
 		os.Setenv("ZINC_MAX_DOCUMENT_SIZE", "1m")
-		os.Setenv("ZINC_WAL_SYNC_INTERVAL", "10s")
 	})
 
 	t.Run("check", func(t *testing.T) {
@@ -65,12 +64,10 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 1000, c.AggregationTermsSize)
 		assert.Equal(t, int64(10000000000), c.ObjCache.MaxCacheSize)
 		assert.Equal(t, "disk", c.StorageType)
-		assert.Equal(t, false, c.EnableWal)
 		assert.Equal(t, 1, c.Cluster.NodeId)
 		assert.Equal(t, int64(100000), c.VectorConfig.IvfPqThreshold)
 		assert.Equal(t, int64(10000), c.VectorConfig.HNSWMaxLogs)
 
-		assert.Equal(t, 10*time.Second, c.WalSyncInterval)
 		assert.Equal(t, []string{"localhost:2379"}, c.Etcd.Endpoints)
 
 		assert.Equal(t, false, c.Plugin.GSE.Enable)
@@ -150,11 +147,13 @@ func TestConfig(t *testing.T) {
 			},
 		}
 		for _, v := range dt {
-			os.Setenv("ZINC_WAL_SYNC_INTERVAL", v.value)
+			t.Setenv("TEST_DURATION", v.value)
 
-			c := new(config)
+			c := &struct {
+				Duration time.Duration `env:"TEST_DURATION"`
+			}{}
 			zutils.LoadConfig(reflect.ValueOf(c).Elem())
-			assert.Equal(t, c.WalSyncInterval, v.expect)
+			assert.Equal(t, c.Duration, v.expect)
 		}
 
 	})

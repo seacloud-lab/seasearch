@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -130,7 +129,7 @@ func Create(request *meta.IndexSimple) (*Index, error) {
 		return nil, fmt.Errorf("index request must not be nil")
 	}
 	name := request.Name
-	err := core.CheckIndexName(name)
+	err := meta.CheckIndexName(name)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +194,8 @@ func GetQueryIndex(name string) (*Index, error) {
 // Delete waits for owner references to drain before closing resources and
 // removing data. Callers must release their own references before calling it.
 // Resource cleanup is best-effort and does not prevent persistent data deletion.
+// Success confirms persistent deletion, not successful release of every resource;
+// cleanup failures are logged by resource owners, and deletion errors are returned.
 func Delete(name string) error {
 	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, "_") || !deleteIndexNameRe.MatchString(name) {
 		return fmt.Errorf("invalid index name %q", name)

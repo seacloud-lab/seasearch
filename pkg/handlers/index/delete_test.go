@@ -21,7 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
@@ -98,10 +99,11 @@ func TestDelete(t *testing.T) {
 }
 
 func prepareIndex(t *testing.T, name, storageType string) {
-	index, err := core.NewIndex(name)
+	index, err := store.Create(&meta.IndexSimple{Name: name})
 	assert.NoError(t, err)
 	assert.NotNil(t, index)
 
-	err = core.IndexMgr.Store(index)
-	assert.NoError(t, err)
+	if index != nil {
+		index.Close()
+	}
 }

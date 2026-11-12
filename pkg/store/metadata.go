@@ -6,7 +6,6 @@ import (
 	"maps"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -77,7 +76,7 @@ func (index *Index) save() error {
 // or publishing a cache reference. All allocations on failure are GC-managed.
 func createIndex(request *meta.IndexSimple) (*Index, error) {
 	name := request.Name
-	err := core.CheckIndexName(name)
+	err := meta.CheckIndexName(name)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +99,7 @@ func createIndex(request *meta.IndexSimple) (*Index, error) {
 		ShardNum:      1,
 	}
 
-	template, err := core.UseTemplate(name)
+	template, err := metadata.Template.Match(name)
 	if err != nil {
 		return nil, fmt.Errorf("load template for index %s: %w", name, err)
 	}
@@ -212,7 +211,7 @@ func formatIndex(ref *meta.Index, readOnly bool) (*Index, error) {
 // formatIndexWithAnalyzers shares the final analyzer objects with text runtime
 // options. Creation parses mappings with this same set before constructing text.
 func formatIndexWithAnalyzers(ref *meta.Index, readOnly bool, analyzers map[string]*analysis.Analyzer) (*Index, error) {
-	err := core.CheckIndexName(ref.Name)
+	err := meta.CheckIndexName(ref.Name)
 	if err != nil {
 		return nil, err
 	}

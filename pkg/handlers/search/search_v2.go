@@ -32,9 +32,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/errors"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -64,7 +65,7 @@ func SearchDSL(c *gin.Context) {
 
 	resp, err := searchIndex(strings.Split(indexName, ","), query)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -84,7 +85,7 @@ func SearchDSL(c *gin.Context) {
 			eventData["search_index_size_in_mb"] = storageSize / 1024 / 1024
 			eventData["time_taken_to_search_in_ms"] = resp.Took
 			eventData["aggregations_count"] = len(query.Aggregations)
-			core.Telemetry.Event("search", eventData)
+			catalog.Telemetry.Event("search", eventData)
 		}
 	}
 
@@ -207,7 +208,7 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 		resp, err = store.MultiSearch(indexNames, query)
 	} else {
 		if !cluster.AssignCheck(indexName) {
-			return nil, core.ErrIndexServerMismatch
+			return nil, zincerrors.ErrIndexServerMismatch
 		}
 		index, loadErr := store.Open(indexName)
 		if loadErr != nil {

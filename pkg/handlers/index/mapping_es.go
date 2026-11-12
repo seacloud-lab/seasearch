@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/meta/elastic"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
@@ -23,7 +23,7 @@ import (
 // @Router /es/{index}/_mapping [get]
 func GetESMapping(c *gin.Context) {
 	indexName := c.Param("target")
-	index, err := core.GetIndexMetadata(indexName)
+	index, err := catalog.GetIndexMetadata(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return

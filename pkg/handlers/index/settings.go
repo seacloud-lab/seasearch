@@ -21,7 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/store"
@@ -39,7 +39,7 @@ import (
 // @Router /api/{index}/_settings [get]
 func GetSettings(c *gin.Context) {
 	indexName := c.Param("target")
-	index, err := core.GetIndexMetadata(indexName)
+	index, err := catalog.GetIndexMetadata(indexName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return

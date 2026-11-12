@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
@@ -100,8 +99,6 @@ func TestDocument(t *testing.T) {
 			resp := request("PUT", "/api/"+indexName+"/_doc/1111", body)
 			assert.Equal(t, http.StatusBadRequest, resp.Code)
 		})
-		// wait for WAL write to index
-		time.Sleep(time.Second)
 	})
 
 	t.Run("DELETE /api/:target/_doc/:id", func(t *testing.T) {
