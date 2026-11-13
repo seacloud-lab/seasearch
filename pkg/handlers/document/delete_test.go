@@ -18,12 +18,10 @@ package document
 import (
 	"net/http"
 	"testing"
-	"time"
+
+	"github.com/zincsearch/zincsearch/test/utils"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/zincsearch/zincsearch/pkg/core"
-	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func TestDelete(t *testing.T) {
@@ -100,8 +98,6 @@ func TestDelete(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), `"id":"1"`)
 
-		// wait for WAL write to index
-		time.Sleep(time.Second)
 	})
 
 	for _, tt := range tests {
@@ -113,12 +109,4 @@ func TestDelete(t *testing.T) {
 			assert.Contains(t, w.Body.String(), tt.args.result)
 		})
 	}
-
-	t.Run("cleanup", func(t *testing.T) {
-		idx, err := core.IndexMgr.Get(indexName)
-		assert.Nil(t, err)
-		assert.NoError(t, idx.Close())
-		err = core.IndexMgr.Delete(indexName)
-		assert.NoError(t, err)
-	})
 }

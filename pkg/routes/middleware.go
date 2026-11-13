@@ -24,7 +24,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/zincsearch/zincsearch/pkg/auth"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 )
 
 func AuthMiddleware(permission string) func(c *gin.Context) {
@@ -74,7 +75,7 @@ func IndexAliasMiddleware(c *gin.Context) {
 		return
 	}
 
-	indexes, ok := core.ZINC_INDEX_ALIAS_LIST.GetIndexesForAlias(target)
+	indexes, ok := catalog.ZINC_INDEX_ALIAS_LIST.GetIndexesForAlias(target)
 	if !ok {
 		c.Next()
 		return
@@ -93,7 +94,7 @@ func ClusterMiddleware(c *gin.Context) {
 	indexNames := strings.Split(indexName, ",")
 	for _, index := range indexNames {
 		if !cluster.AssignCheck(index) {
-			c.AbortWithStatusJSON(http.StatusNotAcceptable, meta.HTTPResponseError{Error: core.ErrIndexServerMismatch.Error()})
+			c.AbortWithStatusJSON(http.StatusNotAcceptable, meta.HTTPResponseError{Error: zincerrors.ErrIndexServerMismatch.Error()})
 		}
 	}
 }

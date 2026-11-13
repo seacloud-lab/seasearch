@@ -95,17 +95,10 @@ func (p *Property) AddField(field string, value Property) {
 
 // DeepClone returns a copy of the Property.
 func (p *Property) DeepClone() Property {
-	prop := NewProperty(p.Type)
-	prop.Analyzer = p.Analyzer
-	prop.SearchAnalyzer = p.SearchAnalyzer
-	prop.Format = p.Format
-	prop.Index = p.Index
-	prop.Store = p.Store
-	prop.Sortable = p.Sortable
-	prop.Aggregatable = p.Aggregatable
-	prop.Highlightable = p.Highlightable
+	prop := *p
 
 	if p.Fields != nil {
+		prop.Fields = make(map[string]Property, len(p.Fields))
 		for k, v := range p.Fields {
 			prop.Fields[k] = v.DeepClone()
 		}

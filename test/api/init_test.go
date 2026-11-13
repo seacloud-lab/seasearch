@@ -26,11 +26,11 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
+	"github.com/zincsearch/zincsearch/test/storetest"
 	"github.com/zincsearch/zincsearch/test/utils"
 
 	"github.com/gin-gonic/gin"
@@ -118,18 +118,13 @@ func TestMain(m *testing.M) {
 		metadata.InitMetaStorage()
 		auth.InitFirstUser()
 		chs.InitGse()
-		core.InitWalList()
 		// init lruCache
 		lru_cache.Init()
-		// init assign watch
-		core.InitIndexList()
-		// init vector index
-		core.InitVecIndexManager()
-		return nil
+		return storetest.Start()
 	}
 	stop := func() error {
-		core.CloseIndexList()
-		core.CloseVecIndexManager()
+		storetest.Stop()
+		lru_cache.ShutDown()
 		return metadata.Close()
 	}
 	os.Exit(utils.RunMain(m, start, stop))

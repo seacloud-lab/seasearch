@@ -22,9 +22,9 @@ import (
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
@@ -51,32 +51,17 @@ func Analyze(c *gin.Context) {
 	indexName := c.Param("target")
 	if indexName != "" {
 		// use index analyzer
-		index, err := core.IndexMgr.Get(indexName)
+		index, err := store.Open(indexName)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 			return
 		}
-		if query.Filed != "" && query.Analyzer == "" {
-			mappings := index.GetMappings()
-			if mappings != nil && mappings.Len() > 0 {
-				if prop, ok := mappings.GetProperty(query.Filed); ok {
-					if query.Analyzer == "" && prop.SearchAnalyzer != "" {
-						query.Analyzer = prop.SearchAnalyzer
-					}
-					if query.Analyzer == "" && prop.Analyzer != "" {
-						query.Analyzer = prop.Analyzer
-					}
-				}
-			}
-		}
-		ana, _ = zincanalysis.QueryAnalyzer(index.GetAnalyzers(), query.Analyzer)
-		if ana == nil {
-			if query.Analyzer == "" {
-				ana = new(analysis.Analyzer)
-			} else {
-				c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "analyzer " + query.Analyzer + " does not exists"})
-				return
-			}
+		defer index.Close()
+
+		ana, err = index.Analyzer(query.Filed, query.Analyzer)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+			return
 		}
 	} else {
 		// none index specified

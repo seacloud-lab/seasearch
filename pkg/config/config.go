@@ -20,7 +20,6 @@ import (
 	"path"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 
@@ -30,41 +29,29 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const (
-	WalStorageTypeDisk  = "disk"
-	WalStorageTypeRkv   = "rkv"
-	WalStorageTypePgsql = "postgresql"
-	WalStorageTypeMysql = "mysql"
-)
-
 type config struct {
-	GinMode                   string        `env:"GIN_MODE,default=release"`
-	ServerPort                string        `env:"ZINC_SERVER_PORT,default=4080"`
-	ServerAddress             string        `env:"ZINC_SERVER_ADDRESS"`
-	ServerTLSCertificateFile  string        `env:"ZINC_SERVER_TLS_CERTIFICATE_FILE"`
-	ServerTLSKeyFile          string        `env:"ZINC_SERVER_TLS_KEY_FILE"`
-	DataPath                  string        `env:"SS_DATA_PATH,default=./data"`
-	MetadataStorage           string        `env:"ZINC_METADATA_STORAGE,default=bolt"`
-	IceCompressor             string        `env:"ZINC_ICE_COMPRESSOR,default=zstd"`
-	SentryEnable              bool          `env:"ZINC_SENTRY,default=false"`
-	SentryDSN                 string        `env:"ZINC_SENTRY_DSN,default=https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942"`
-	ProfilerEnable            bool          `env:"ZINC_PROFILER,default=false"`
-	ProfilerServer            string        `env:"ZINC_PROFILER_SERVER,default=https://pyroscope.dev.zincsearch.com"`
-	ProfilerAPIKey            string        `env:"ZINC_PROFILER_API_KEY,default=psx-AfPbC5Bh6gI4dHkCMpoxM2Qd7Xblsqhip5nlwvHdhAE1"`
-	ProfilerFriendlyProfileID string        `env:"ZINC_PROFILER_FRIENDLY_PROFILE_ID"`
-	TelemetryEnable           bool          `env:"ZINC_TELEMETRY,default=false"`
-	PrometheusEnable          bool          `env:"SS_PROMETHEUS_ENABLE,default=false"`
-	EnableTextKeywordMapping  bool          `env:"ZINC_ENABLE_TEXT_KEYWORD_MAPPING,default=false"`
-	BatchSize                 int           `env:"ZINC_BATCH_SIZE,default=1024"`
-	MaxResults                int           `env:"ZINC_MAX_RESULTS,default=10000"`
-	AggregationTermsSize      int           `env:"ZINC_AGGREGATION_TERMS_SIZE,default=1000"`
-	MaxDocumentSize           int           `env:"ZINC_MAX_DOCUMENT_SIZE,default=1m"`      // Max size for a single document . Default = 1 MB = 1024 * 1024
-	WalSyncInterval           time.Duration `env:"ZINC_WAL_SYNC_INTERVAL,default=1s"`      // sync wal to disk, 1s, 10ms
-	WalRedoLogNoSync          bool          `env:"ZINC_WAL_REDOLOG_NO_SYNC,default=false"` // control sync after every write
-	ZincSwaggerEnable         bool          `env:"ZINC_SWAGGER_ENABLE,default=true"`
-	EnableWal                 bool          `env:"ZINC_WAL_ENABLE,default=false"`
-	WalStorageType            string        `env:"ZINC_WAL_STORAGE_TYPE,default=disk"`
-	WalConfig                 walConfig
+	GinMode                   string `env:"GIN_MODE,default=release"`
+	ServerPort                string `env:"ZINC_SERVER_PORT,default=4080"`
+	ServerAddress             string `env:"ZINC_SERVER_ADDRESS"`
+	ServerTLSCertificateFile  string `env:"ZINC_SERVER_TLS_CERTIFICATE_FILE"`
+	ServerTLSKeyFile          string `env:"ZINC_SERVER_TLS_KEY_FILE"`
+	DataPath                  string `env:"SS_DATA_PATH,default=./data"`
+	MetadataStorage           string `env:"ZINC_METADATA_STORAGE,default=bolt"`
+	IceCompressor             string `env:"ZINC_ICE_COMPRESSOR,default=zstd"`
+	SentryEnable              bool   `env:"ZINC_SENTRY,default=false"`
+	SentryDSN                 string `env:"ZINC_SENTRY_DSN,default=https://15b6d9b8be824b44896f32b0234c32b7@o1218932.ingest.sentry.io/6360942"`
+	ProfilerEnable            bool   `env:"ZINC_PROFILER,default=false"`
+	ProfilerServer            string `env:"ZINC_PROFILER_SERVER,default=https://pyroscope.dev.zincsearch.com"`
+	ProfilerAPIKey            string `env:"ZINC_PROFILER_API_KEY,default=psx-AfPbC5Bh6gI4dHkCMpoxM2Qd7Xblsqhip5nlwvHdhAE1"`
+	ProfilerFriendlyProfileID string `env:"ZINC_PROFILER_FRIENDLY_PROFILE_ID"`
+	TelemetryEnable           bool   `env:"ZINC_TELEMETRY,default=false"`
+	PrometheusEnable          bool   `env:"SS_PROMETHEUS_ENABLE,default=false"`
+	EnableTextKeywordMapping  bool   `env:"ZINC_ENABLE_TEXT_KEYWORD_MAPPING,default=false"`
+	BatchSize                 int    `env:"ZINC_BATCH_SIZE,default=1024"`
+	MaxResults                int    `env:"ZINC_MAX_RESULTS,default=10000"`
+	AggregationTermsSize      int    `env:"ZINC_AGGREGATION_TERMS_SIZE,default=1000"`
+	MaxDocumentSize           int    `env:"ZINC_MAX_DOCUMENT_SIZE,default=1m"` // Max size for a single document . Default = 1 MB = 1024 * 1024
+	ZincSwaggerEnable         bool   `env:"ZINC_SWAGGER_ENABLE,default=true"`
 	StorageType               string `env:"SS_STORAGE_TYPE,default=disk"`
 	ObjCache                  objCache
 	LogConfig                 logConfig
@@ -145,16 +132,6 @@ type gse struct {
 	DictPath   string `env:"ZINC_PLUGIN_GSE_DICT_PATH,default=./plugins/gse/dict"`
 }
 
-type walConfig struct {
-	RkvEndpoint []string `env:"ZINC_WAL_RKV_ENDPOINT"`
-
-	Host     string `env:"ZINC_WAL_SQL_HOST"`
-	Port     string `env:"ZINC_WAL_SQL_PORT"`
-	Db       string `env:"ZINC_WAL_SQL_DB"`
-	User     string `env:"ZINC_WAL_SQL_USER"`
-	Password string `env:"ZINC_WAL_SQL_PWD"`
-}
-
 type vectorConfig struct {
 	IvfPqThreshold int64 `env:"SS_VECTOR_IVFPQ_THRESHOLD,default=100000"`
 	HNSWMaxLogs    int64 `env:"SS_VECTOR_HNSW_MAX_LOGS,default=10000"`
@@ -198,7 +175,6 @@ func initConfig(c *config) {
 	// check obj store backend config
 	checkOss()
 	checkS3()
-	checkWalConfig()
 }
 
 func checkOss() {
@@ -245,30 +221,4 @@ func checkS3() {
 	}
 
 	Global.S3.PartSize = Global.S3.PartSize * 1024 * 1024
-}
-
-func checkWalConfig() {
-	if !Global.EnableWal {
-		return
-	}
-
-	if Global.WalStorageType == WalStorageTypeDisk {
-		return
-	}
-
-	if Global.WalStorageType == WalStorageTypeRkv {
-		if len(Global.WalConfig.RkvEndpoint) == 0 {
-			log.Fatal().Msg("require rkv")
-		}
-		return
-	}
-	if Global.WalStorageType != WalStorageTypeMysql && Global.WalStorageType != WalStorageTypePgsql {
-		log.Fatal().Msg("unsupported wal type")
-	}
-
-	if Global.WalConfig.Db == "" || Global.WalConfig.Host == "" ||
-		Global.WalConfig.Port == "" || Global.WalConfig.User == "" ||
-		Global.WalConfig.Password == "" {
-		log.Fatal().Msg("require wal sql config")
-	}
 }

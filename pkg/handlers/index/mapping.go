@@ -18,13 +18,13 @@ package index
 import (
 	"net/http"
 
-	"github.com/zincsearch/zincsearch/pkg/errors"
+	"github.com/zincsearch/zincsearch/pkg/store"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/uquery/mappings"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -39,7 +39,7 @@ import (
 // @Router /api/{index}/_mapping [get]
 func GetMapping(c *gin.Context) {
 	indexName := c.Param("target")
-	index, err := core.GetIndexMetadata(indexName)
+	index, err := catalog.GetIndexMetadata(indexName)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
@@ -76,66 +76,24 @@ func SetMapping(c *gin.Context) {
 		return
 	}
 
-	mappings, err := mappings.Request(nil, mappingRequest)
+	index, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-
-	index, exists, err := core.IndexMgr.GetOrCreate(indexName)
-	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if zincerrors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+	defer index.Close()
 
-	// check if mapping field is exists
-	if exists {
-		indexMappings := index.GetMappings()
-		if indexMappings != nil && indexMappings.Len() > 0 {
-			for field := range mappings.ListProperty() {
-				if _, ok := indexMappings.GetProperty(field); ok {
-					zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index [" + indexName + "] already exists mapping of field [" + field + "]"})
-					return
-				}
-			}
+	if err := index.AddMappings(mappingRequest); err != nil {
+		code := http.StatusInternalServerError
+		var configErr *zincerrors.Error
+		if zincerrors.As(err, &configErr) {
+			code = http.StatusBadRequest
 		}
-		// add mappings
-		for field, prop := range mappings.ListProperty() {
-			indexMappings.SetProperty(field, prop)
-		}
-		mappings = indexMappings
-	}
-
-	// update mappings
-	if mappings != nil && mappings.Len() > 0 {
-		for k, v := range mappings.Properties {
-			if v.Fields == nil {
-				continue
-			}
-
-			update := false
-			for kField, field := range v.Fields {
-				if field.Fields != nil {
-					field.Fields = nil
-					v.Fields[kField] = field
-					update = true
-				}
-			}
-
-			if update {
-				mappings.Properties[k] = v
-			}
-		}
-		_ = index.SetMappings(mappings)
-	}
-
-	// store index
-	if err := core.IndexMgr.Store(index); err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		zutils.GinRenderJSON(c, code, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
 

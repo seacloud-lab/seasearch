@@ -23,13 +23,11 @@ require (
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-ego/gse v0.80.2
-	github.com/go-sql-driver/mysql v1.7.1
 	github.com/goccy/go-json v0.10.6
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/haiwen/goutils/clusterkit v0.1.1
 	github.com/haiwen/goutils/objclient v0.1.7
 	github.com/joho/godotenv v1.4.0
-	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.20.5
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.29.0
@@ -40,10 +38,8 @@ require (
 	github.com/swaggo/files v0.0.0-20220728132757-551d4a08d97a
 	github.com/swaggo/gin-swagger v1.5.3
 	github.com/swaggo/swag v1.8.11
-	github.com/tidwall/btree v1.8.1
 	github.com/x448/float16 v0.8.4
 	github.com/zincsearch/go-gin-prometheus v0.1.1
-	github.com/zincsearch/wal v1.2.6
 	go.etcd.io/bbolt v1.3.6
 	go.etcd.io/etcd/client/v3 v3.6.9
 	golang.org/x/crypto v0.58.0
@@ -126,7 +122,6 @@ require (
 	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/segmentio/backo-go v1.0.0 // indirect
-	github.com/tidwall/tinylru v1.1.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
@@ -158,5 +153,4 @@ replace (
 	github.com/blugelabs/bluge_segment_api => github.com/seacloud-lab/bluge_segment_api v1.0.0
 	github.com/blugelabs/ice => github.com/seacloud-lab/ice v1.1.3
 	github.com/zincsearch/go-gin-prometheus => github.com/seacloud-lab/go-gin-prometheus v0.1.1
-	github.com/zincsearch/wal => github.com/seacloud-lab/wal v1.2.6
 )

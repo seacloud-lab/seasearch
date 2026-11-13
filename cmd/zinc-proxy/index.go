@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -33,7 +33,7 @@ func List(c *gin.Context) {
 	desc, _ := strconv.ParseBool(c.DefaultQuery("desc", "false"))
 	name := c.DefaultQuery("name", "")
 
-	items, err := core.ListIndexMetadata()
+	items, err := catalog.ListIndexMetadata()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, &meta.HTTPResponseError{Error: err.Error()})
 		return

@@ -18,11 +18,9 @@ package document
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -97,8 +95,6 @@ func TestUpdate(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "")
 
-		// wait for WAL write to index
-		time.Sleep(time.Second)
 	})
 
 	for _, tt := range tests {
@@ -118,12 +114,4 @@ func TestUpdate(t *testing.T) {
 			assert.Contains(t, w.Body.String(), tt.args.result)
 		})
 	}
-
-	t.Run("cleanup", func(t *testing.T) {
-		idx, err := core.IndexMgr.Get("TestDocumentUpdate.index_1")
-		assert.Nil(t, err)
-		assert.NoError(t, idx.Close())
-		err = core.IndexMgr.Delete("TestDocumentUpdate.index_1")
-		assert.NoError(t, err)
-	})
 }

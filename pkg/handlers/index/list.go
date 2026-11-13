@@ -23,7 +23,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
@@ -45,7 +45,7 @@ func List(c *gin.Context) {
 	desc, _ := strconv.ParseBool(c.DefaultQuery("desc", "false"))
 	name := c.DefaultQuery("name", "")
 
-	items, err := core.ListIndexMetadata()
+	items, err := catalog.ListIndexMetadata()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -139,7 +139,7 @@ func List(c *gin.Context) {
 func IndexNameList(c *gin.Context) {
 	queryName := strings.ToLower(c.DefaultQuery("name", ""))
 	var items []string
-	names, err := core.ListIndexNames()
+	names, err := catalog.ListIndexNames()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return

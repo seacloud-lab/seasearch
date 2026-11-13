@@ -16,14 +16,16 @@
 package index
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 )
 
 // Delete deletes a zinc index and its associated data.
@@ -38,6 +40,7 @@ import (
 // @Success 200 {object} meta.HTTPResponseIndex
 // @Failure 400 {object} meta.HTTPResponseError
 // @Failure 500 {object} meta.HTTPResponseError
+// @Failure 503 {object} meta.HTTPResponseError
 // @Router /api/index/{index} [delete]
 func Delete(c *gin.Context) {
 	indexNames := c.Param("target")
@@ -46,7 +49,7 @@ func Delete(c *gin.Context) {
 		return
 	}
 
-	indexList, err := core.ListIndexNames()
+	indexList, err := catalog.ListIndexNames()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -56,13 +59,13 @@ func Delete(c *gin.Context) {
 		if strings.Contains(indexName, "*") { // check for wildcard
 			err := deleteIndexWithWildcard(indexName, indexList)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+				renderDeleteError(c, err)
 				return
 			}
 			continue
 		}
-		if err := core.IndexMgr.Delete(indexName); err != nil {
-			c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+		if err := store.Delete(indexName); err != nil {
+			renderDeleteError(c, err)
 			return
 		}
 	}
@@ -70,6 +73,14 @@ func Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, meta.HTTPResponse{
 		Message: "deleted",
 	})
+}
+
+func renderDeleteError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, store.ErrIndexDrainTimeout) {
+		status = http.StatusServiceUnavailable
+	}
+	c.JSON(status, meta.HTTPResponseError{Error: err.Error()})
 }
 
 func deleteIndexWithWildcard(indexName string, indexList []string) error {
@@ -89,7 +100,7 @@ func deleteIndexWithWildcard(indexName string, indexList []string) error {
 
 	for _, name := range indexList {
 		if p.MatchString(name) {
-			if err := core.IndexMgr.Delete(name); err != nil {
+			if err := store.Delete(name); err != nil {
 				return err
 			}
 		}

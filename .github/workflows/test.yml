@@ -20,9 +20,6 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     env:
-      ZINC_WAL_SYNC_INTERVAL: 10ms
-      ZINC_WAL_REDOLOG_NO_SYNC: true
-      ZINC_WAL_ENABLE: false
       ZINC_ENABLE_TEXT_KEYWORD_MAPPING: true
 
     steps:

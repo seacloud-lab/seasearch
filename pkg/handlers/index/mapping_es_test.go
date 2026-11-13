@@ -8,7 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -16,12 +17,13 @@ func TestESMapping_GetConverted(t *testing.T) {
 	config.Global.EnableTextKeywordMapping = true
 
 	t.Run("create index", func(t *testing.T) {
-		index, err := core.NewIndex("TestEsMapping.index_1")
+		index, err := store.Create(&meta.IndexSimple{Name: "TestEsMapping.index_1"})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	t.Run("set mapping", func(t *testing.T) {
@@ -159,7 +161,7 @@ func TestESMapping_GetConverted(t *testing.T) {
 
 	t.Run("delete index", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			_ = core.IndexMgr.Delete(fmt.Sprintf("TestEsMapping.index_%d", i))
+			_ = store.Delete(fmt.Sprintf("TestEsMapping.index_%d", i))
 		}
 	})
 

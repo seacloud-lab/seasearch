@@ -19,9 +19,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	v1 "github.com/zincsearch/zincsearch/pkg/meta/v1"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/uquery"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
@@ -41,11 +42,12 @@ import (
 // @Router /api/{index}/_search [post]
 func SearchV1(c *gin.Context) {
 	indexName := c.Param("target")
-	index, err := core.IndexMgr.Get(indexName)
+	index, err := store.Open(indexName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}
+	defer index.Close()
 
 	iQuery := new(v1.ZincQuery)
 	iQuery.MaxResults = 10
@@ -74,7 +76,7 @@ func SearchV1(c *gin.Context) {
 	eventData["search_index_size_in_mb"] = storageSize / 1024 / 1024
 	eventData["time_taken_to_search_in_ms"] = resp.Took
 	eventData["aggregations_count"] = len(iQuery.Aggregations)
-	core.Telemetry.Event("search", eventData)
+	catalog.Telemetry.Event("search", eventData)
 
 	c.JSON(http.StatusOK, resp)
 }

@@ -68,7 +68,6 @@ func SetupHttp(r *gin.Engine) {
 
 	// vector
 	r.POST("/api/:target/_search/vector", SearchVector)
-	r.POST("/api/:target/:field/_rebuild", directForwarding)
 	r.POST("/api/:target/_recall", directForwarding)
 
 	// index settings
@@ -132,7 +131,6 @@ func SetupHttp(r *gin.Engine) {
 	r.POST("/es/_bulk", EsBulk)
 	r.POST("/es/:target/_bulk", EsBulk)
 	r.PUT("/es/:target/_bulk", EsBulk)
-	r.POST("/es/:target/_refresh", directForwarding)
 
 	r.POST("/es/:target/_doc", directForwarding)        // create
 	r.PUT("/es/:target/_doc/:id", directForwarding)     // create or update
