@@ -26,7 +26,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/goccy/go-json v0.10.6
 	github.com/grafana/pyroscope-go v1.2.0
-	github.com/haiwen/goutils/clusterkit v0.1.1
+	github.com/haiwen/goutils/clusterkit v0.1.3
 	github.com/haiwen/goutils/objclient v0.1.7
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.10.9
@@ -46,10 +46,10 @@ require (
 	github.com/zincsearch/wal v1.2.6
 	go.etcd.io/bbolt v1.3.6
 	go.etcd.io/etcd/client/v3 v3.6.9
-	golang.org/x/crypto v0.58.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/text v0.43.0
+	golang.org/x/crypto v0.59.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/text v0.44.0
 	golang.org/x/time v0.7.0
 )
 
@@ -143,8 +143,8 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.25.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
