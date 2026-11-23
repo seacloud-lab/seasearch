@@ -292,7 +292,7 @@ func calculateMin(subCount int, v interface{}) (res int, err error) {
 			if match != nil {
 				leftPart := match[1]
 				rightPart := match[2]
-				condition, err := strconv.ParseInt(leftPart, 10, 64)
+				condition, err := strconv.Atoi(leftPart)
 				if err != nil {
 					return 0, fmt.Errorf("cannot parse the condition value: %w", err)
 				}
@@ -301,7 +301,7 @@ func calculateMin(subCount int, v interface{}) (res int, err error) {
 					return 0, fmt.Errorf("cannot parse the clauses count: %w", err)
 				}
 				conditions[i] = combination{
-					condition: int(condition),
+					condition: condition,
 					count:     count,
 				}
 			} else {
@@ -343,7 +343,7 @@ func calculateMin(subCount int, v interface{}) (res int, err error) {
 		if match != nil {
 			leftPart := match[1]
 			rightPart := match[2]
-			condition, err := strconv.ParseInt(leftPart, 10, 64)
+			condition, err := strconv.Atoi(leftPart)
 			if err != nil {
 				return 0, fmt.Errorf("cannot parse the condition value: %w", err)
 			}
@@ -351,7 +351,7 @@ func calculateMin(subCount int, v interface{}) (res int, err error) {
 			if err != nil {
 				return 0, fmt.Errorf("cannot parse the clauses count: %w", err)
 			}
-			if subCount <= int(condition) {
+			if subCount <= condition {
 				return subCount, nil
 			}
 			return count, nil
@@ -376,12 +376,12 @@ func getPartValue(termCount int, part string) (int, error) {
 		count := float64(termCount) * float64(proportion) / 100
 		return int(count), nil
 	}
-	count, err := strconv.ParseInt(part, 10, 64)
+	count, err := strconv.Atoi(part)
 	if err != nil {
 		return 0, fmt.Errorf("cannot parse a int value: %w", err)
 	}
 	if count < 0 {
-		return termCount + int(count), nil
+		return termCount + count, nil
 	}
-	return int(count), nil
+	return count, nil
 }

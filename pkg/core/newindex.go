@@ -38,6 +38,9 @@ func CheckIndexName(name string) error {
 	if name == "" {
 		return fmt.Errorf("index name cannot be empty")
 	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("index name cannot be \".\" or \"..\"")
+	}
 	if strings.HasPrefix(name, "_") {
 		return fmt.Errorf("index name cannot start with _")
 	}

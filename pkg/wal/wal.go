@@ -16,13 +16,15 @@
 package wal
 
 import (
+	"path/filepath"
+	"strings"
+
 	"github.com/zincsearch/wal"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/wal/mysql"
 	"github.com/zincsearch/zincsearch/pkg/wal/pgsql"
 	"github.com/zincsearch/zincsearch/pkg/wal/redo"
-	"path"
 )
 
 type Wal interface {
@@ -82,6 +84,17 @@ func Open(indexName string) (*Log, error) {
 	l.name = indexName
 
 	if config.Global.WalStorageType == config.WalStorageTypeDisk {
+		// indexName is a relative shard path. Reject dot components before
+		// joining so existing metadata cannot redirect WAL or redo storage.
+		if !filepath.IsLocal(indexName) {
+			return nil, errors.New(errors.ErrorTypeRuntimeException, "invalid WAL path: expected a local relative path")
+		}
+		for component := range strings.SplitSeq(indexName, string(filepath.Separator)) {
+			if component == "." || component == ".." {
+				return nil, errors.New(errors.ErrorTypeRuntimeException, "invalid WAL path: . and .. components are not allowed")
+			}
+		}
+
 		opt := &wal.Options{
 			NoSync:           true,     // Fsync after every write
 			SegmentSize:      16777216, // 16 MB log segment files.
@@ -91,7 +104,7 @@ func Open(indexName string) (*Log, error) {
 			FilePerms:        0640,     // Permissions for the created data files
 			FillID:           true,     // Allow writes with a zero ID
 		}
-		l.log, err = wal.Open(path.Join(config.Global.DataPath, indexName, "wal"), opt)
+		l.log, err = wal.Open(filepath.Join(config.Global.DataPath, indexName, "wal"), opt)
 		if err != nil {
 			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal error").Cause(err)
 		}
@@ -99,7 +112,7 @@ func Open(indexName string) (*Log, error) {
 		redoOpt := redo.DefaultOptions()
 		redoOpt.NoSync = config.Global.WalRedoLogNoSync
 		redoOpt.NoCopy = true
-		l.Redo, err = redo.Open(path.Join(config.Global.DataPath, indexName, "redo"), redoOpt)
+		l.Redo, err = redo.Open(filepath.Join(config.Global.DataPath, indexName, "redo"), redoOpt)
 		if err != nil {
 			return nil, errors.New(errors.ErrorTypeRuntimeException, "open wal redo error").Cause(err)
 		}
