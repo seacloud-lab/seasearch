@@ -37,52 +37,8 @@ import (
 )
 
 var (
-	username   = "admin"
-	password   = "Complexpass#123"
-	indexName  = "games3"
-	indexAlias = indexName + "-alias"
-	indexData  = `{
-	"Athlete": "DEMTSCHENKO, Albert",
-	"City": "Turin",
-	"Country": "RUS",
-	"Discipline": "Luge",
-	"Event": "Singles",
-	"Gender": "Men",
-	"Medal": "Silver",
-	"Season": "winter",
-	"Sport": "Luge",
-	"Year": 2006
-}`
-	// 	queryDataMatch = `{
-	// 	"search_type": "match",
-	// 	"query":
-	// 	{
-	// 		"term": "DEMTSCHENKO",
-	// 		"start_time": "2021-06-02T14:28:31.894Z",
-	// 		"end_time": "2021-12-30T15:28:31.894Z"
-	// 	},
-	// 	"fields": ["_all"]
-	// }`
-
-	// 	queryDataQueryString = `{
-	//     "search_type": "querystring",
-	//     "query":
-	//     {
-	//         "term": "+City:Turin +Silver",
-	//         "start_time": "2021-06-02T14:28:31.894Z",
-	//         "end_time": "2021-12-30T15:28:31.894Z"
-	//     },
-	//     "fields": ["_all"]
-	// }`
-	bulkData = `{"index": {"_index": "games3", "_type": "doc", "_id": "1"}}
-{"field1": "value1", "field2": "value2", "field3": "value3"}
-{"index": {"_index": "games3", "_type": "doc", "_id": "2"}}
-{"field1": "value1", "field2": "value2", "field3": "value3"}
-{"create": {"_index": "games3", "_type": "doc", "_id": "3"}}
-{"field1": "value1", "field2": "value2", "field3": "value3"}`
-	bulkDataWithDelete = `{"index": {"_index": "games3", "_type": "doc", "_id": "4"}}
-{"field1": "value1", "field2": "value2", "field3": "value3"}
-{"delete": {"_index": "games3", "_type": "doc", "_id": "1"}}`
+	username = "admin"
+	password = "Complexpass#123"
 )
 
 var (
@@ -91,14 +47,12 @@ var (
 )
 
 func server() *gin.Engine {
-	if r == nil {
-		once.Do(func() {
-			gin.SetMode(gin.ReleaseMode)
-			r = gin.New()
-			r.Use(gin.Recovery())
-			routes.SetRoutes(r)
-		})
-	}
+	once.Do(func() {
+		gin.SetMode(gin.ReleaseMode)
+		r = gin.New()
+		r.Use(gin.Recovery())
+		routes.SetRoutes(r)
+	})
 
 	return r
 }
@@ -113,6 +67,21 @@ func request(method, api string, body io.Reader) *httptest.ResponseRecorder {
 
 func TestMain(m *testing.M) {
 	start := func() error {
+		// Set before InitConfig: godotenv.Load must not select shared/remote
+		// storage from a developer's .env. RunMain owns the temporary DataPath.
+		for key, value := range map[string]string{
+			"SS_STORAGE_TYPE": "disk", "ZINC_METADATA_STORAGE": "bolt",
+			"SS_CLUSTER_ENABLE": "false", "ZINC_TELEMETRY": "false",
+			"ZINC_PROFILER": "false", "ZINC_SENTRY": "false",
+			"ZINC_BATCH_SIZE": "1024", "ZINC_MAX_RESULTS": "10000",
+			"ZINC_SHARD_MAX_SIZE": "1073741824", "ZINC_SHARD_GOROUTINE_NUM": "3",
+			"SS_VECTOR_IVFPQ_THRESHOLD": "100000", "SS_VECTOR_HNSW_MAX_LOGS": "10000",
+			"ZINC_ENABLE_TEXT_KEYWORD_MAPPING": "false",
+		} {
+			if err := os.Setenv(key, value); err != nil {
+				return err
+			}
+		}
 		config.InitConfig()
 		ider.InitIder()
 		metadata.InitMetaStorage()

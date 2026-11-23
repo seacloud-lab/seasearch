@@ -41,7 +41,9 @@ func (index *Index) CreateDocuments(operations []DocOperation) error {
 			var err error
 			id, _, err = shard.FindDocument(context.Background(), index.ref.Shards[shard.GetID()], operation.DocId, false)
 			if errors.Is(err, zincerrors.ErrorIDNotFound) {
-				update = false
+				// Keep replacement semantics: an earlier window in this request
+				// may insert the same ID before this operation is committed.
+				id = text.ShardIDNeedLatest
 			} else if err != nil {
 				return errors.Join(err, index.save())
 			}

@@ -1,247 +1,68 @@
-/* Copyright 2022 Zinc Labs Inc. and Contributors
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
- */
-
 package api
 
 import (
-	"bytes"
-	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
 func TestSearchV1(t *testing.T) {
-	t.Run("init data for search", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(indexData)
-		resp := request("PUT", "/api/"+indexName+"/_doc", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-	})
-
-	t.Run("POST /api/:target/_search", func(t *testing.T) {
-		t.Run("search document with not exist indexName", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{}`)
-			resp := request("POST", "/api/notExistSearch/_search", body)
-			assert.Equal(t, http.StatusBadRequest, resp.Code)
+	name := indexResource(t)
+	apiRaw(t, "PUT", "/api/"+name+"/_doc/1", indexData, 200, nil)
+	for _, test := range []struct {
+		name, body string
+		count      int
+	}{
+		{"all", `{"search_type":"alldocuments"}`, 1},
+		{"no_match", `{"search_type":"match","query":{"term":"absent"}}`, 0},
+		{"match", `{"search_type":"match","query":{"field":"Athlete","term":"DEMTSCHENKO"}}`, 1},
+		{"wildcard", `{"search_type":"wildcard","query":{"field":"Athlete","term":"dem*"}}`, 1},
+		{"fuzzy", `{"search_type":"fuzzy","query":{"field":"Athlete","term":"demtschenk"}}`, 1},
+		{"term", `{"search_type":"term","query":{"field":"City","term":"turin"}}`, 1},
+		{"matchall", `{"search_type":"matchall","query":{"term":"demtschenk"}}`, 1},
+		{"phrase", `{"search_type":"matchphrase","query":{"field":"Athlete","term":"DEMTSCHENKO"}}`, 1},
+		{"multiphrase", `{"search_type":"multiphrase","query":{"terms":[["demtschenko"],["albert"]]}}`, 1},
+		{"prefix", `{"search_type":"prefix","query":{"field":"Athlete","term":"dem"}}`, 1},
+		{"querystring", `{"search_type":"querystring","query":{"term":"Athlete:DEMTSCHENKO"}}`, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var result meta.SearchResponse
+			apiRaw(t, "POST", "/api/"+name+"/_search", test.body, 200, &result)
+			require.Equal(t, test.count, result.Hits.Total.Value)
+			if test.count > 0 {
+				require.Equal(t, []string{name + "/1"}, hitKeys(&result))
+			} else {
+				require.Empty(t, result.Hits.Hits)
+			}
 		})
-		t.Run("search document with exist indexName", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "alldocuments"}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-		})
-		t.Run("search document with not exist term", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "match", "query": {"term": "xxxx"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.Equal(t, 0, data.Hits.Total.Value)
-		})
-		t.Run("search document with exist term", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "match", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: alldocuments", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "alldocuments", "query": {}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: wildcard", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "wildcard", "query": {"field":"Athlete","term": "dem*"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: fuzzy", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "fuzzy", "query": {"field":"Athlete","term": "demtschenk"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: term", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{
-				"search_type": "term", 
-				"query": {
-					"term": "turin", 
-					"field":"City"
+	}
+	t.Run("missing_index", func(t *testing.T) { apiRaw(t, "POST", "/api/"+resourceName()+"/_search", `{}`, 400, nil) })
+	for _, test := range []struct{ name, body string }{
+		{"terms", `{"search_type":"matchall","aggs":{"years":{"agg_type":"terms","field":"Year"}}}`},
+		{"metrics", `{"search_type":"matchall","aggs":{"maximum":{"agg_type":"max","field":"Year"},"minimum":{"agg_type":"min","field":"Year"},"average":{"agg_type":"avg","field":"Year"}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var result struct {
+				Aggregations map[string]struct {
+					Value   float64 `json:"value"`
+					Buckets []struct {
+						Key   float64 `json:"key"`
+						Count int     `json:"doc_count"`
+					} `json:"buckets"`
+				} `json:"aggregations"`
+			}
+			apiRaw(t, "POST", "/api/"+name+"/_search", test.body, 200, &result)
+			if test.name == "terms" {
+				buckets := result.Aggregations["years"].Buckets
+				require.Len(t, buckets, 1)
+				require.EqualValues(t, 2006, buckets[0].Key)
+				require.Equal(t, 1, buckets[0].Count)
+			} else {
+				for _, key := range []string{"maximum", "minimum", "average"} {
+					require.EqualValues(t, 2006, result.Aggregations[key].Value)
 				}
-			}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
+			}
 		})
-
-		t.Run("search document type: matchall", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "matchall", "query": {"term": "demtschenk"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: match", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "match", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: matchphrase", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "matchphrase", "query": {"field":"Athlete","term": "DEMTSCHENKO"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: multiphrase", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{
-				"search_type": "multiphrase",
-				"query": {
-					"terms": [
-						["demtschenko"],
-						["albert"]
-					]
-				}
-			}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: prefix", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "prefix", "query": {"field":"Athlete","term": "dem"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-		t.Run("search document type: querystring", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{"search_type": "querystring", "query": {"term": "Athlete:DEMTSCHENKO"}}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, data.Hits.Total.Value, 1)
-		})
-	})
-
-	t.Run("POST /api/:target/_search with aggregations", func(t *testing.T) {
-		t.Run("terms aggregation", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{
-				"search_type": "matchall", 
-				"aggs": {
-					"my-agg": {
-						"agg_type": "terms",
-						"field": "City"
-					}
-				}
-			}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, len(data.Aggregations), 1)
-		})
-
-		t.Run("metric aggregation", func(t *testing.T) {
-			body := bytes.NewBuffer(nil)
-			body.WriteString(`{
-				"search_type": "matchall", 
-				"aggs": {
-					"my-agg-max": {
-						"agg_type": "max",
-						"field": "Year"
-					},
-					"my-agg-min": {
-						"agg_type": "min",
-						"field": "Year"
-					},
-					"my-agg-avg": {
-						"agg_type": "avg",
-						"field": "Year"
-					}
-				}
-			}`)
-			resp := request("POST", "/api/"+indexName+"/_search", body)
-			assert.Equal(t, http.StatusOK, resp.Code)
-
-			data := new(meta.SearchResponse)
-			err := json.Unmarshal(resp.Body.Bytes(), data)
-			assert.NoError(t, err)
-			assert.GreaterOrEqual(t, len(data.Aggregations), 1)
-		})
-	})
+	}
 }

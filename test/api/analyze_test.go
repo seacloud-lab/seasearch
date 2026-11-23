@@ -18,7 +18,6 @@ package api
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -47,7 +46,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("standard analyzer with stopwords", func(t *testing.T) {
-			indexName := "my-index-001"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -70,8 +69,6 @@ func TestAnalyze(t *testing.T) {
 			body := bytes.NewBuffer(nil)
 			body.WriteString(index)
 			resp := request("PUT", "/api/index/"+indexName, body)
-			buf, err := io.ReadAll(resp.Body)
-			fmt.Println(string(buf), err)
 			assert.Equal(t, http.StatusOK, resp.Code)
 
 			// analyze
@@ -88,7 +85,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("standard analyzer with stopwords and filters", func(t *testing.T) {
-			indexName := "my-index-002"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -186,7 +183,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("regexp analyzer with pattern", func(t *testing.T) {
-			indexName := "my-index-003"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -243,7 +240,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("stop analyzer with stopwords", func(t *testing.T) {
-			indexName := "my-index-004"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -403,7 +400,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("n-gram tokenizer with configuration", func(t *testing.T) {
-			indexName := "my-index-005"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -469,7 +466,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("edge n-gram tokenizer with configuration", func(t *testing.T) {
-			indexName := "my-index-006"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -570,7 +567,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("regexp tokenizer with configuration example1", func(t *testing.T) {
-			indexName := "my-index-007"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -614,7 +611,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("regexp tokenizer with configuration example2", func(t *testing.T) {
-			indexName := "my-index-008"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -699,7 +696,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("path hierarchy tokenizer with configuration", func(t *testing.T) {
-			indexName := "my-index-009"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {
@@ -1236,7 +1233,7 @@ func TestAnalyze(t *testing.T) {
 		})
 
 		t.Run("Pattern replace character filter", func(t *testing.T) {
-			indexName := "my-index-010"
+			indexName := indexResource(t)
 			index := `{
 				"settings": {
 				  "analysis": {

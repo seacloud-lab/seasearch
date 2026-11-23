@@ -1,339 +1,225 @@
 package api
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/zincsearch/zincsearch/pkg/bluge/directory"
-	"github.com/zincsearch/zincsearch/pkg/config"
+	"github.com/stretchr/testify/require"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
-var (
-	vecIndexName1 = "paper"
-	vecIndexName2 = "paper2"
-
-	vecIndexMeta1 = `
-		{
-			"name":"paper",
-			"mappings":{
-				"properties":{
-					"title-vec":{
-						"type":"vector",
-						"dims": 4,
-						"vec_index_type":"flat"
-					},
-					"paper-id":{
-						"type":"keyword"
-					}
-				}
-			}
-		}`
-	vecIndexMeta2 = `
-		{
-			"name":"paper2",
-			"mappings":{
-				"properties":{
-					"title-vec":{
-						"type":"vector",
-						"dims": 4,
-						"vec_index_type":"flat"
-					},
-					"paper-id":{
-						"type":"keyword"
-					}
-				}
-			}
-		}`
-)
-
-var documents = `{ "index" : {"_index" : "paper" } }
-{"paper-id": "001","title-vec":[10.2,10.40,9.5,22.2]}
-{ "index" : {"_index" : "paper" } }
-{"paper-id": "002","title-vec":[10.2,11.40,9.5,22.2]}
-{ "index" : {"_index" : "paper" } }
-{"paper-id": "003","title-vec":[10.2,12.40,9.5,22.2]}
-{ "index" : {"_index" : "paper" } }
-{"paper-id": "004","title-vec":[10.2,10.39,9.5,22.2]}
-{ "index" : {"_index" : "paper2" } }
-{"paper-id": "005","title-vec":[10.2,10.37,9.5,22.2]}
-`
-
-var searchParam1 = `
-{
-    "query_field":"title-vec",
-    "k":3,
-    "return_fields":["paper-id"],
-    "vector":[10.2,10.39,9.5,22.2],
-    "_source": ["paper-id"]
-}
-`
-
-var searchParam2 = `
-{
-    "query_field":"title-vec",
-    "k":3,
-    "return_fields":["paper-id"],
-    "vector":[10.2,10.39,9.5,22.2],
-    "_source": ["paper-id"],
-	"query": {
-		"match_all": {}
-	}
-}
-`
-
-// result by faiss index
-var vectorSearchResult = `
-{
-	"took": 0,
-	"timed_out": false,
-	"_shards": {
-		"total": 1,
-		"successful": 1,
-		"skipped": 0,
-		"failed": 0
-	},
-	"hits": {
-		"total": {
-			"value": 3
+func vectorIndexConfig(kind string) map[string]any {
+	return map[string]any{
+		"mappings": map[string]any{
+			"properties": map[string]any{
+				"embedding": map[string]any{
+					"type":           "vector",
+					"dims":           4,
+					"vec_index_type": kind,
+				},
+				"category": map[string]any{
+					"type": "keyword",
+				},
+			},
 		},
-		"max_score": 1,
-		"hits": [
-			{
-				"_index": "paper",
-				"_type": "_doc",
-				"_id": "27OC23UOaQP",
-				"_score": 1,
-				"_source": {
-					"paper-id": "004"
-				},
-				"fields": {
-					"paper-id": [
-						"004"
-					]
-				}
-			},
-			{
-				"_index": "paper",
-				"_type": "_doc",
-				"_id": "27OC23UOaQM",
-				"_score": 0.9998999834060669,
-				"_source": {
-					"paper-id": "001"
-				},
-				"fields": {
-					"paper-id": [
-						"001"
-					]
-				}
-			},
-			{
-				"_index": "paper",
-				"_type": "_doc",
-				"_id": "27OC23UOaQN",
-				"_score": 0.49502530694007874,
-				"_source": {
-					"paper-id": "002"
-				},
-				"fields": {
-					"paper-id": [
-						"002"
-					]
-				}
-			}
-		]
 	}
 }
-`
 
-var deleteByQuery = `
-{
-    "query": {
-        "bool": {
-            "filter": [
-                {
-                    "term": {"paper-id":"003"}
-                }
-            ]
-        }
-    }
-}
-`
-
-func TestVectorSearch(t *testing.T) {
-	// config storage here
-	// config.Global.StorageType = "s3"
-	// config.Global.S3.Bucket = "zincsearch"
-	// config.Global.S3.AccessId = "admin"
-	// config.Global.S3.AccessSecret = "12345678"
-	// config.Global.S3.Endpoint = "127.0.0.1:9000"
-	// config.Global.StorageType = "oss"
-	// config.Global.Oss.Endpoint = ""
-	// config.Global.Oss.AccessId = ""
-	// config.Global.Oss.AccessSecret = ""
-	config.Global.Oss.Bucket = "zincsearch-test"
-	config.Global.LogConfig.LogLevel = "Debug"
-	defer func() {
-		config.Global.StorageType = "disk"
-	}()
-
-	t.Run("init metaData for vectorSearch", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(vecIndexMeta1)
-		resp := request("PUT", "/api/index/"+vecIndexName1, body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		body.Reset()
-		body.WriteString(vecIndexMeta2)
-		resp = request("PUT", "/api/index/"+vecIndexName2, body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-	})
-
-	t.Run("init document for vectorSearch", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(documents)
-		resp := request("POST", "/es/_bulk", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-	})
-
-	t.Run("search for document", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(deleteByQuery)
-		resp := request("POST", "/es/"+vecIndexName1+"/_search", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result = &meta.SearchResponse{}
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		assert.Equal(t, 1, result.Hits.Total.Value)
-	})
-
-	t.Run("search for vector", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam1)
-		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result = &meta.SearchResponse{}
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		var vecResult = &meta.SearchResponse{}
-		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
-		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
-		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
-			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
-		}
-	})
-
-	t.Run("search for vector with query", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam2)
-		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result = &meta.SearchResponse{}
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		var vecResult = &meta.SearchResponse{}
-		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
-		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
-		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
-			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
-		}
-	})
-
-	t.Run("search multi-vector", func(t *testing.T) {
-		uri := fmt.Sprintf("/api/%v,%v/_search/vector", vecIndexName1, vecIndexName2)
-		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam1)
-		resp := request("POST", uri, body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result = &meta.SearchResponse{}
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		var ids []string
-		for _, hit := range result.Hits.Hits {
-			v, ok := hit.Fields["paper-id"].([]any)
-			if !ok || len(v) != 1 {
-				continue
-			}
-			id, ok := v[0].(string)
-			if !ok {
-				continue
-			}
-			ids = append(ids, id)
-		}
-		assert.Equal(t, ids, []string{"004", "001", "005"})
-	})
-
-	t.Run("delete by query", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(deleteByQuery)
-		resp := request("POST", "/es/"+vecIndexName1+"/_delete_by_query", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-	})
-
-	t.Run("search for vector", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(searchParam1)
-		resp := request("POST", "/api/"+vecIndexName1+"/_search/vector", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result = &meta.SearchResponse{}
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		assert.Equal(t, 3, result.Hits.Total.Value)
-
-		var vecResult = &meta.SearchResponse{}
-		// after delete 003
-		_ = json.Unmarshal([]byte(vectorSearchResult), &vecResult)
-		assert.Equal(t, vecResult.Hits.Total.Value, result.Hits.Total.Value)
-		assert.Equal(t, vecResult.Hits.MaxScore, result.Hits.MaxScore)
-		for i := 0; i < len(vecResult.Hits.Hits) && i < len(result.Hits.Hits); i++ {
-			assert.Equal(t, vecResult.Hits.Hits[i].Source, result.Hits.Hits[i].Source) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Fields, result.Hits.Hits[i].Fields) // paper-id
-			assert.Equal(t, vecResult.Hits.Hits[i].Score, result.Hits.Hits[i].Score)
-		}
-	})
-
-	t.Run("delete Index", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		resp := request("DELETE", "/api/index/"+vecIndexName1, body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		if resp.Code != http.StatusOK {
-			bd, _ := io.ReadAll(resp.Body)
-			t.Error(string(bd))
-		}
-		resp = request("DELETE", "/api/index/"+vecIndexName2, body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		if resp.Code != http.StatusOK {
-			bd, _ := io.ReadAll(resp.Body)
-			t.Error(string(bd))
-		}
-		checkExists(t)
-	})
-}
-
-func checkExists(t *testing.T) {
-	var exists bool
-	var err error
-	switch config.Global.StorageType {
-	case "oss":
-		exists, err = directory.OssExists(vecIndexName1)
-	case "s3":
-		exists, err = directory.S3Exists(vecIndexName1)
+func vectorQuery(k int) map[string]any {
+	return map[string]any{
+		"query_field": "embedding",
+		"vector":      []float32{0, 0, 0, 0},
+		"k":           k,
+		"nprobe":      2,
 	}
-	assert.Nil(t, err)
-	assert.False(t, exists)
-	_, err = os.Stat(path.Join(config.Global.DataPath, vecIndexName1))
-	exists = os.IsExist(err)
-	assert.False(t, exists)
+}
+
+func searchVectors(t *testing.T, target string, query any) *meta.SearchResponse {
+	t.Helper()
+
+	var result meta.SearchResponse
+	apiJSON(t, "POST", "/api/"+target+"/_search/vector", query, 200, &result)
+	return &result
+}
+
+func TestVectorDocumentLifecycle(t *testing.T) {
+	name := indexResource(t)
+	createIndex(t, name, vectorIndexConfig("flat"))
+	putDocument(t, name, "1", map[string]any{
+		"title":     "nearest",
+		"category":  "a",
+		"embedding": []float32{0, 0, 0, 0},
+	})
+	putDocument(t, name, "2", map[string]any{
+		"title":     "second",
+		"category":  "b",
+		"embedding": []float32{1, 0, 0, 0},
+	})
+	putDocument(t, name, "3", map[string]any{
+		"title":     "third",
+		"category":  "a",
+		"embedding": []float32{2, 0, 0, 0},
+	})
+
+	// Squared L2 distances 0, 1 and 4 become scores 1, 1/2 and 1/5.
+	query := vectorQuery(3)
+	query["_source"], query["return_fields"] = []string{"title"}, []string{"category"}
+	result := searchVectors(t, name, query)
+	require.Equal(t, 3, result.Hits.Total.Value)
+	require.Equal(t, []string{name + "/1", name + "/2", name + "/3"}, hitKeys(result))
+	for i, score := range []float64{1, .5, .2} {
+		hit := result.Hits.Hits[i]
+		require.InDelta(t, score, hit.Score, 1e-6)
+		require.Len(t, hit.Source, 1)
+		require.Contains(t, hit.Source, "title")
+		require.Contains(t, hit.Fields, "category")
+	}
+	require.Equal(t, "nearest", hitSource(t, result.Hits.Hits[0])["title"])
+
+	// Text filtering must restrict the native vector candidate set.
+	query["filter_query"] = map[string]any{
+		"term": map[string]any{
+			"category": "a",
+		},
+	}
+	filtered := searchVectors(t, name, query)
+	require.Equal(t, []string{name + "/1", name + "/3"}, hitKeys(filtered))
+	delete(query, "filter_query")
+
+	// Updating a vector must remove its previous position in the ranking.
+	putDocument(t, name, "1", map[string]any{
+		"title":     "moved",
+		"category":  "a",
+		"embedding": []float32{3, 0, 0, 0},
+	})
+	require.Equal(t, []string{name + "/2", name + "/3", name + "/1"}, hitKeys(searchVectors(t, name, query)))
+
+	// Omitting a vector keeps its prior value, although text source is replaced.
+	apiJSON(t, "POST", "/api/"+name+"/_update/2", map[string]any{
+		"title":    "renamed",
+		"category": "b",
+	}, 200, nil)
+	result = searchVectors(t, name, query)
+	require.Equal(t, name+"/2", hitKeys(result)[0])
+	require.Equal(t, "renamed", hitSource(t, result.Hits.Hits[0])["title"])
+	require.InDelta(t, .5, result.Hits.Hits[0].Score, 1e-6)
+
+	apiJSON(t, "DELETE", "/api/"+name+"/_doc/2", nil, 200, nil)
+	require.Equal(t, []string{name + "/3", name + "/1"}, hitKeys(searchVectors(t, name, query)))
+
+	// Query-based deletion must clean vector data as well as text documents.
+	apiJSON(t, "POST", "/es/"+name+"/_delete_by_query", map[string]any{
+		"query": map[string]any{
+			"match": map[string]any{
+				"title": "third",
+			},
+		},
+	}, 200, nil)
+	require.Equal(t, []string{name + "/1"}, hitKeys(searchVectors(t, name, query)))
+	require.Equal(t, []string{name + "/1"}, hitKeys(searchDocuments(t, name, allDocuments())))
+}
+
+func TestMultiIndexVectorSearch(t *testing.T) {
+	a, b := indexResource(t), indexResource(t)
+	for _, name := range []string{a, b} {
+		createIndex(t, name, vectorIndexConfig("flat"))
+	}
+
+	// ID alone is not a global identity: backfill must also use the index name.
+	putDocument(t, a, "1", map[string]any{
+		"title":     "alpha",
+		"embedding": []float32{2, 0, 0, 0},
+	})
+	putDocument(t, b, "1", map[string]any{
+		"title":     "beta",
+		"embedding": []float32{0, 0, 0, 0},
+	})
+	putDocument(t, a, "2", map[string]any{
+		"title":     "extra",
+		"embedding": []float32{3, 0, 0, 0},
+	})
+
+	result := searchVectors(t, a+","+b, vectorQuery(2))
+	require.Equal(t, 2, result.Hits.Total.Value)
+	require.Equal(t, []string{b + "/1", a + "/1"}, hitKeys(result))
+	require.Equal(t, "beta", hitSource(t, result.Hits.Hits[0])["title"])
+	require.Equal(t, "alpha", hitSource(t, result.Hits.Hits[1])["title"])
+}
+
+func TestVectorValidation(t *testing.T) {
+	name := indexResource(t)
+	createIndex(t, name, vectorIndexConfig("flat"))
+	putDocument(t, name, "1", map[string]any{
+		"embedding": []float32{1, 0, 0, 0},
+	})
+
+	for _, test := range []struct {
+		name, field string
+		value       any
+	}{
+		{"dimensions", "vector", []float32{1, 2}},
+		{"k", "k", 0},
+		{"nprobe", "nprobe", 0},
+		{"field", "query_field", "missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := vectorQuery(1)
+			query[test.field] = test.value
+
+			var response meta.HTTPResponseError
+			apiJSON(t, "POST", "/api/"+name+"/_search/vector", query, 400, &response)
+			require.NotEmpty(t, response.Error)
+		})
+	}
+
+	// Validation failures leave both the vector and the text backfill usable.
+	require.Equal(t, []string{name + "/1"}, hitKeys(searchVectors(t, name, vectorQuery(1))))
+
+	var recall struct {
+		Recall float32 `json:"recall"`
+	}
+	apiJSON(t, "POST", "/api/"+name+"/_recall", map[string]any{
+		"field": "embedding",
+	}, 200, &recall)
+	require.EqualValues(t, 1, recall.Recall)
+}
+
+func TestVectorAlgorithmsSmoke(t *testing.T) {
+	for _, kind := range []string{"hnsw", "ivf_pq"} {
+		t.Run(kind, func(t *testing.T) {
+			name := indexResource(t)
+			config := vectorIndexConfig(kind)
+			if kind == "ivf_pq" {
+				field := config["mappings"].(map[string]any)["properties"].(map[string]any)["embedding"].(map[string]any)
+				field["m"], field["nbits"] = 2, 4
+			}
+
+			createIndex(t, name, config)
+			if kind == "ivf_pq" {
+				// With no eligible segment this is a no-op hint. HTTP success
+				// confirms acceptance only, never completion of a build.
+				apiJSON(t, "POST", "/api/"+name+"/embedding/_seal", nil, 200, nil)
+			}
+
+			// Keep this smoke test independent of approximate ranking details.
+			putDocument(t, name, "1", map[string]any{
+				"title":     "first",
+				"embedding": []float32{1, 0, 0, 0},
+			})
+			putDocument(t, name, "2", map[string]any{
+				"title":     "second",
+				"embedding": []float32{2, 0, 0, 0},
+			})
+			require.ElementsMatch(t, []string{name + "/1", name + "/2"}, hitKeys(searchVectors(t, name, vectorQuery(2))))
+
+			putDocument(t, name, "1", map[string]any{
+				"title":     "updated",
+				"embedding": []float32{3, 0, 0, 0},
+			})
+			apiJSON(t, "DELETE", "/api/"+name+"/_doc/2", nil, 200, nil)
+
+			result := searchVectors(t, name, vectorQuery(2))
+			require.Equal(t, []string{name + "/1"}, hitKeys(result))
+			require.Equal(t, "updated", hitSource(t, result.Hits.Hits[0])["title"])
+		})
+	}
 }
