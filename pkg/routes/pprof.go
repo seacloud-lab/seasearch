@@ -16,11 +16,16 @@
 package routes
 
 import (
+	"github.com/zincsearch/zincsearch/pkg/config"
+
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 )
 
 func SetPProf(app *gin.Engine) {
-	pprof.Register(app)
+	if !config.Global.PProfEnable {
+		return
+	}
 
+	pprof.Register(app)
 }

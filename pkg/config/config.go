@@ -54,6 +54,7 @@ type config struct {
 	ProfilerFriendlyProfileID string        `env:"ZINC_PROFILER_FRIENDLY_PROFILE_ID"`
 	TelemetryEnable           bool          `env:"ZINC_TELEMETRY,default=false"`
 	PrometheusEnable          bool          `env:"SS_PROMETHEUS_ENABLE,default=false"`
+	PProfEnable               bool          `env:"SS_PPROF_ENABLE,default=false"`
 	EnableTextKeywordMapping  bool          `env:"ZINC_ENABLE_TEXT_KEYWORD_MAPPING,default=false"`
 	BatchSize                 int           `env:"ZINC_BATCH_SIZE,default=1024"`
 	MaxResults                int           `env:"ZINC_MAX_RESULTS,default=10000"`
