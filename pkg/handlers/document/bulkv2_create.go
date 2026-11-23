@@ -18,12 +18,11 @@ package document
 import (
 	"net/http"
 
-	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/errors"
+	"github.com/zincsearch/zincsearch/pkg/store"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
@@ -60,7 +59,7 @@ func Bulkv2(c *gin.Context) {
 	defer c.Request.Body.Close()
 	count, err := Bulkv2Worker(target, body)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if zincerrors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			c.JSON(http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -75,11 +74,12 @@ func Bulkv2(c *gin.Context) {
 func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 	var err error
 	var count int64
-	newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
+	newIndex, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
 		return count, err
 	}
-	ops := make([]core.DocOperation, 0)
+	defer newIndex.Close()
+	ops := make([]store.DocOperation, 0)
 	for _, doc := range body.Records { // Read each line
 		update := false
 
@@ -92,26 +92,16 @@ func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 		} else {
 			update = true
 		}
-		if config.Global.EnableWal {
-			err = newIndex.CreateDocument(docID, doc, update)
-			if err != nil {
-				return count, err
-			}
-		} else {
-			ops = append(ops, core.DocOperation{
-				DocId:  docID,
-				Doc:    doc,
-				Update: update,
-			})
-		}
+		ops = append(ops, store.DocOperation{
+			DocId:  docID,
+			Doc:    doc,
+			Update: update,
+		})
 
 		count++
 	}
-	if !config.Global.EnableWal {
-		err := newIndex.CreateDocuments(ops)
-		if err != nil {
-			return 0, err
-		}
+	if err := newIndex.CreateDocuments(ops); err != nil {
+		return 0, err
 	}
 
 	return count, nil

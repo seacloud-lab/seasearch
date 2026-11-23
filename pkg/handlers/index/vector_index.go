@@ -1,33 +1,51 @@
 package index
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
+// SealVectorIndex accepts a current-state maintenance hint, not a completed seal.
+// The worker acquires its own owner reference and revalidates the current field.
 func SealVectorIndex(c *gin.Context) {
-	indexName := c.Param("target")
-	fieldName := c.Param("field")
-
-	index, err := core.IndexMgr.Get(indexName)
+	index, err := store.Open(c.Param("target"))
 	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not exists"})
+		code := http.StatusInternalServerError
+		if errors.Is(err, store.ErrIndexNotFound) {
+			code = http.StatusNotFound
+		} else if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
+			code = http.StatusNotAcceptable
+		}
+		zutils.GinRenderJSON(c, code, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	mp := index.GetMappings()
-	prop, ok := mp.Properties[fieldName]
-	if !ok || prop.Type != "vector" {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "field is not vector"})
-		return
-	}
+	defer index.Close()
 
-	err = core.SealIndex(index.GetName(), fieldName)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
+	field := c.Param("field")
+	mappings := index.GetMappings()
+	if mappings == nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "field is not an IVFPQ vector field"})
 		return
 	}
+	prop, ok := mappings.GetProperty(field)
+	if !ok || prop.Type != "vector" || prop.VecIndexType != vector.IVFPQ {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "field is not an IVFPQ vector field"})
+		return
+	}
+	if err := store.RequestVectorSeal(index.GetName(), field); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, store.ErrVectorMaintenanceStopped) {
+			code = http.StatusServiceUnavailable
+		}
+		zutils.GinRenderJSON(c, code, meta.HTTPResponseError{Error: err.Error()})
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, meta.HTTPResponse{Message: "ok"})
 }

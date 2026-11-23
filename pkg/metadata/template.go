@@ -16,6 +16,10 @@
 package metadata
 
 import (
+	"regexp"
+	"sort"
+	"strings"
+
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
@@ -23,6 +27,36 @@ import (
 type template struct{}
 
 var Template = new(template)
+
+// Match selects the highest-priority matching template using the existing index
+// pattern rules. Callers must copy its mutable configuration before applying it.
+func (t *template) Match(indexName string) (*meta.IndexTemplate, error) {
+	templates, err := t.List(0, 0)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(templates, func(i, j int) bool {
+		return templates[i].IndexTemplate.Priority > templates[j].IndexTemplate.Priority
+	})
+	var filteredTemplates []*meta.Template
+	for _, tpl := range templates {
+		for _, pattern := range tpl.IndexTemplate.IndexPatterns {
+			if strings.HasPrefix(indexName, pattern[:1]) {
+				filteredTemplates = append(filteredTemplates, tpl)
+				break
+			}
+		}
+	}
+	for _, tpl := range filteredTemplates {
+		for _, pattern := range tpl.IndexTemplate.IndexPatterns {
+			pattern := strings.TrimRight(strings.ReplaceAll(pattern, "*", ".*"), "$") + "$"
+			if regexp.MustCompile(pattern).MatchString(indexName) {
+				return tpl.IndexTemplate, nil
+			}
+		}
+	}
+	return nil, nil
+}
 
 func (t *template) List(offset, limit int) ([]*meta.Template, error) {
 	data, err := db.List(t.key(""), offset, limit)

@@ -12,11 +12,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	zincsearch "github.com/zincsearch/zincsearch/pkg/bluge/search"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/handlers/search"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"golang.org/x/sync/errgroup"
 )
@@ -97,9 +97,9 @@ func processUnifiedSearch(c *gin.Context, indexes []string, indexQueryMap map[st
 // with each node handling a subset of the second shards.
 // If parallel processing is not needed, the index will be assigned to a single node
 // according to the allocation rules.
-func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) {
+func calcNodeIndexMap(indexes []string) (map[string]store.PartialIndexes, error) {
 	// node -> index -> second ids
-	nodeIndexMap := make(map[string]core.PartialIndexes)
+	nodeIndexMap := make(map[string]store.PartialIndexes)
 
 	nodeList := GetNodeList()
 	if len(nodeList) == 0 {
@@ -129,7 +129,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			if partialIndexes, ok := nodeIndexMap[addr]; ok {
 				partialIndexes[index] = []int{}
 			} else {
-				nodeIndexMap[addr] = core.CreatePartialIndexes(index, []int{})
+				nodeIndexMap[addr] = store.CreatePartialIndexes(index, []int{})
 			}
 			continue
 		}
@@ -142,7 +142,7 @@ func calcNodeIndexMap(indexes []string) (map[string]core.PartialIndexes, error) 
 			if partialIndexes, ok := nodeIndexMap[addr]; ok {
 				partialIndexes.AddSecondShardId(index, int(secondShard.ID))
 			} else {
-				nodeIndexMap[addr] = core.CreatePartialIndexes(index, []int{int(secondShard.ID)})
+				nodeIndexMap[addr] = store.CreatePartialIndexes(index, []int{int(secondShard.ID)})
 			}
 		}
 	}
@@ -193,7 +193,7 @@ func getQueryNodes(nodeList []nodeInfo, indexName string) (queryNodes, error) {
 	return res, nil
 }
 
-func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
+func parallelGetStats(auth string, parallelNodeMap map[string]store.PartialIndexes, query *meta.ZincQuery) (*zincsearch.UnifiedStats, error) {
 	var (
 		stats = &zincsearch.UnifiedStats{}
 		mutex = sync.Mutex{}
@@ -225,7 +225,7 @@ func parallelGetStats(auth string, parallelNodeMap map[string]core.PartialIndexe
 	return stats, err
 }
 
-func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialIndexes, stats *zincsearch.UnifiedStats, indexQueryMap map[string]*meta.ZincQuery) (*meta.SearchResponse, error) {
+func execParallelQueries(auth string, parallelNodeMap map[string]store.PartialIndexes, stats *zincsearch.UnifiedStats, indexQueryMap map[string]*meta.ZincQuery) (*meta.SearchResponse, error) {
 	var (
 		mutex sync.Mutex
 	)
@@ -253,7 +253,7 @@ func execParallelQueries(auth string, parallelNodeMap map[string]core.PartialInd
 			}
 			for idx, secondIds := range partialIndexes {
 				q := indexQueryMap[idx]
-				req.IndexQueries = append(req.IndexQueries, core.IndexQueryRequest{
+				req.IndexQueries = append(req.IndexQueries, store.IndexQueryRequest{
 					Index:         idx,
 					SecondShardId: secondIds,
 					Query:         q,

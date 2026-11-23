@@ -19,16 +19,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zincsearch/zincsearch/pkg/core/vector"
-
-	"github.com/blugelabs/bluge/analysis"
-
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	zincanalysis "github.com/zincsearch/zincsearch/pkg/uquery/analysis"
+	"github.com/zincsearch/zincsearch/pkg/vector"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
+
+	"github.com/blugelabs/bluge/analysis"
 )
 
 func Request(analyzers map[string]*analysis.Analyzer, data map[string]interface{}) (*meta.Mappings, error) {

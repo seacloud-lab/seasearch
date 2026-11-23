@@ -1,68 +1,58 @@
 package search
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
-	"github.com/zincsearch/zincsearch/pkg/cluster"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
 func SearchVector(c *gin.Context) {
-	indexNames := strings.Split(c.Param("target"), ",")
-	query := &core.VectorQuery{K: 10, Nprobe: 1}
+	query := &store.VectorQuery{K: 10, Nprobe: 1}
 	if err := zutils.GinBindJSON(c, query); err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-
-	indexes, err := core.GetMatchedIndexes(indexNames)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	if len(indexes) == 0 {
-		err := fmt.Errorf("vector search error: index not found")
-		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: err.Error()})
-		return
-	}
-	for _, index := range indexes {
-		mappings := index.GetMappings()
-		prop, ok := mappings.Properties[query.QueryField]
-		if !ok {
-			err := fmt.Errorf("vector search error: field %s not found in mapping on index %v", query.QueryField, index.GetName())
-			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		if prop.Type != "vector" {
-			err := fmt.Errorf("vector search error: field %s is not vector field on index %v", query.QueryField, index.GetName())
-			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-		if prop.Dims != len(query.Vector) {
-			err := fmt.Errorf("vector search error: invalid query vector, the dims should be %d on index %v", prop.Dims, index.GetName())
-			zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-			return
-		}
-	}
-	rsp, err := core.VectorSearch(indexes, query)
-	if err != nil {
-		log.Err(err).Msgf("vector search error:")
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
+	if query.K <= 0 || query.Nprobe <= 0 {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "vector query k and nprobe must be positive"})
 		return
 	}
 
-	zutils.GinRenderJSON(c, http.StatusOK, rsp)
+	indexNames := strings.Split(c.Param("target"), ",")
+	var response *meta.SearchResponse
+	var err error
+	if len(indexNames) > 1 || strings.Contains(indexNames[0], "*") {
+		// This is local owner-only matching, not cross-node vector fanout.
+		response, err = store.MultiVectorSearch(c.Request.Context(), indexNames, query)
+	} else {
+		index, openErr := store.Open(indexNames[0])
+		if openErr != nil {
+			vectorError(c, openErr)
+			return
+		}
+		defer index.Close()
+		if !validateVectorField(c, index, query.QueryField, len(query.Vector)) {
+			return
+		}
+		response, err = index.VectorSearch(c.Request.Context(), query)
+	}
+	if err != nil {
+		vectorError(c, err)
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, response)
 }
 
 type recallResult struct {
 	Recall float32 `json:"recall"`
 }
+
 type recallRequest struct {
 	Field      string `json:"field"`
 	Nprobe     int    `json:"nprobe"`
@@ -71,80 +61,60 @@ type recallRequest struct {
 }
 
 func VectorRecall(c *gin.Context) {
-	indexName := c.Param("target")
-
-	if !cluster.AssignCheck(indexName) {
-		zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: core.ErrIndexServerMismatch.Error()})
-		return
-	}
-
-	zincIndex, err := core.IndexMgr.Get(indexName)
-	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: index %s not found: %w", indexName, err).Error()})
-		return
-	}
-	request := &recallRequest{
-		Nprobe:     5,
-		QueryCount: 100,
-		K:          10,
-	}
-	err = zutils.GinBindJSON(c, request)
-	if err != nil {
+	request := &recallRequest{Nprobe: 5, QueryCount: 100, K: 10}
+	if err := zutils.GinBindJSON(c, request); err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
-	if request.QueryCount <= 0 {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("invalid query count").Error()})
+	if request.QueryCount <= 0 || request.Nprobe <= 0 || request.K <= 0 {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "recall query count, k and nprobe must be positive"})
 		return
 	}
-	if request.Nprobe <= 0 {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("invalid nprobe").Error()})
-		return
-	}
-	if request.K <= 0 {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("invalid k").Error()})
-		return
-	}
-
-	fieldName := request.Field
-	mappings := zincIndex.GetMappings()
-	prop, ok := mappings.Properties[fieldName]
-	if !ok {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: field %s not found in mapping", fieldName).Error()})
-		return
-	}
-	if prop.Type != "vector" {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: fmt.Errorf("vector search error: field %s is not vector field", fieldName).Error()})
-		return
-	}
-	recall, err := core.VectorRecall(zincIndex, fieldName, request.QueryCount, int64(request.K),
-		request.Nprobe)
+	index, err := store.Open(c.Param("target"))
 	if err != nil {
-		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
+		vectorError(c, err)
 		return
 	}
-	var result = &recallResult{
-		Recall: recall,
+	defer index.Close()
+	if !validateVectorField(c, index, request.Field, -1) {
+		return
 	}
-	zutils.GinRenderJSON(c, http.StatusOK, result)
-
+	recall, err := index.VectorRecall(c.Request.Context(), request.Field, request.QueryCount, int64(request.K), request.Nprobe)
+	if err != nil {
+		vectorError(c, err)
+		return
+	}
+	zutils.GinRenderJSON(c, http.StatusOK, recallResult{Recall: recall})
 }
 
-// InternalSearchVector queries the specified vector index segments and just returns the matched doc ids and the distances.
-// The proxy needs to perform an additional internal search based on the document IDs,
-// because the assignments of the vector index may differ from the assignments of the full-text index.
-func InternalSearchVector(c *gin.Context) {
-	query := &core.InternalVectorQuery{}
-	if err := zutils.GinBindJSON(c, query); err != nil {
-		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
-		return
+// Validate a detached mapping snapshot for HTTP errors. Store revalidates the
+// authoritative state under its metadata lock before using any resources.
+func validateVectorField(c *gin.Context, index *store.Index, field string, dimensions int) bool {
+	mappings := index.GetMappings()
+	if mappings == nil {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "index has no mappings"})
+		return false
 	}
+	prop, ok := mappings.GetProperty(field)
+	if !ok || prop.Type != "vector" {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "field is not a vector field"})
+		return false
+	}
+	if dimensions >= 0 && prop.Dims != dimensions {
+		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "invalid query vector dimensions"})
+		return false
+	}
+	return true
+}
 
-	res, err := core.InternalVectorSearch(query)
-	if err != nil {
-		log.Err(err).Msgf("internal vector search error:")
+func vectorError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, zincerrors.ErrIndexServerMismatch):
+		zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
+	case errors.Is(err, store.ErrIndexNotFound):
+		zutils.GinRenderJSON(c, http.StatusNotFound, meta.HTTPResponseError{Error: "index not found"})
+	default:
+		log.Error().Err(err).Msg("vector operation failed")
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: "internal server error"})
-		return
 	}
-	zutils.GinRenderJSON(c, http.StatusOK, res)
 }

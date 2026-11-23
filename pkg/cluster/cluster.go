@@ -19,8 +19,9 @@ var (
 	assignMap = make(map[string]struct{})
 	lock      sync.RWMutex
 
-	// UnassignChan used for notify core update memory index list
-	UnassignChan = make(chan map[string]struct{})
+	// AssignmentChanged prompts the store to recheck current ownership. Pending
+	// notifications may be coalesced; cleanup must not block assignment updates.
+	AssignmentChanged = make(chan struct{}, 1)
 	// UserChan used for notify core update user list
 	UserChan = make(chan struct{})
 	// RoleChan used for notify core update role list
@@ -119,12 +120,9 @@ func updateAssigns() (int64, error) {
 	lock.Lock()
 
 	assignMap = make(map[string]struct{})
-	unassignMap := make(map[string]struct{})
 	for _, assign := range assigns {
 		if assign.NodeID == config.Global.Cluster.NodeId {
 			assignMap[assign.Prefix] = struct{}{}
-		} else {
-			unassignMap[assign.Prefix] = struct{}{}
 		}
 	}
 
@@ -132,7 +130,8 @@ func updateAssigns() (int64, error) {
 
 	select {
 	case <-closer.HasBeenClosed():
-	case UnassignChan <- unassignMap:
+	case AssignmentChanged <- struct{}{}:
+	default:
 	}
 	return rev, nil
 }

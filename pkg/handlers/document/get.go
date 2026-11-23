@@ -21,8 +21,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
 
@@ -48,15 +49,16 @@ func Get(c *gin.Context) {
 	}
 
 	// If the index does not exist, then create it
-	index, _, err := core.IndexMgr.GetOrCreate(indexName)
+	index, _, err := store.OpenOrCreate(indexName)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
 	}
+	defer index.Close()
 
 	source, err := index.GetDocument(docID)
 	if err != nil {

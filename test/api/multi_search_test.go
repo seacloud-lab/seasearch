@@ -1,77 +1,107 @@
 package api
 
 import (
-	"bytes"
-	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zincsearch/zincsearch/pkg/meta"
-	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
-var mbulkData = `{ "index" : {"_index" : "index_m_001" } } 
-{"name": "Jack"}
-{ "index" : {"_index" : "index_m_001" } } 
-{"name": "Tom"}
-{ "index" : {"_index" : "index_m_002" } } 
-{"name": "Barry"}`
+func TestMultiIndexSearch(t *testing.T) {
+	a := indexResource(t)
+	b := a + "-second"
+	t.Cleanup(func() { apiJSON(t, "DELETE", "/api/index/"+b, nil, 200, nil) })
 
-func TestMultiSearch(t *testing.T) {
-	t.Run("init data for search", func(t *testing.T) {
-		body := bytes.NewBuffer(nil)
-		body.WriteString(mbulkData)
-		resp := request("POST", "/es/_bulk", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
+	// The same ID in different indexes must retain its own source and sort value.
+	putDocument(t, a, "1", map[string]any{
+		"title": "alpha",
+		"rank":  2,
+	})
+	putDocument(t, b, "1", map[string]any{
+		"title": "beta",
+		"rank":  1,
 	})
 
-	t.Run("search from 1 and 2", func(t *testing.T) {
-		data := `{"index":["index_m_001","index_m_002"]}
-	{"query":{"match_all":{}},"size":10}`
-		body := bytes.NewBuffer(nil)
-		body.WriteString(data)
-		resp := request("POST", "/es/_msearch", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result map[string][]*meta.SearchResponse
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		res := result["responses"]
-		assert.Equal(t, 3, res[0].Hits.Total.Value)
+	query := map[string]any{
+		"query": map[string]any{
+			"match_all": map[string]any{},
+		},
+		"sort": []string{"rank"},
+		"size": 10,
+	}
+	result := searchDocuments(t, a+","+b, query)
+	require.Equal(t, 2, result.Hits.Total.Value)
+	require.Equal(t, []string{b + "/1", a + "/1"}, hitKeys(result))
+	require.Equal(t, "beta", hitSource(t, result.Hits.Hits[0])["title"])
+	require.Equal(t, "alpha", hitSource(t, result.Hits.Hits[1])["title"])
+	require.Equal(t, hitKeys(result), hitKeys(searchDocuments(t, a+"*", query)))
+
+	alias := resourceName()
+	apiJSON(t, "POST", "/es/_aliases", map[string]any{
+		"actions": []any{
+			map[string]any{
+				"add": map[string]any{
+					"indices": []string{a, b},
+					"alias":   alias,
+				},
+			},
+		},
+	}, 200, nil)
+	t.Cleanup(func() {
+		apiJSON(t, "POST", "/es/_aliases", map[string]any{
+			"actions": []any{
+				map[string]any{
+					"remove": map[string]any{
+						"indices": []string{a, b},
+						"alias":   alias,
+					},
+				},
+			},
+		}, 200, nil)
 	})
 
-	t.Run("search 1 and 2", func(t *testing.T) {
-		data := `{"index":"index_m_001"}
-	{"query":{"match_all":{}},"size":10}
-	{"index":"index_m_002"}
-	{"query":{"match_all":{}},"size":10}
-`
-		body := bytes.NewBuffer(nil)
-		body.WriteString(data)
-		resp := request("POST", "/es/_msearch", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result map[string][]*meta.SearchResponse
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		res := result["responses"]
-		assert.Equal(t, 2, res[0].Hits.Total.Value)
-		assert.Equal(t, 1, res[1].Hits.Total.Value)
-	})
+	// Alias expansion must preserve global sorting, pagination and total hits.
+	require.Equal(t, hitKeys(result), hitKeys(searchDocuments(t, alias, query)))
 
-	t.Run("search 1 not exist in 2", func(t *testing.T) {
-		data := `{"index":"index_m_001"}
-	{"query":{"match_all":{}},"size":10}
-	{"index":"index_m_002"}
-	{"query":{"match":"xxxx"},"size":10}
-`
-		body := bytes.NewBuffer(nil)
-		body.WriteString(data)
-		resp := request("POST", "/es/_msearch", body)
-		assert.Equal(t, http.StatusOK, resp.Code)
-		var result map[string][]*meta.SearchResponse
-		b := resp.Body.Bytes()
-		_ = json.Unmarshal(b, &result)
-		res := result["responses"]
-		assert.Equal(t, 2, res[0].Hits.Total.Value)
-		assert.Equal(t, 0, res[1].Hits.Total.Value)
-	})
+	query["from"], query["size"] = 1, 1
+	page := searchDocuments(t, alias, query)
+	require.Equal(t, 2, page.Hits.Total.Value)
+	require.Equal(t, []string{a + "/1"}, hitKeys(page))
+
+	// Each msearch response corresponds to the request at the same position.
+	var multi struct {
+		Responses []*meta.SearchResponse `json:"responses"`
+	}
+	apiRaw(t, "POST", "/es/_msearch", ndjson(t,
+		map[string]any{
+			"index": a,
+		},
+		allDocuments(),
+		map[string]any{
+			"index": b,
+		},
+		map[string]any{
+			"query": map[string]any{
+				"match": map[string]any{
+					"title": "absent",
+				},
+			},
+		},
+	), 200, &multi)
+	require.Len(t, multi.Responses, 2)
+	require.Equal(t, []string{a + "/1"}, hitKeys(multi.Responses[0]))
+	require.Zero(t, multi.Responses[1].Hits.Total.Value)
+
+	// Removing one alias member must not remove the other member.
+	apiJSON(t, "POST", "/es/_aliases", map[string]any{
+		"actions": []any{
+			map[string]any{
+				"remove": map[string]any{
+					"index": b,
+					"alias": alias,
+				},
+			},
+		},
+	}, 200, nil)
+	require.Equal(t, []string{a + "/1"}, hitKeys(searchDocuments(t, alias, allDocuments())))
 }

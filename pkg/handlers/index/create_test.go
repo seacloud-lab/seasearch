@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
@@ -124,7 +124,7 @@ func TestCreate(t *testing.T) {
 			}
 
 			if !tt.wantErr {
-				err = core.IndexMgr.Delete(resp["index"])
+				err = store.Delete(resp["index"])
 				assert.NoError(t, err)
 			}
 		})
@@ -218,7 +218,7 @@ func TestCreateES(t *testing.T) {
 			assert.NoError(t, err)
 
 			if !tt.wantErr {
-				err = core.IndexMgr.Delete(resp["index"].(string))
+				err = store.Delete(resp["index"].(string))
 				assert.NoError(t, err)
 			}
 		})

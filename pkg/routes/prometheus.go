@@ -18,8 +18,8 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 	ginprometheus "github.com/zincsearch/go-gin-prometheus"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 )
 
 // SetPrometheus sets up prometheus metrics for gin
@@ -28,6 +28,6 @@ func SetPrometheus(app *gin.Engine) {
 		return
 	}
 
-	p := ginprometheus.NewPrometheus("seasearch", []*ginprometheus.Metric{core.ZINC_METRICS})
+	p := ginprometheus.NewPrometheus("seasearch", []*ginprometheus.Metric{catalog.ZINC_METRICS})
 	p.Use(app)
 }

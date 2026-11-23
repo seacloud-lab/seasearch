@@ -23,7 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 )
@@ -63,7 +63,7 @@ func AddOrRemoveESAlias(c *gin.Context) {
 	addMap := map[string][]string{}
 	removeMap := map[string][]string{}
 
-	indexList, err := core.ListIndexNames()
+	indexList, err := catalog.ListIndexNames()
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusInternalServerError, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -98,11 +98,11 @@ func AddOrRemoveESAlias(c *gin.Context) {
 	}
 
 	for alias, indexes := range addMap {
-		_ = core.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias(alias, indexes)
+		_ = catalog.ZINC_INDEX_ALIAS_LIST.AddIndexesToAlias(alias, indexes)
 	}
 
 	for alias, indexes := range removeMap {
-		_ = core.ZINC_INDEX_ALIAS_LIST.RemoveIndexesFromAlias(alias, indexes)
+		_ = catalog.ZINC_INDEX_ALIAS_LIST.RemoveIndexesFromAlias(alias, indexes)
 	}
 
 	zutils.GinRenderJSON(c, http.StatusOK, gin.H{"acknowledged": true})
@@ -133,7 +133,7 @@ func GetESAliases(c *gin.Context) {
 		targetAliases = strings.Split(targetAlias, ",")
 	}
 
-	m := core.ZINC_INDEX_ALIAS_LIST.GetAliasMap(targetIndexes, targetAliases)
+	m := catalog.ZINC_INDEX_ALIAS_LIST.GetAliasMap(targetIndexes, targetAliases)
 
 	zutils.GinRenderJSON(c, http.StatusOK, m)
 }
@@ -178,7 +178,7 @@ func matchAndAddToMap(indexList []string, indexName string, m map[string][]strin
 	var n string // reuse same string variable
 
 	if !strings.Contains(indexName, "*") {
-		x, err := core.GetIndexMetadata(indexName)
+		x, err := catalog.GetIndexMetadata(indexName)
 		if err != nil {
 			return
 		}

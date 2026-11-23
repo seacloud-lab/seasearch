@@ -21,18 +21,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
 func TestSettings(t *testing.T) {
 	t.Run("create index", func(t *testing.T) {
-		index, err := core.NewIndex("TestSettings.index_1")
+		index, err := store.Create(&meta.IndexSimple{Name: "TestSettings.index_1"})
 		assert.NoError(t, err)
 		assert.NotNil(t, index)
 
-		err = core.IndexMgr.Store(index)
-		assert.NoError(t, err)
+		if index != nil {
+			index.Close()
+		}
 	})
 
 	t.Run("set settings", func(t *testing.T) {
@@ -176,7 +178,7 @@ func TestSettings(t *testing.T) {
 
 	t.Run("delete index", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			_ = core.IndexMgr.Delete(fmt.Sprintf("TestSettings.index_%d", i))
+			_ = store.Delete(fmt.Sprintf("TestSettings.index_%d", i))
 		}
 	})
 }

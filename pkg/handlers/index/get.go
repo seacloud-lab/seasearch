@@ -21,7 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
@@ -32,7 +32,7 @@ import (
 // @Tags    Index
 // @Produce json
 // @Param   index  path  string  true  "Index"
-// @Success 200 {object} core.Index
+// @Success 200 {object} meta.Index
 // @Failure 404 {object} meta.HTTPResponseError
 // @Router /api/index/{index} [get]
 func Get(c *gin.Context) {
@@ -42,8 +42,8 @@ func Get(c *gin.Context) {
 		return
 	}
 
-	index, err := core.GetIndexMetadata(indexName)
-	if errors.Is(err, zincerrors.ErrKeyNotFound) || errors.Is(err, core.ErrIndexServerMismatch) {
+	index, err := catalog.GetIndexMetadata(indexName)
+	if errors.Is(err, zincerrors.ErrKeyNotFound) || errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 		c.JSON(http.StatusNotFound, meta.HTTPResponseError{Error: "index " + indexName + " does not exists"})
 		return
 	}

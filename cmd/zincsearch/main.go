@@ -29,15 +29,15 @@ import (
 
 	"github.com/zincsearch/zincsearch/pkg/auth"
 	"github.com/zincsearch/zincsearch/pkg/bluge/analysis/lang/chs"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/cluster"
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/lru_cache"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
-	"github.com/zincsearch/zincsearch/pkg/wal"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils/logger"
 
 	"github.com/getsentry/sentry-go"
@@ -91,19 +91,15 @@ func main() {
 	cluster.Init()
 	// init lruCache
 	lru_cache.Init()
-	// init assign watch
-	core.InitIndexList()
-	// init vector index
-	core.InitVecIndexManager()
+	// Initialize catalog state and the store cache/assignment loop.
+	catalog.Init()
+	if err := store.Start(); err != nil {
+		log.Fatal().Err(err).Msg("failed to start index store")
+	}
+	// Maintenance borrows current owner references from the store.
+	store.StartVectorMaintenance()
 	// init listen auth and role
 	auth.Init()
-	// init async metadata update
-	core.InitAsyncMetaDataUpdate()
-	// Initialize WAL
-	if config.Global.EnableWal {
-		core.InitWalList()
-		wal.Init()
-	}
 
 	go logger.HandleRotateSignal()
 
@@ -132,12 +128,9 @@ func main() {
 		}
 
 		log.Info().Msg("Index closing...")
-		// close metadata update
-		core.CloseAsyncMetaDataUpdate()
-		// close index list update
-		core.CloseIndexList()
-		// close vector index
-		core.CloseVecIndexManager()
+		store.StopVectorMaintenance()
+		// All store users must be drained before final resource cleanup.
+		store.Stop()
 		// close auth
 		auth.Close()
 		// close cluster
@@ -148,10 +141,6 @@ func main() {
 		// close metadata
 		err := metadata.Close()
 		log.Info().Err(err).Msgf("Metadata closed")
-		// close wal
-		if config.Global.EnableWal {
-			wal.ShutDown()
-		}
 
 		done <- struct{}{}
 	})
@@ -200,10 +189,10 @@ func main() {
 }
 
 func telemetry() {
-	core.InitTelemetry()
-	core.Telemetry.Instance()
-	core.Telemetry.Event("server_start", nil)
-	core.Telemetry.Cron()
+	catalog.InitTelemetry()
+	catalog.Telemetry.Instance()
+	catalog.Telemetry.Event("server_start", nil)
+	catalog.Telemetry.Cron()
 }
 
 func sentries() {
@@ -233,7 +222,7 @@ func profiling() {
 
 	ProfileID := config.Global.ProfilerFriendlyProfileID
 	if ProfileID == "" {
-		ProfileID = strings.ToLower(core.Telemetry.GetInstanceID())
+		ProfileID = strings.ToLower(catalog.Telemetry.GetInstanceID())
 	}
 
 	_, err := pyroscope.Start(pyroscope.Config{

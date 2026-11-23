@@ -27,9 +27,10 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
-	"github.com/zincsearch/zincsearch/pkg/core"
+	zincerrors "github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/ider"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
@@ -53,7 +54,7 @@ func Bulk(c *gin.Context) {
 
 	ret, err := BulkWorker(target, c.Request.Body)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, meta.HTTPResponseError{Error: err.Error()})
 			return
 		}
@@ -83,7 +84,7 @@ func ESBulk(c *gin.Context) {
 
 	ret, err := BulkWorker(target, c.Request.Body)
 	if err != nil {
-		if errors.Is(err, core.ErrIndexServerMismatch) {
+		if errors.Is(err, zincerrors.ErrIndexServerMismatch) {
 			zutils.GinRenderJSON(c, http.StatusNotAcceptable, &meta.HTTPResponseError{Error: err.Error()})
 		}
 		if ret == nil {
@@ -102,6 +103,26 @@ func ESBulk(c *gin.Context) {
 func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	bulkRes := &BulkResponse{Items: []map[string]BulkResponseItem{}}
 
+	indexes := make(map[string]*store.Index)
+	defer func() {
+		for _, index := range indexes {
+			index.Close()
+		}
+	}()
+	// Reuse held references: acquiring the same index again could wait on a
+	// lifecycle writer that is itself waiting for this request's reference.
+	getIndex := func(name string) (*store.Index, error) {
+		if index, ok := indexes[name]; ok {
+			return index, nil
+		}
+		index, _, err := store.OpenOrCreate(name)
+		if err != nil {
+			return nil, err
+		}
+		indexes[name] = index
+		return index, nil
+	}
+
 	// Prepare to read the entire raw text of the body
 	scanner := bufio.NewScanner(body)
 
@@ -114,8 +135,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	nextLineIsData := false
 	lastLineMetaData := make(map[string]interface{})
 
-	// disable wal write indexName -> []ops
-	indexDocMap := make(map[string][]core.DocOperation)
+	// Synchronous batches: indexName -> []ops
+	indexDocMap := make(map[string][]store.DocOperation)
 	// indexName -> []ids
 	indexDelDocMap := make(map[string][]string)
 
@@ -149,55 +170,13 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			if suppliedIndexName == nil && len(target) > 0 {
 				suppliedIndexName = target
 			}
-			suppliedOperation := lastLineMetaData["operation"]
-			if suppliedOperation == nil && len(target) > 0 {
-				suppliedOperation = "create"
-			}
 			indexName := suppliedIndexName.(string)
-			if config.Global.EnableWal {
-				bulkRes.Count++
-				operation := suppliedOperation.(string)
-				switch operation {
-				case "index":
-					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "created", nil),
-					})
-				case "create":
-					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "created", nil),
-					})
-				case "update":
-					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "updated", nil),
-					})
-				default:
-				}
-				newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
-				if err != nil {
-					return bulkRes, err
-				}
-				err = newIndex.CreateDocument(docID, doc, update)
-				if err != nil {
-					return bulkRes, err
-				}
-			} else {
-				// the 'doc' object is reused, we create a temp doc to prevent the 'doc' modified
-				var tempDoc map[string]interface{}
-				_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
-				if list, ok := indexDocMap[indexName]; ok {
-					indexDocMap[indexName] = append(list, core.DocOperation{
-						DocId:  docID,
-						Doc:    tempDoc,
-						Update: update,
-					})
-				} else {
-					indexDocMap[indexName] = []core.DocOperation{{
-						Doc:    tempDoc,
-						DocId:  docID,
-						Update: update,
-					}}
-				}
-			}
+			// The scanner document is reused; retain an independent batch value.
+			var tempDoc map[string]interface{}
+			_ = json.Unmarshal(scanner.Bytes(), &tempDoc)
+			indexDocMap[indexName] = append(indexDocMap[indexName], store.DocOperation{
+				DocId: docID, Doc: tempDoc, Update: update,
+			})
 
 		} else { // This branch will process the metadata line in the request. Each metadata line is preceded by a data line.
 
@@ -234,24 +213,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 						return nil, errors.New("bulk index data format error")
 					}
 
-					if config.Global.EnableWal {
-						newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
-						if err != nil {
-							return bulkRes, err
-						}
-						// delete
-						err = newIndex.DeleteDocument(docID)
-						bulkRes.Count++
-						bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-							"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "deleted", err),
-						})
-					} else {
-						if list, ok := indexDelDocMap[indexName]; ok {
-							indexDelDocMap[indexName] = append(list, docID)
-						} else {
-							indexDelDocMap[indexName] = []string{docID}
-						}
-					}
+					indexDelDocMap[indexName] = append(indexDelDocMap[indexName], docID)
 				default:
 					lastLineMetaData["_index"] = target
 					lastLineMetaData["operation"] = "index"
@@ -264,43 +226,42 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 		return bulkRes, err
 	}
 
-	if !config.Global.EnableWal {
-		for indexName, ids := range indexDelDocMap {
-			newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
-			if err != nil {
-				return bulkRes, err
-			}
-			for _, id := range ids {
-				bulkRes.Count++
+	// Preserve the synchronous bulk contract: grouped deletes precede writes.
+	for indexName, ids := range indexDelDocMap {
+		newIndex, err := getIndex(indexName)
+		if err != nil {
+			return bulkRes, err
+		}
+		for _, id := range ids {
+			bulkRes.Count++
+			bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+				"delete": NewBulkResponseItem(bulkRes.Count, indexName, id, "deleted", err),
+			})
+		}
+		err = newIndex.DeleteDocuments(ids)
+		if err != nil {
+			return bulkRes, err
+		}
+	}
+	for indexName, ops := range indexDocMap {
+		newIndex, err := getIndex(indexName)
+		if err != nil {
+			return bulkRes, err
+		}
+		for _, op := range ops {
+			bulkRes.Count++
+			if op.Update {
 				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-					"delete": NewBulkResponseItem(bulkRes.Count, indexName, id, "deleted", err),
+					"index": NewBulkResponseItem(bulkRes.Count, indexName, op.DocId, "updated", nil)})
+			} else {
+				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+					"index": NewBulkResponseItem(bulkRes.Count, indexName, op.DocId, "created", nil),
 				})
 			}
-			err = newIndex.DeleteDocuments(ids)
-			if err != nil {
-				return bulkRes, err
-			}
 		}
-		for indexName, ops := range indexDocMap {
-			newIndex, _, err := core.IndexMgr.GetOrCreate(indexName)
-			if err != nil {
-				return bulkRes, err
-			}
-			for _, op := range ops {
-				bulkRes.Count++
-				if op.Update {
-					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"index": NewBulkResponseItem(bulkRes.Count, indexName, op.DocId, "updated", nil)})
-				} else {
-					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"index": NewBulkResponseItem(bulkRes.Count, indexName, op.DocId, "created", nil),
-					})
-				}
-			}
-			err = newIndex.CreateDocuments(ops)
-			if err != nil {
-				return bulkRes, err
-			}
+		err = newIndex.CreateDocuments(ops)
+		if err != nil {
+			return bulkRes, err
 		}
 	}
 

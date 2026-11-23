@@ -20,8 +20,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
+	"github.com/zincsearch/zincsearch/pkg/store"
 )
 
 // @Id DeleteDocument
@@ -43,11 +43,12 @@ func Delete(c *gin.Context) {
 	}
 
 	indexName := c.Param("target")
-	index, err := core.IndexMgr.Get(indexName)
+	index, err := store.Open(indexName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, meta.HTTPResponseError{Error: "index does not exists"})
 		return
 	}
+	defer index.Close()
 
 	err = index.DeleteDocument(docID)
 	if err != nil {

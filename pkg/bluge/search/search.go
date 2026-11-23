@@ -18,8 +18,10 @@ package search
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"iter"
+	"sync"
 	"sync/atomic"
 
 	"github.com/zincsearch/zincsearch/pkg/config"
@@ -77,7 +79,27 @@ func MultiZincSearch(
 	mappings *meta.Mappings,
 	analyzers map[string]*analysis.Analyzer,
 	searchers ...Searcher,
-) (*meta.SearchResponse, error) {
+) (response *meta.SearchResponse, err error) {
+	// Work on a private slice and close each underlying resource exactly once,
+	// including preflight failures and callers using non-idempotent Readers.
+	owned := make([]*requestSearcher, len(searchers))
+	requestSearchers := make([]Searcher, len(searchers))
+	for i, searcher := range searchers {
+		owned[i] = &requestSearcher{Searcher: searcher}
+		requestSearchers[i] = owned[i]
+	}
+	searchers = requestSearchers
+	defer func() {
+		for _, searcher := range owned {
+			err = errors.Join(err, searcher.Close())
+		}
+	}()
+	if query == nil {
+		return nil, fmt.Errorf("query must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(searchers) == 0 {
 		return &meta.SearchResponse{
 			Hits: meta.Hits{
@@ -114,6 +136,30 @@ func MultiZincSearch(
 	query.Size += query.From
 	query.From = 0
 
+	err = uquery.NormalizeQuery(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+	if err != nil {
+		return nil, err
+	}
+	if docList.sort == nil {
+		if req, ok := req.(*bluge.TopNSearch); ok {
+			docList.sort = req.SortOrder().Copy()
+		}
+	}
+
+	// Finish parsing before starting any tasks: an error must not leave workers
+	// running after the owning Index reference and metadata lock are released.
+	requests := make([]bluge.SearchRequest, len(searchers))
+	for i := range searchers {
+		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
+		if err != nil {
+			return nil, err
+		}
+		requests[i] = req
+	}
 	egDoc := &errgroup.Group{}
 	egDoc.Go(func() error {
 		for doc := range docs {
@@ -128,38 +174,17 @@ func MultiZincSearch(
 		return nil
 	})
 
-	err := uquery.NormalizeQuery(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-	}
-	req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
-	if err != nil {
-		return nil, err
-	}
-	if docList.sort == nil {
-		if req, ok := req.(*bluge.TopNSearch); ok {
-			docList.sort = req.SortOrder().Copy()
-		}
-	}
-
-	defer func() {
-		for _, r := range searchers {
-			_ = r.Close()
-		}
-	}()
-
-	for _, searcher := range searchers {
-		// A new request is created for each reader. Query is not modified concurrently.
-		req, err := uquery.ParseQueryDSL(query, mappings, analyzers)
-		if err != nil {
-			return nil, err
-		}
+	for i, searcher := range searchers {
+		req := requests[i]
 		searcher := searcher
 		eg.Go(func() error {
 			defer func() {
 				_ = searcher.Close()
 			}()
 
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			var n int64
 			dmi, err := searcher.Search(ctx, req)
 			if err != nil {
@@ -167,12 +192,19 @@ func MultiZincSearch(
 			}
 			next, err := dmi.Next()
 			for err == nil && next != nil {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				n++
 				hit, err2 := visitMatchedDoc(next, query, mappings)
 				if err2 != nil {
 					return err2
 				}
-				docs <- &Document{hit: &hit, match: next}
+				select {
+				case docs <- &Document{hit: &hit, match: next}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				next, err = dmi.Next()
 			}
 			aggs <- dmi.Aggregations()
@@ -184,13 +216,16 @@ func MultiZincSearch(
 			return err
 		})
 	}
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-
+	err = eg.Wait()
 	close(docs)
 	close(aggs)
 	_ = egDoc.Wait()
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	docList.Done()
 	docList.bucket.Aggregation("duration").Finish()
@@ -220,6 +255,19 @@ func MultiZincSearch(
 	return resp, nil
 }
 
+// requestSearcher allows eager per-shard cleanup and a final cleanup pass without
+// closing the underlying Reader twice. All worker tasks exit before the last pass.
+type requestSearcher struct {
+	Searcher
+	once sync.Once
+	err  error
+}
+
+func (s *requestSearcher) Close() error {
+	s.once.Do(func() { s.err = s.Searcher.Close() })
+	return s.err
+}
+
 func getSingleReaderResult(ctx context.Context,
 	query *meta.ZincQuery,
 	mappings *meta.Mappings,
@@ -246,6 +294,9 @@ func getSingleReaderResult(ctx context.Context,
 
 	next, err := dmi.Next()
 	for err == nil && next != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		hit, err2 := visitMatchedDoc(next, query, mappings)
 		if err2 != nil {
 			err = err2
@@ -256,6 +307,9 @@ func getSingleReaderResult(ctx context.Context,
 	}
 	if err != nil {
 		return nil, fmt.Errorf("search.MultiSearch: error iterating results: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	resp.Took = int(dmi.Aggregations().Duration().Milliseconds())
 	resp.Hits.Total = meta.Total{Value: int(dmi.Aggregations().Count())}

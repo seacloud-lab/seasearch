@@ -20,7 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/catalog"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/uquery/template"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
@@ -36,7 +36,7 @@ import (
 // @Router /es/_index_template [get]
 func ListTemplate(c *gin.Context) {
 	pattern := c.Query("pattern")
-	templates, err := core.ListTemplates(pattern)
+	templates, err := catalog.ListTemplates(pattern)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -59,7 +59,7 @@ func GetTemplate(c *gin.Context) {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: "template.name should be not empty"})
 		return
 	}
-	template, exists, err := core.LoadTemplate(name)
+	template, exists, err := catalog.LoadTemplate(name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -105,7 +105,7 @@ func CreateTemplate(c *gin.Context) {
 		return
 	}
 
-	err = core.NewTemplate(name, template)
+	err = catalog.NewTemplate(name, template)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return
@@ -138,7 +138,7 @@ func UpdateTemplateForSDK() {}
 // @Router /es/_index_template/{name} [delete]
 func DeleteTemplate(c *gin.Context) {
 	name := c.Param("target")
-	err := core.DeleteTemplate(name)
+	err := catalog.DeleteTemplate(name)
 	if err != nil {
 		zutils.GinRenderJSON(c, http.StatusBadRequest, meta.HTTPResponseError{Error: err.Error()})
 		return

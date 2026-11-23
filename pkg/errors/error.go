@@ -31,7 +31,8 @@ const (
 )
 
 var (
-	ErrorIDNotFound = errors.New("id not found")
+	ErrorIDNotFound        = errors.New("id not found")
+	ErrIndexServerMismatch = errors.New("requested index is not handled by this server")
 )
 
 type Error struct {
