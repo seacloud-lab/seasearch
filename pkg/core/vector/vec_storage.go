@@ -121,6 +121,16 @@ func (d *diskStore) Remove(name string) error {
 }
 
 func ListVecSegments(vecIndexName string) (map[int64]struct{}, error) {
+	// Validate before joining so segment listing stays under the vector root.
+	if !filepath.IsLocal(vecIndexName) {
+		return nil, fmt.Errorf("invalid vector index path: expected a local relative path")
+	}
+	for component := range strings.SplitSeq(vecIndexName, "/") {
+		if component == "." || component == ".." {
+			return nil, fmt.Errorf("invalid vector index path: . and .. components are not allowed")
+		}
+	}
+
 	var files []string
 	var err error
 	prefix := path.Join(VecPrefix, vecIndexName)
